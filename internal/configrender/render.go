@@ -251,6 +251,7 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 		"mode":                "rule",
 		"log-level":           "info",
 		"external-controller": "127.0.0.1:9090",
+		"external-ui":         "ui/zashboard",
 		"unified-delay":       true,
 		"proxies":             proxies,
 	}

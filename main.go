@@ -11,6 +11,7 @@ import (
 	"localclash/internal/configrender"
 	"localclash/internal/coredownload"
 	"localclash/internal/corerun"
+	"localclash/internal/dashboard"
 	"localclash/internal/subdownload"
 )
 
@@ -19,6 +20,7 @@ const usage = `localclash
 Usage:
   localclash core download [flags]
   localclash subscription download --url <url> [flags]
+  localclash dashboard download [flags]
   localclash config render [flags]
   localclash run [flags]
 
@@ -36,6 +38,13 @@ Flags for subscription download:
   --output string       output file path (default subscription.yaml)
   --user-agent string   subscription User-Agent (default "clash-verge/v1.5.1")
   --force              overwrite output if it exists
+
+Flags for dashboard download:
+  --version string   zashboard GitHub release tag, or "latest" (default "latest")
+  --asset string     zashboard release asset name (default "dist.zip")
+  --output string    output directory (default ".runtime/mihomo/ui/zashboard")
+  --repo string      GitHub repo owner/name (default "Zephyruso/zashboard")
+  --force           replace output directory if it exists
 
 Flags for config render:
   --source string   downloaded subscription source YAML (default "subscription.yaml")
@@ -74,6 +83,9 @@ func run(args []string) error {
 	}
 	if len(args) >= 2 && (args[0] == "subscription" || args[0] == "sub") && args[1] == "download" {
 		return runSubscriptionDownload(args[2:])
+	}
+	if len(args) >= 2 && args[0] == "dashboard" && args[1] == "download" {
+		return runDashboardDownload(args[2:])
 	}
 	if len(args) >= 2 && args[0] == "config" && args[1] == "render" {
 		return runConfigRender(args[2:])
@@ -147,6 +159,36 @@ func runSubscriptionDownload(args []string) error {
 	}
 
 	fmt.Printf("downloaded subscription to %s (%d bytes)\n", result.OutputPath, result.BytesWritten)
+	return nil
+}
+
+func runDashboardDownload(args []string) error {
+	fs := flag.NewFlagSet("dashboard download", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := dashboard.Options{}
+	fs.StringVar(&opts.Version, "version", "latest", "zashboard GitHub release tag, or latest")
+	fs.StringVar(&opts.AssetName, "asset", "dist.zip", "zashboard release asset name")
+	fs.StringVar(&opts.OutputDir, "output", ".runtime/mihomo/ui/zashboard", "output directory")
+	fs.StringVar(&opts.Repo, "repo", "Zephyruso/zashboard", "GitHub repo owner/name")
+	fs.BoolVar(&opts.Force, "force", false, "replace output directory if it exists")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	result, err := dashboard.Download(ctx, opts)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("downloaded %s (%s) to %s\n", result.AssetName, result.Version, result.OutputDir)
 	return nil
 }
 

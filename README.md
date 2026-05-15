@@ -51,6 +51,20 @@ go run . subscription download --url "https://example.com/playlist?token=..." --
 
 The default User-Agent is `clash-verge/v1.5.1`, matching the known OpenClash subscription setting. The downloaded subscription file is local data and should not be committed.
 
+## Dashboard
+
+Download the zashboard static UI for Mihomo:
+
+```bash
+go run . dashboard download --force
+```
+
+The command downloads the default `dist.zip` release asset. The default output is `.runtime/mihomo/ui/zashboard`. Rendered configs set `external-ui: ui/zashboard`, so after `go run . run` the dashboard is available at:
+
+```text
+http://127.0.0.1:9090/ui
+```
+
 ## Config Render
 
 Render a runtime Mihomo config from a downloaded subscription source and a local policy:
