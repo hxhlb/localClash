@@ -1,0 +1,17 @@
+.DS_Store
+
+# Local Clash/OpenClash snapshots can contain subscription tokens,
+# node UUIDs, passwords, and provider-specific secrets.
+degyax.yaml
+*.secret.yaml
+*.local.yaml
+subscription*.yaml
+
+# Downloaded/reference packages.
+mihomo-cli-*/
+
+# Build output.
+bin/
+dist/
+build/
+*.log
