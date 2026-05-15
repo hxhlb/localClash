@@ -6,6 +6,10 @@ degyax.yaml
 *.secret.yaml
 *.local.yaml
 subscription*.yaml
+sources/
+generated/
+.runtime/
+.localtest/
 
 # Downloaded/reference packages.
 mihomo-cli-*/

@@ -8,7 +8,9 @@ import (
 	"runtime"
 	"time"
 
+	"localclash/internal/configrender"
 	"localclash/internal/coredownload"
+	"localclash/internal/corerun"
 	"localclash/internal/subdownload"
 )
 
@@ -17,6 +19,8 @@ const usage = `localclash
 Usage:
   localclash core download [flags]
   localclash subscription download --url <url> [flags]
+  localclash config render [flags]
+  localclash run [flags]
 
 Flags for core download:
   --version string   GitHub release tag, or "latest" (default "latest")
@@ -32,6 +36,19 @@ Flags for subscription download:
   --output string       output file path (default subscription.yaml)
   --user-agent string   subscription User-Agent (default "clash-verge/v1.5.1")
   --force              overwrite output if it exists
+
+Flags for config render:
+  --source string   downloaded subscription source YAML (default "subscription.yaml")
+  --policy string   localClash policy YAML (default "policies/loyalsoldier.yaml")
+  --mode string     policy mode; empty means policy default
+  --output string   generated Mihomo config path (default "generated/mihomo.yaml")
+  --force          overwrite output if it exists
+
+Flags for run:
+  --core string     Mihomo core binary path (default "bin/mihomo")
+  --config string   Mihomo runtime config path (default "generated/mihomo.yaml")
+  --workdir string  Mihomo runtime data directory (default ".runtime/mihomo")
+  --log string      Mihomo log file path (default "<workdir>/mihomo.log")
 `
 
 func main() {
@@ -55,6 +72,12 @@ func run(args []string) error {
 	}
 	if len(args) >= 2 && (args[0] == "subscription" || args[0] == "sub") && args[1] == "download" {
 		return runSubscriptionDownload(args[2:])
+	}
+	if len(args) >= 2 && args[0] == "config" && args[1] == "render" {
+		return runConfigRender(args[2:])
+	}
+	if len(args) >= 1 && args[0] == "run" {
+		return runCore(args[1:])
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 }
@@ -123,4 +146,51 @@ func runSubscriptionDownload(args []string) error {
 
 	fmt.Printf("downloaded subscription to %s (%d bytes)\n", result.OutputPath, result.BytesWritten)
 	return nil
+}
+
+func runConfigRender(args []string) error {
+	fs := flag.NewFlagSet("config render", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := configrender.Options{}
+	fs.StringVar(&opts.SourcePath, "source", "subscription.yaml", "downloaded subscription source YAML")
+	fs.StringVar(&opts.PolicyPath, "policy", "policies/loyalsoldier.yaml", "localClash policy YAML")
+	fs.StringVar(&opts.Mode, "mode", "", "policy mode; empty means policy default")
+	fs.StringVar(&opts.OutputPath, "output", "generated/mihomo.yaml", "generated Mihomo config path")
+	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	result, err := configrender.Render(opts)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("rendered %s mode config to %s (%d proxies, %d rules)\n", result.Mode, result.OutputPath, result.ProxyCount, result.RuleCount)
+	return nil
+}
+
+func runCore(args []string) error {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := corerun.Options{}
+	fs.StringVar(&opts.CorePath, "core", "bin/mihomo", "Mihomo core binary path")
+	fs.StringVar(&opts.ConfigPath, "config", "generated/mihomo.yaml", "Mihomo runtime config path")
+	fs.StringVar(&opts.WorkDir, "workdir", ".runtime/mihomo", "Mihomo runtime data directory")
+	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	return corerun.Run(opts)
 }

@@ -50,3 +50,33 @@ go run . subscription download --url "https://example.com/playlist?token=..." --
 ```
 
 The default User-Agent is `clash-verge/v1.5.1`, matching the known OpenClash subscription setting. The downloaded subscription file is local data and should not be committed.
+
+## Config Render
+
+Render a runtime Mihomo config from a downloaded subscription source and a local policy:
+
+```bash
+go run . config render --force
+```
+
+The default render path is `generated/mihomo.yaml`. The renderer treats the subscription as a proxy source and owns the runtime rules, rule providers, and proxy groups locally.
+
+Test the generated config:
+
+```bash
+./bin/mihomo -d .runtime/mihomo -f generated/mihomo.yaml -t
+```
+
+Run the generated config:
+
+```bash
+go run . run
+```
+
+By default this is equivalent to:
+
+```bash
+./bin/mihomo -d .runtime/mihomo -f generated/mihomo.yaml
+```
+
+Mihomo output is also appended to `.runtime/mihomo/mihomo.log`. Override the path with `--log`.

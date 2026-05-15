@@ -1,0 +1,155 @@
+# Loyalsoldier-based initial policy preset.
+#
+# This file describes localClash policy intent. It is not a complete Mihomo
+# runtime config. Renderers should inject downloaded subscription proxies and
+# generate rule-providers/rules from this policy.
+
+version: 1
+name: loyalsoldier
+description: Starter policies using Loyalsoldier clash-rules recommended whitelist and blacklist modes.
+
+rule_source:
+  name: Loyalsoldier/clash-rules
+  repository: https://github.com/Loyalsoldier/clash-rules
+  base_url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release
+  primary_base_url: https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release
+  update_interval: 86400
+
+groups:
+  direct: DIRECT
+  reject: REJECT
+  proxy: PROXY
+  auto: AUTO
+  manual: MANUAL
+  apple: Apple
+
+provider_mapping:
+  reject:
+    path: reject.txt
+    behavior: domain
+    target: reject
+  icloud:
+    path: icloud.txt
+    behavior: domain
+    target: direct
+  apple:
+    path: apple.txt
+    behavior: domain
+    target: apple
+  google:
+    path: google.txt
+    behavior: domain
+    target: proxy
+  proxy:
+    path: proxy.txt
+    behavior: domain
+    target: proxy
+  direct:
+    path: direct.txt
+    behavior: domain
+    target: direct
+  private:
+    path: private.txt
+    behavior: domain
+    target: direct
+  gfw:
+    path: gfw.txt
+    behavior: domain
+    target: proxy
+  greatfire:
+    path: greatfire.txt
+    behavior: domain
+    target: proxy
+  tld-not-cn:
+    path: tld-not-cn.txt
+    behavior: domain
+    target: proxy
+  telegramcidr:
+    path: telegramcidr.txt
+    behavior: ipcidr
+    target: proxy
+  cncidr:
+    path: cncidr.txt
+    behavior: ipcidr
+    target: direct
+  lancidr:
+    path: lancidr.txt
+    behavior: ipcidr
+    target: direct
+  applications:
+    path: applications.txt
+    behavior: classical
+    target: direct
+
+modes:
+  default: whitelist
+  whitelist:
+    description: Allowlisted direct traffic goes DIRECT; unmatched traffic falls back to PROXY.
+    fallback: proxy
+    rules:
+      - provider: applications
+        target: direct
+      - domain: clash.razord.top
+        target: direct
+      - domain: yacd.haishan.me
+        target: direct
+      - provider: private
+        target: direct
+      - provider: reject
+        target: reject
+      - provider: icloud
+        target: direct
+      - provider: apple
+        target: direct
+      - provider: google
+        target: proxy
+      - provider: proxy
+        target: proxy
+      - provider: direct
+        target: direct
+      - provider: lancidr
+        target: direct
+        no_resolve: true
+      - provider: cncidr
+        target: direct
+        no_resolve: true
+      - provider: telegramcidr
+        target: proxy
+        no_resolve: true
+      - geoip: LAN
+        target: direct
+      - geoip: CN
+        target: direct
+      - match: true
+        target: proxy
+  blacklist:
+    description: Known blocked traffic goes PROXY; unmatched traffic falls back to DIRECT.
+    fallback: direct
+    rules:
+      - provider: applications
+        target: direct
+      - domain: clash.razord.top
+        target: direct
+      - domain: yacd.haishan.me
+        target: direct
+      - provider: private
+        target: direct
+      - provider: reject
+        target: reject
+      - provider: tld-not-cn
+        target: proxy
+      - provider: gfw
+        target: proxy
+      - provider: telegramcidr
+        target: proxy
+        no_resolve: true
+      - match: true
+        target: direct
+
+local_overrides:
+  direct:
+    target: direct
+    domains: []
+  proxy:
+    target: proxy
+    domains: []
