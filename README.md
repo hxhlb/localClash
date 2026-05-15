@@ -18,3 +18,35 @@ Models should produce policy intent, not edit Clash YAML directly. A determinist
 ## Local Data
 
 Do not commit downloaded subscriptions, active router profiles, generated configs, or files containing node credentials.
+
+## Core Download
+
+Download the matching Mihomo core for the machine running the command:
+
+```bash
+go run . core download
+```
+
+By default the command detects the current OS and CPU architecture, selects the matching `MetaCubeX/mihomo` release asset, decompresses it, and writes the binary to `bin/mihomo` or `bin/mihomo.exe`.
+
+To inspect the selected release asset without downloading:
+
+```bash
+go run . core download --dry-run
+```
+
+To download a core for another target, pass `--os` and `--arch` explicitly:
+
+```bash
+go run . core download --os linux --arch arm64 --output bin/clash_meta
+```
+
+## Subscription Download
+
+Download a subscription with a Clash-compatible User-Agent:
+
+```bash
+go run . subscription download --url "https://example.com/playlist?token=..." --output subscription.yaml --force
+```
+
+The default User-Agent is `clash-verge/v1.5.1`, matching the known OpenClash subscription setting. The downloaded subscription file is local data and should not be committed.
