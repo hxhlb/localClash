@@ -48,7 +48,9 @@ Flags for run:
   --core string     Mihomo core binary path (default "bin/mihomo")
   --config string   Mihomo runtime config path (default "generated/mihomo.yaml")
   --workdir string  Mihomo runtime data directory (default ".runtime/mihomo")
-  --log string      Mihomo log file path (default "<workdir>/mihomo.log")
+  --log string      Mihomo log file path (default "<workdir>/logs/mihomo-YYYY-MM-DD.log")
+  --log-retention int
+                 days of dated Mihomo logs to keep (default 7)
 `
 
 func main() {
@@ -184,6 +186,7 @@ func runCore(args []string) error {
 	fs.StringVar(&opts.ConfigPath, "config", "generated/mihomo.yaml", "Mihomo runtime config path")
 	fs.StringVar(&opts.WorkDir, "workdir", ".runtime/mihomo", "Mihomo runtime data directory")
 	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
+	fs.IntVar(&opts.LogRetentionDays, "log-retention", 7, "days of dated Mihomo logs to keep")
 
 	if err := fs.Parse(args); err != nil {
 		return err

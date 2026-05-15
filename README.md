@@ -79,4 +79,4 @@ By default this is equivalent to:
 ./bin/mihomo -d .runtime/mihomo -f generated/mihomo.yaml
 ```
 
-Mihomo output is also appended to `.runtime/mihomo/mihomo.log`. Override the path with `--log`.
+Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
