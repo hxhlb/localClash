@@ -33,6 +33,8 @@ func Registry() []Tool {
 	tools := []Tool{
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "inspect_generated_config", SafetyLevel: SafeRead, Description: "Inspect generated Mihomo config structure without applying changes."},
+		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry."},
+		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter generated rule pack cache entries."},
 		{Name: "rules_adapt", SafetyLevel: SafeRead, Description: "Adapt rule sources into runtime pack cache."},
 		{Name: "rules_render", SafetyLevel: SafeRead, Description: "Render selected rule packs into a rules fragment."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated Mihomo config from reviewed local inputs."},
@@ -59,14 +61,41 @@ func ListedTools() []ListedTool {
 			Name:        tool.Name,
 			Description: tool.Description,
 			SafetyLevel: tool.SafetyLevel,
-			InputSchema: map[string]any{
-				"type":                 "object",
-				"additionalProperties": true,
-			},
+			InputSchema: inputSchemaForTool(tool.Name),
 			Annotations: map[string]any{
 				"safety_level": tool.SafetyLevel,
 			},
 		})
 	}
 	return out
+}
+
+func inputSchemaForTool(name string) map[string]any {
+	switch name {
+	case "packs_list":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"source": map[string]any{"type": "string", "description": "Exact pack source, for example sukkaw or blackmatrix7."},
+				"name":   map[string]any{"type": "string", "description": "Case-insensitive substring filter for pack name or id."},
+				"target": map[string]any{"type": "string", "description": "Exact target filter, for example DIRECT, REJECT, or AI."},
+				"limit":  map[string]any{"type": "integer", "minimum": 1},
+			},
+		}
+	case "packs_get":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id": map[string]any{"type": "string", "description": "Catalog pack id, for example blackmatrix7_OpenAI."},
+			},
+			"required": []string{"id"},
+		}
+	default:
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": true,
+		}
+	}
 }

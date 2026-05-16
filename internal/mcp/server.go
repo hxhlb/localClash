@@ -232,6 +232,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	switch call.Name {
 	case "doctor":
 		return callDoctor(ctx, args)
+	case "packs_list":
+		return callPacksList(args)
+	case "packs_get":
+		return callPacksGet(args)
 	case "rules_adapt":
 		return callRulesAdapt(ctx, args)
 	case "rules_render":
@@ -247,6 +251,45 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
+}
+
+func callPacksList(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Source string `json:"source"`
+		Name   string `json:"name"`
+		Target string `json:"target"`
+		Limit  int    `json:"limit"`
+		Cache  string `json:"cache"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := rules.ListPacks(rules.PackListOptions{
+		CacheDir: in.Cache,
+		Source:   in.Source,
+		Name:     in.Name,
+		Target:   in.Target,
+		Limit:    in.Limit,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callPacksGet(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		ID    string `json:"id"`
+		Cache string `json:"cache"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, ID: in.ID})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
 }
 
 func callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {

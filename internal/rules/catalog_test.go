@@ -1,0 +1,154 @@
+package rules
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestListPacksReturnsSummaries(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	result, err := ListPacks(PackListOptions{CacheDir: cacheDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 3 {
+		t.Fatalf("total = %d, want 3", result.Total)
+	}
+	if result.Packs[0].ID != "blackmatrix7_GitHub" {
+		t.Fatalf("first pack id = %q, want blackmatrix7_GitHub", result.Packs[0].ID)
+	}
+	if result.Packs[0].ProviderCount != 1 || result.Packs[0].RuleCount != 1 {
+		t.Fatalf("counts = %+v, want provider/rule count 1", result.Packs[0])
+	}
+}
+
+func TestListPacksFiltersNameCaseInsensitive(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	result, err := ListPacks(PackListOptions{CacheDir: cacheDir, Name: "open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || result.Packs[0].ID != "blackmatrix7_OpenAI" {
+		t.Fatalf("result = %+v, want blackmatrix7_OpenAI", result)
+	}
+}
+
+func TestListPacksFiltersSourceExact(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	result, err := ListPacks(PackListOptions{CacheDir: cacheDir, Source: "sukkaw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || result.Packs[0].Source != "sukkaw" {
+		t.Fatalf("result = %+v, want only sukkaw", result)
+	}
+}
+
+func TestListPacksFiltersTargetExact(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	result, err := ListPacks(PackListOptions{CacheDir: cacheDir, Target: "AI"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || result.Packs[0].ID != "blackmatrix7_OpenAI" {
+		t.Fatalf("result = %+v, want AI OpenAI pack", result)
+	}
+}
+
+func TestListPacksLimit(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	result, err := ListPacks(PackListOptions{CacheDir: cacheDir, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || len(result.Packs) != 2 {
+		t.Fatalf("result = %+v, want 2 limited packs", result)
+	}
+}
+
+func TestGetPackReturnsDetail(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	result, err := GetPack(PackGetOptions{CacheDir: cacheDir, ID: "blackmatrix7_OpenAI"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := result.Pack
+	if pack.ID != "blackmatrix7_OpenAI" || pack.Target != "AI" {
+		t.Fatalf("pack = %+v, want OpenAI target AI", pack)
+	}
+	if len(pack.Providers) != 1 || pack.Providers[0].Name != "blackmatrix7_OpenAI" {
+		t.Fatalf("providers = %+v, want blackmatrix7_OpenAI", pack.Providers)
+	}
+	if len(pack.Rules) != 1 || pack.Rules[0] != "RULE-SET,blackmatrix7_OpenAI,AI" {
+		t.Fatalf("rules = %+v, want RULE-SET target AI", pack.Rules)
+	}
+}
+
+func TestGetPackUnknownIDReturnsError(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	if _, err := GetPack(PackGetOptions{CacheDir: cacheDir, ID: "missing_pack"}); err == nil {
+		t.Fatal("expected unknown pack error")
+	}
+}
+
+func writeCatalogTestCaches(t *testing.T) string {
+	t.Helper()
+	cacheDir := filepath.Join(t.TempDir(), "packs")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	caches := []PackCache{
+		{
+			Version:    1,
+			Source:     "blackmatrix7",
+			Adapter:    "blackmatrix7",
+			Renderable: true,
+			Packs: []Pack{
+				testCatalogPack("GitHub", "PROXY"),
+				testCatalogPack("OpenAI", "AI"),
+			},
+		},
+		{
+			Version:    1,
+			Source:     "sukkaw",
+			Adapter:    "sukkaw",
+			Renderable: true,
+			Packs: []Pack{
+				testCatalogPack("direct", "DIRECT"),
+			},
+		},
+	}
+	for _, cache := range caches {
+		if err := WritePackCache(cacheDir, cache); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cacheDir
+}
+
+func testCatalogPack(id, target string) Pack {
+	return Pack{
+		ID:         id,
+		Name:       id,
+		Target:     target,
+		Renderable: true,
+		Components: []Component{
+			{
+				ID:         id,
+				Behavior:   "classical",
+				Format:     "yaml",
+				OrderClass: "mixed",
+				URL:        "https://example.com/" + id + ".yaml",
+				Path:       "./rule-packs/test/" + id + ".yaml",
+			},
+		},
+	}
+}

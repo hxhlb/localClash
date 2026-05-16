@@ -86,7 +86,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "rules_adapt", "rules_render", "config_render", "config_test"} {
+	for _, name := range []string{"doctor", "packs_list", "packs_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -100,6 +100,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 	want := map[string]SafetyLevel{
 		"doctor":                   SafeRead,
 		"inspect_generated_config": SafeRead,
+		"packs_get":                SafeRead,
+		"packs_list":               SafeRead,
 		"rules_adapt":              SafeRead,
 		"rules_render":             SafeRead,
 		"config_render":            SafeWrite,
@@ -116,6 +118,55 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		if got[name] != level {
 			t.Fatalf("%s safety level = %q, want %q", name, got[name], level)
 		}
+	}
+}
+
+func TestToolsCallPacksListReturnsSerializableResult(t *testing.T) {
+	setupMCPPackCache(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "packs_list",
+			"arguments": map[string]any{"name": "open"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("packs_list returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["total"] != float64(1) {
+		t.Fatalf("packs_list total = %v, want 1", content["total"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("packs_list structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
+	setupMCPPackCache(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "packs_get",
+			"arguments": map[string]any{"id": "blackmatrix7_OpenAI"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("packs_get returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	pack := content["pack"].(map[string]any)
+	if pack["id"] != "blackmatrix7_OpenAI" {
+		t.Fatalf("pack id = %v, want blackmatrix7_OpenAI", pack["id"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("packs_get structured content is not serializable: %v", err)
 	}
 }
 
@@ -248,6 +299,37 @@ func marshalToolResult(t *testing.T, value any) toolResult {
 func writeTestExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setupMCPPackCache(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`
+version: 1
+source: blackmatrix7
+adapter: blackmatrix7
+renderable: true
+packs:
+  - id: OpenAI
+    name: OpenAI
+    target: AI
+    renderable: true
+    components:
+      - id: OpenAI
+        behavior: classical
+        format: yaml
+        order_class: mixed
+        url: https://example.com/OpenAI.yaml
+        path: ./rule-packs/blackmatrix7/OpenAI.yaml
+`)
+	if err := os.WriteFile(filepath.Join(cacheDir, "blackmatrix7.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

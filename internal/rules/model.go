@@ -33,6 +33,7 @@ type PackCache struct {
 type Pack struct {
 	ID         string      `yaml:"id"`
 	Name       string      `yaml:"name,omitempty"`
+	Target     string      `yaml:"target,omitempty"`
 	Renderable bool        `yaml:"renderable"`
 	Reason     string      `yaml:"reason,omitempty"`
 	Components []Component `yaml:"components,omitempty"`

@@ -75,6 +75,15 @@ The initial server deliberately does not execute `run_runtime`,
 confirmation-required not-implemented error. zashboard remains Mihomo's runtime
 dashboard only, not localClash's configuration UI.
 
+MCP packs catalog tools:
+
+- `packs_list`: list and filter adapter-generated pack cache entries from
+  `.runtime/rules/packs/*.yaml`.
+- `packs_get`: inspect one pack's target, provider summaries, and rule summary
+  before enabling it in a selection file.
+
+If the pack cache does not exist yet, run `rules_adapt` first.
+
 For a real MCP client smoke test, use the local `callCopilot` wrapper after the
 `localclash` server is registered in the Copilot user MCP config
 (`~/.copilot/mcp-config.json`). This is the fixed end-to-end MCP test target for
