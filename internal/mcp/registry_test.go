@@ -1,6 +1,9 @@
 package mcp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	tools := Registry()
@@ -47,6 +50,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if byName["run_runtime"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("run_runtime safety = %q, want %q", byName["run_runtime"].SafetyLevel, ConfirmRequired)
+	}
+	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
+		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)
 	}
 	if byName["apply_router_config"].SafetyLevel != HighRisk {
 		t.Fatalf("apply_router_config safety = %q, want %q", byName["apply_router_config"].SafetyLevel, HighRisk)

@@ -1,13 +1,15 @@
 # localClash
 
-Local MCP service for AI-assisted Clash, Mihomo, and OpenClash management.
+Local Mihomo runtime wrapper with an MCP management interface for AI-assisted
+Clash, Mihomo, and OpenClash workflows.
 
 ## Direction
 
 localClash is intended to run near the proxy runtime, such as on a local
-machine, NAS, home server, or router. Its primary interface is MCP: AI agents
-talk to localClash, localClash observes and manages the local Clash/Mihomo or
-OpenClash environment.
+machine, NAS, home server, or router. It is not only a remote management helper:
+it also owns the local runtime lifecycle for Mihomo. MCP is the management
+surface that lets AI agents observe, bootstrap, plan, and confirm operations
+against that runtime.
 
 The project is not an admin Web UI. Conversation with an AI agent is the main
 management surface. zashboard can still be downloaded and served by Mihomo as a
@@ -15,13 +17,39 @@ runtime dashboard, but it is not localClash's configuration UI.
 
 localClash should expose:
 
-- An MCP server as the primary agent interface.
+- A runtime entrypoint that can ensure prerequisites, render config, validate
+  health, and start Mihomo.
+- An MCP server as the primary agent management interface.
 - CLI commands for bootstrap, debugging, and fallback operation.
 - Deterministic renderers for rules, packs, virtual targets, and runtime
   Mihomo configs.
 - Read-only diagnostics and runtime inspection for safe agent observation.
 - Router adapters for OpenClash workflows, with write operations gated by
   explicit user confirmation.
+
+## Runtime Model
+
+localClash's runtime path is the shortest path from local state to a running
+Mihomo process:
+
+```text
+localclash run
+-> ensure core
+-> ensure subscription exists
+-> ensure rules cache and pack catalog
+-> render generated/mihomo.yaml
+-> doctor, including Mihomo config validation
+-> start Mihomo runtime
+```
+
+If no subscription has been configured, runtime startup should stop with a clear
+bootstrap message instead of guessing. The user or agent should configure one or
+more subscription sources first, then refresh the effective `subscription.yaml`.
+
+Low-level operations such as rule source adaptation, rules fragment rendering,
+and raw Mihomo config testing are implementation details of this runtime and
+render pipeline. They may remain available as CLI/debug helpers, but they are
+not the main MCP workflow for agents.
 
 ## Safety Boundary
 
@@ -49,7 +77,8 @@ user asks an AI agent
 ```
 
 CLI commands remain useful for local development and for environments where an
-MCP client is not available, but they are not the primary product interface.
+MCP client is not available. The main human path is either `localclash run` for
+runtime startup, or conversation through an MCP-capable agent for management.
 
 ## MCP Server
 
@@ -59,9 +88,10 @@ Start the local MCP stdio server:
 go run . mcp
 ```
 
-The MCP server is the primary agent interface. It currently exposes read-only
-diagnostic and inspection tools, safe generated-config render/test tools, and
-metadata for future confirm-required or high-risk operations.
+The MCP server is the primary agent management interface. It exposes bootstrap,
+inspection, planning, rendering, health-check, and confirmed runtime-start
+tools. It should not expose every internal CLI/debug helper as a product-level
+tool.
 
 Tool safety levels are part of the tool metadata:
 
@@ -70,10 +100,10 @@ Tool safety levels are part of the tool metadata:
 - `confirm_required`: must not run without an explicit confirmation flow.
 - `high_risk`: reserved for operations such as applying router config.
 
-The initial server deliberately does not execute `run_runtime`,
-`switch_proxy_group`, or `apply_router_config`; calls to those tools return a
-confirmation-required not-implemented error. zashboard remains Mihomo's runtime
-dashboard only, not localClash's configuration UI.
+The server marks `run_runtime` as `confirm_required`, and assumes the Agent SDK
+or MCP client has completed confirmation before calling it. `switch_proxy_group`
+and `apply_router_config` are not part of the minimal runtime loop. zashboard
+remains Mihomo's runtime dashboard only, not localClash's configuration UI.
 
 MCP subscription bootstrap tools:
 
@@ -100,7 +130,9 @@ MCP packs catalog tools:
 - `packs_get`: inspect one pack's target, provider summaries, and rule summary
   before enabling it in a selection file.
 
-If the pack cache does not exist yet, run `rules_adapt` first.
+Pack cache generation is an internal ensure step of runtime startup and config
+rendering. Agents should not normally need to call a separate rules adapter
+tool.
 
 MCP virtual nodes tools:
 
@@ -134,6 +166,29 @@ directory. It does not overwrite `generated/mihomo.yaml`, does not modify
 router/OpenClash changes. If an agent wants to preserve an existing overlay, it
 must first call `config_overlay_inspect` and submit the full desired overlay,
 including the retained packs and virtual targets.
+
+MCP runtime tool:
+
+- `run_runtime`: starts Mihomo from `generated/mihomo.yaml` in the background.
+
+`run_runtime` is `confirm_required`. localClash does not implement an
+interactive yes/no prompt inside the tool; the Agent SDK or MCP client must ask
+the user for confirmation before calling it. Starting or restarting the proxy
+runtime may temporarily interrupt network connectivity. The Agent itself may
+depend on the current network or proxy path and could lose its connection after
+this operation. `run_runtime` does not modify router/OpenClash config, does not
+switch proxy groups, and does not modify system proxy settings.
+
+Minimal MCP closed loop:
+
+1. `subscriptions_refresh`
+2. `config_render`
+3. `doctor`
+4. `run_runtime`
+
+This is the MCP form of the runtime loop. `doctor` should be the health-check
+entrypoint, including generated config validation, so agents do not need to call
+a separate Mihomo config-test tool in the normal flow.
 
 For a real MCP client smoke test, use the local `callCopilot` wrapper after the
 `localclash` server is registered in the Copilot user MCP config

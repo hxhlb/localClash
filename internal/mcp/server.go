@@ -17,6 +17,7 @@ import (
 	"localclash/internal/configinspect"
 	"localclash/internal/configplan"
 	"localclash/internal/configrender"
+	"localclash/internal/corerun"
 	"localclash/internal/doctor"
 	"localclash/internal/rules"
 	"localclash/internal/subscriptions"
@@ -265,7 +266,9 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callConfigRender(args)
 	case "config_test":
 		return callConfigTest(ctx, args)
-	case "run_runtime", "switch_proxy_group", "apply_router_config":
+	case "run_runtime":
+		return callRunRuntime(ctx, args)
+	case "switch_proxy_group", "apply_router_config":
 		return errorToolResult("not implemented; requires explicit confirmation flow"), nil
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
@@ -606,6 +609,39 @@ func callConfigRender(args json.RawMessage) (toolResult, error) {
 	result, err := configrender.Render(opts)
 	if err != nil {
 		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config     string `json:"config"`
+		RuntimeDir string `json:"runtime_dir"`
+		Core       string `json:"core"`
+		Foreground bool   `json:"foreground"`
+		LogFile    string `json:"log_file"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := corerun.Start(ctx, corerun.StartOptions{
+		CorePath:   in.Core,
+		ConfigPath: in.Config,
+		WorkDir:    in.RuntimeDir,
+		LogPath:    in.LogFile,
+		Foreground: in.Foreground,
+	})
+	if err != nil {
+		return jsonToolResult(map[string]any{
+			"started": false,
+			"error":   err.Error(),
+			"warnings": []string{
+				"Starting or restarting the proxy runtime may temporarily interrupt network connectivity.",
+				"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
+			},
+		})
 	}
 	return jsonToolResult(result)
 }

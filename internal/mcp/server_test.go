@@ -129,6 +129,13 @@ func TestRegistrySafetyLevels(t *testing.T) {
 			t.Fatalf("%s safety level = %q, want %q", name, got[name], level)
 		}
 	}
+	for _, tool := range Registry() {
+		if tool.Name == "run_runtime" {
+			if !strings.Contains(tool.Description, "network connectivity") || !strings.Contains(tool.Description, "Agent itself") || !strings.Contains(tool.Description, "disconnected") {
+				t.Fatalf("run_runtime description missing risk warning: %q", tool.Description)
+			}
+		}
+	}
 }
 
 func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
@@ -488,8 +495,79 @@ func TestToolsCallDoctorReturnsSerializableResult(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeToolReturnsSerializableResult(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	writeTestExecutable(t, core, `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    echo configuration test is successful
+    exit 0
+  fi
+done
+echo runtime started
+sleep 30
+`)
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(dir, "runtime")
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "run_runtime",
+			"arguments": map[string]any{
+				"core":        core,
+				"config":      config,
+				"runtime_dir": workDir,
+				"log_file":    filepath.Join(workDir, "mihomo.log"),
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("run_runtime returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	defer killMCPProcess(int(content["pid"].(float64)))
+	if content["started"] != true || content["already_running"] != false {
+		t.Fatalf("run_runtime content = %+v, want started", content)
+	}
+	if content["external_ui_url"] != "http://127.0.0.1:9090/ui" {
+		t.Fatalf("external ui url = %v", content["external_ui_url"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("run_runtime structured content is not serializable: %v", err)
+	}
+}
+
+func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "run_runtime",
+			"arguments": map[string]any{
+				"config": filepath.Join(t.TempDir(), "missing.yaml"),
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("run_runtime preflight returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["started"] != false || content["error"] == "" {
+		t.Fatalf("content = %+v, want started false error", content)
+	}
+}
+
 func TestConfirmRequiredAndHighRiskToolsReturnToolError(t *testing.T) {
-	for _, name := range []string{"run_runtime", "switch_proxy_group", "apply_router_config"} {
+	for _, name := range []string{"switch_proxy_group", "apply_router_config"} {
 		resp := callHandle(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      1,
@@ -587,6 +665,13 @@ func writeTestExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func killMCPProcess(pid int) {
+	process, err := os.FindProcess(pid)
+	if err == nil {
+		_ = process.Kill()
 	}
 }
 
