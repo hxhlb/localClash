@@ -91,14 +91,16 @@ go run . mcp
 The MCP server is the primary agent management interface. It exposes bootstrap,
 inspection, planning, rendering, health-check, and confirmed runtime-start
 tools. It should not expose every internal CLI/debug helper as a product-level
-tool.
+tool. Rules adaptation, rules fragment rendering, and raw Mihomo config testing
+are internal pipeline or CLI/debug capabilities, not MCP product tools.
 
 Tool safety levels are part of the tool metadata:
 
 - `safe_read`: observation and diagnostics.
 - `safe_write`: writes local generated artifacts or runs local validation.
 - `confirm_required`: must not run without an explicit confirmation flow.
-- `high_risk`: reserved for operations such as applying router config.
+- `high_risk`: reserved for operations such as applying router config. The
+  first product MCP surface currently exposes no high-risk tools.
 
 The server marks `run_runtime` as `confirm_required`, and assumes the Agent SDK
 or MCP client has completed confirmation before calling it. `switch_proxy_group`

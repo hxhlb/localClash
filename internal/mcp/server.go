@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -21,8 +19,6 @@ import (
 	"localclash/internal/doctor"
 	"localclash/internal/rules"
 	"localclash/internal/subscriptions"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Server struct{}
@@ -244,10 +240,6 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callPacksList(args)
 	case "packs_get":
 		return callPacksGet(args)
-	case "rules_adapt":
-		return callRulesAdapt(ctx, args)
-	case "rules_render":
-		return callRulesRender(args)
 	case "subscriptions_status":
 		return callSubscriptionsStatus(args)
 	case "subscriptions_configure":
@@ -258,18 +250,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callVirtualNodesList(args)
 	case "virtual_nodes_get":
 		return callVirtualNodesGet(args)
-	case "inspect_generated_config":
-		return callInspectGeneratedConfig(args)
 	case "config_plan_render":
 		return callConfigPlanRender(ctx, args)
 	case "config_render":
 		return callConfigRender(args)
-	case "config_test":
-		return callConfigTest(ctx, args)
 	case "run_runtime":
 		return callRunRuntime(ctx, args)
-	case "switch_proxy_group", "apply_router_config":
-		return errorToolResult("not implemented; requires explicit confirmation flow"), nil
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
@@ -525,65 +511,6 @@ func callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(report)
 }
 
-func callRulesAdapt(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Sources string `json:"sources"`
-		Cache   string `json:"cache"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return toolResult{}, err
-	}
-	opts := rules.Options{SourcesDir: in.Sources, CacheDir: in.Cache}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	caches, err := rules.Adapt(ctx, opts)
-	if err != nil {
-		return toolResult{}, err
-	}
-	type adaptedSource struct {
-		Source  string `json:"source"`
-		Adapter string `json:"adapter"`
-		Packs   int    `json:"packs"`
-	}
-	out := struct {
-		Sources []adaptedSource `json:"sources"`
-	}{}
-	for _, cache := range caches {
-		out.Sources = append(out.Sources, adaptedSource{Source: cache.Source, Adapter: cache.Adapter, Packs: len(cache.Packs)})
-	}
-	return jsonToolResult(out)
-}
-
-func callRulesRender(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Selection    string `json:"selection"`
-		Cache        string `json:"cache"`
-		Subscription string `json:"subscription"`
-		Output       string `json:"output"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return toolResult{}, err
-	}
-	opts := rules.Options{SelectionPath: in.Selection, CacheDir: in.Cache, Subscription: in.Subscription, OutputPath: in.Output}
-	fragment, err := rules.Render(opts)
-	if err != nil {
-		return toolResult{}, err
-	}
-	if opts.OutputPath != "" && opts.OutputPath != "-" {
-		if err := rules.WriteFragment(opts.OutputPath, fragment); err != nil {
-			return toolResult{}, err
-		}
-		summary := map[string]any{
-			"output":         opts.OutputPath,
-			"rule_providers": len(fragment.RuleProviders),
-			"proxy_groups":   len(fragment.ProxyGroups),
-			"rules":          len(fragment.Rules),
-		}
-		return jsonToolResult(summary)
-	}
-	return jsonToolResult(fragment)
-}
-
 func callConfigRender(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Source         string `json:"source"`
@@ -646,79 +573,6 @@ func callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, erro
 	return jsonToolResult(result)
 }
 
-func callInspectGeneratedConfig(args json.RawMessage) (toolResult, error) {
-	var opts struct {
-		Config     string `json:"config"`
-		ConfigPath string `json:"config_path"`
-	}
-	if err := json.Unmarshal(args, &opts); err != nil {
-		return toolResult{}, err
-	}
-	if opts.ConfigPath == "" {
-		opts.ConfigPath = opts.Config
-	}
-	if opts.ConfigPath == "" {
-		opts.ConfigPath = "generated/mihomo.yaml"
-	}
-	config, err := readYAMLMap(opts.ConfigPath)
-	if err != nil {
-		return toolResult{}, err
-	}
-	groupNames := []string{}
-	for _, raw := range anySlice(config["proxy-groups"]) {
-		if group, ok := raw.(map[string]any); ok {
-			if name, ok := group["name"].(string); ok {
-				groupNames = append(groupNames, name)
-			}
-		}
-	}
-	out := map[string]any{
-		"config_path":          opts.ConfigPath,
-		"proxies":              len(anySlice(config["proxies"])),
-		"proxy_groups":         groupNames,
-		"rule_providers_count": len(anyMap(config["rule-providers"])),
-		"rules_count":          len(anySlice(config["rules"])),
-	}
-	return jsonToolResult(out)
-}
-
-func callConfigTest(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var opts struct {
-		Core       string `json:"core"`
-		CorePath   string `json:"core_path"`
-		Config     string `json:"config"`
-		ConfigPath string `json:"config_path"`
-		WorkDir    string `json:"workdir"`
-	}
-	if err := json.Unmarshal(args, &opts); err != nil {
-		return toolResult{}, err
-	}
-	if opts.CorePath == "" {
-		opts.CorePath = opts.Core
-	}
-	if opts.CorePath == "" {
-		opts.CorePath = "bin/mihomo"
-	}
-	if opts.ConfigPath == "" {
-		opts.ConfigPath = opts.Config
-	}
-	if opts.ConfigPath == "" {
-		opts.ConfigPath = "generated/mihomo.yaml"
-	}
-	if opts.WorkDir == "" {
-		opts.WorkDir = ".runtime/mihomo"
-	}
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, opts.CorePath, "-d", opts.WorkDir, "-f", opts.ConfigPath, "-t")
-	output, err := cmd.CombinedOutput()
-	out := map[string]any{
-		"pass":   err == nil,
-		"output": compactOutput(output, err),
-	}
-	return jsonToolResult(out)
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
@@ -745,52 +599,4 @@ func jsonToolResult(value any) (toolResult, error) {
 		Content:           []toolContent{{Type: "text", Text: string(data)}},
 		StructuredContent: value,
 	}, nil
-}
-
-func errorToolResult(message string) toolResult {
-	return toolResult{
-		Content: []toolContent{{Type: "text", Text: message}},
-		IsError: true,
-	}
-}
-
-func readYAMLMap(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	if err := yaml.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func anySlice(value any) []any {
-	if values, ok := value.([]any); ok {
-		return values
-	}
-	return nil
-}
-
-func anyMap(value any) map[string]any {
-	if values, ok := value.(map[string]any); ok {
-		return values
-	}
-	return nil
-}
-
-func compactOutput(output []byte, err error) string {
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) == 0 || lines[0] == "" {
-		if err != nil {
-			return err.Error()
-		}
-		return ""
-	}
-	const maxLines = 8
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
-	}
-	return strings.Join(lines, "\n")
 }

@@ -88,7 +88,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscriptions_status", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscriptions_status", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -96,29 +96,28 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 			t.Fatalf("tool %q has no safety level", name)
 		}
 	}
+	for _, name := range removedMCPTools() {
+		if byName[name].Name != "" {
+			t.Fatalf("removed tool %q should not be listed", name)
+		}
+	}
 }
 
 func TestRegistrySafetyLevels(t *testing.T) {
 	want := map[string]SafetyLevel{
-		"doctor":                   SafeRead,
-		"config_base_inspect":      SafeRead,
-		"config_overlay_inspect":   SafeRead,
-		"inspect_generated_config": SafeRead,
-		"packs_get":                SafeRead,
-		"packs_list":               SafeRead,
-		"subscriptions_status":     SafeRead,
-		"virtual_nodes_get":        SafeRead,
-		"virtual_nodes_list":       SafeRead,
-		"rules_adapt":              SafeRead,
-		"rules_render":             SafeRead,
-		"config_plan_render":       SafeWrite,
-		"config_render":            SafeWrite,
-		"config_test":              SafeWrite,
-		"subscriptions_configure":  SafeWrite,
-		"subscriptions_refresh":    SafeWrite,
-		"run_runtime":              ConfirmRequired,
-		"switch_proxy_group":       ConfirmRequired,
-		"apply_router_config":      HighRisk,
+		"doctor":                  SafeRead,
+		"config_base_inspect":     SafeRead,
+		"config_overlay_inspect":  SafeRead,
+		"packs_get":               SafeRead,
+		"packs_list":              SafeRead,
+		"subscriptions_status":    SafeRead,
+		"virtual_nodes_get":       SafeRead,
+		"virtual_nodes_list":      SafeRead,
+		"config_plan_render":      SafeWrite,
+		"config_render":           SafeWrite,
+		"subscriptions_configure": SafeWrite,
+		"subscriptions_refresh":   SafeWrite,
+		"run_runtime":             ConfirmRequired,
 	}
 	got := map[string]SafetyLevel{}
 	for _, tool := range Registry() {
@@ -127,6 +126,11 @@ func TestRegistrySafetyLevels(t *testing.T) {
 	for name, level := range want {
 		if got[name] != level {
 			t.Fatalf("%s safety level = %q, want %q", name, got[name], level)
+		}
+	}
+	for _, name := range removedMCPTools() {
+		if _, ok := got[name]; ok {
+			t.Fatalf("removed tool %q should not be registered", name)
 		}
 	}
 	for _, tool := range Registry() {
@@ -566,8 +570,8 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 	}
 }
 
-func TestConfirmRequiredAndHighRiskToolsReturnToolError(t *testing.T) {
-	for _, name := range []string{"switch_proxy_group", "apply_router_config"} {
+func TestRemovedMCPToolsReturnUnknownTool(t *testing.T) {
+	for _, name := range removedMCPTools() {
 		resp := callHandle(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      1,
@@ -577,15 +581,11 @@ func TestConfirmRequiredAndHighRiskToolsReturnToolError(t *testing.T) {
 				"arguments": map[string]any{},
 			},
 		})
-		if resp.Error != nil {
-			t.Fatalf("%s returned protocol error: %+v", name, resp.Error)
+		if resp.Error == nil {
+			t.Fatalf("%s expected unknown tool JSON-RPC error", name)
 		}
-		result := marshalToolResult(t, resp.Result)
-		if !result.IsError {
-			t.Fatalf("%s IsError = false, want true", name)
-		}
-		if !strings.Contains(result.Content[0].Text, "requires explicit confirmation flow") {
-			t.Fatalf("%s error text = %q", name, result.Content[0].Text)
+		if !strings.Contains(resp.Error.Message, "unknown tool") {
+			t.Fatalf("%s error = %+v, want unknown tool", name, resp.Error)
 		}
 	}
 }
@@ -604,37 +604,6 @@ func TestUnknownToolReturnsError(t *testing.T) {
 	}
 }
 
-func TestConfigTestToolRunsMihomoTestCommand(t *testing.T) {
-	dir := t.TempDir()
-	core := filepath.Join(dir, "mihomo")
-	writeTestExecutable(t, core, "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo test; exit 0; fi\necho configuration test is successful\n")
-	config := filepath.Join(dir, "config.yaml")
-	if err := os.WriteFile(config, []byte("proxies: []\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_test",
-			"arguments": map[string]any{
-				"core":    core,
-				"config":  config,
-				"workdir": dir,
-			},
-		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("config_test returned JSON-RPC error: %+v", resp.Error)
-	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	if content["pass"] != true {
-		t.Fatalf("config_test pass = %v, want true", content["pass"])
-	}
-}
-
 func callHandle(t *testing.T, value any) *rpcResponse {
 	t.Helper()
 	data, err := json.Marshal(value)
@@ -646,6 +615,17 @@ func callHandle(t *testing.T, value any) *rpcResponse {
 		t.Fatal("nil response")
 	}
 	return resp
+}
+
+func removedMCPTools() []string {
+	return []string{
+		"config_test",
+		"inspect_generated_config",
+		"rules_adapt",
+		"rules_render",
+		"switch_proxy_group",
+		"apply_router_config",
+	}
 }
 
 func marshalToolResult(t *testing.T, value any) toolResult {

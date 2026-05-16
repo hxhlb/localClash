@@ -1,6 +1,11 @@
 package doctor
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestRuleTarget(t *testing.T) {
 	tests := []struct {
@@ -85,5 +90,66 @@ func TestAggregateStatus(t *testing.T) {
 	}
 	if got := aggregateStatus([]Check{{Status: statusOK}, {Status: statusFail}, {Status: statusWarn}}); got != statusFail {
 		t.Fatalf("aggregateStatus fail = %s, want %s", got, statusFail)
+	}
+}
+
+func TestRunIncludesMihomoConfigValidationCheck(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	if err := os.WriteFile(core, []byte(`#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-v" ]; then
+    echo "Mihomo Meta test"
+    exit 0
+  fi
+  if [ "$arg" = "-t" ]; then
+    echo "configuration file test is successful"
+    exit 0
+  fi
+done
+exit 0
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	subscription := filepath.Join(dir, "subscription.yaml")
+	if err := os.WriteFile(subscription, []byte("proxies:\n  - name: SG\n    type: ss\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte("proxies: []\nproxy-groups: []\nrules: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policy := filepath.Join(dir, "policy.yaml")
+	if err := os.WriteFile(policy, []byte("modes:\n  default: whitelist\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Run(context.Background(), Options{
+		CorePath:         core,
+		SubscriptionPath: subscription,
+		ConfigPath:       config,
+		PolicyPath:       policy,
+		DashboardDir:     filepath.Join(dir, "missing-dashboard"),
+		WorkDir:          workDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mihomoTest *Check
+	for i := range report.Checks {
+		if report.Checks[i].ID == "mihomo_test" {
+			mihomoTest = &report.Checks[i]
+			break
+		}
+	}
+	if mihomoTest == nil {
+		t.Fatal("doctor report missing mihomo_test check")
+	}
+	if mihomoTest.Status != statusOK || mihomoTest.Summary != "mihomo config test passed" {
+		t.Fatalf("mihomo_test = %+v, want ok config validation", *mihomoTest)
 	}
 }

@@ -54,7 +54,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
 		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)
 	}
-	if byName["apply_router_config"].SafetyLevel != HighRisk {
-		t.Fatalf("apply_router_config safety = %q, want %q", byName["apply_router_config"].SafetyLevel, HighRisk)
+	for _, name := range []string{"config_test", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
+		if byName[name].Name != "" {
+			t.Fatalf("removed tool %q should not be registered", name)
+		}
 	}
 }
