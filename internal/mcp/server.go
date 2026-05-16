@@ -19,6 +19,7 @@ import (
 	"localclash/internal/configrender"
 	"localclash/internal/doctor"
 	"localclash/internal/rules"
+	"localclash/internal/subscriptions"
 
 	"gopkg.in/yaml.v3"
 )
@@ -246,6 +247,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callRulesAdapt(ctx, args)
 	case "rules_render":
 		return callRulesRender(args)
+	case "subscriptions_status":
+		return callSubscriptionsStatus(args)
+	case "subscriptions_configure":
+		return callSubscriptionsConfigure(args)
+	case "subscriptions_refresh":
+		return callSubscriptionsRefresh(ctx, args)
 	case "virtual_nodes_list":
 		return callVirtualNodesList(args)
 	case "virtual_nodes_get":
@@ -364,6 +371,74 @@ func callPacksGet(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, ID: in.ID})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config     string `json:"config"`
+		Merged     string `json:"merged"`
+		RuntimeDir string `json:"runtime_dir"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := subscriptions.Status(subscriptions.StatusOptions{
+		ConfigPath: in.Config,
+		MergedPath: in.Merged,
+		RuntimeDir: in.RuntimeDir,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config  string                 `json:"config"`
+		Sources []subscriptions.Source `json:"sources"`
+		Replace *bool                  `json:"replace"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
+		ConfigPath: in.Config,
+		Sources:    in.Sources,
+		Replace:    in.Replace,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config     string   `json:"config"`
+		IDs        []string `json:"ids"`
+		RuntimeDir string   `json:"runtime_dir"`
+		Merged     string   `json:"merged"`
+		Force      bool     `json:"force"`
+		UserAgent  string   `json:"user_agent"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := subscriptions.Refresh(ctx, subscriptions.RefreshOptions{
+		ConfigPath: in.Config,
+		IDs:        in.IDs,
+		RuntimeDir: in.RuntimeDir,
+		MergedPath: in.Merged,
+		Force:      in.Force,
+		UserAgent:  in.UserAgent,
+	})
 	if err != nil {
 		return toolResult{}, err
 	}

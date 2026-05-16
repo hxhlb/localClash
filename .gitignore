@@ -3,12 +3,14 @@
 # Local Clash/OpenClash snapshots can contain subscription tokens,
 # node UUIDs, passwords, and provider-specific secrets.
 degyax.yaml
+localclash-subscriptions.yaml
 *.secret.yaml
 *.local.yaml
 subscription*.yaml
 sources/
 generated/
 .runtime/
+.runtime/subscriptions/
 .localtest/
 
 # Downloaded/reference packages.

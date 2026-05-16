@@ -75,6 +75,24 @@ The initial server deliberately does not execute `run_runtime`,
 confirmation-required not-implemented error. zashboard remains Mihomo's runtime
 dashboard only, not localClash's configuration UI.
 
+MCP subscription bootstrap tools:
+
+- `subscriptions_status`: inspect whether subscription sources are configured,
+  whether per-source runtime artifacts exist, and whether the merged effective
+  `subscription.yaml` exists.
+- `subscriptions_configure`: save one or more subscription sources into
+  `localclash-subscriptions.yaml` without refreshing them.
+- `subscriptions_refresh`: refresh configured sources, validate and normalize
+  them, write `.runtime/subscriptions/<id>.yaml`, and merge the effective
+  `subscription.yaml`.
+
+From a clean setup, an agent should call `subscriptions_status` first. If no
+sources are configured, it should ask the user for one or more subscription
+URLs, call `subscriptions_configure`, then call `subscriptions_refresh`.
+`subscription.yaml` is the merged output used by the existing render pipeline,
+not the only source of truth. `localclash-subscriptions.yaml` contains sensitive
+subscription URLs and must not be committed.
+
 MCP packs catalog tools:
 
 - `packs_list`: list and filter adapter-generated pack cache entries from

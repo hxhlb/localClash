@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,7 +88,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscriptions_status", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -104,6 +106,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"inspect_generated_config": SafeRead,
 		"packs_get":                SafeRead,
 		"packs_list":               SafeRead,
+		"subscriptions_status":     SafeRead,
 		"virtual_nodes_get":        SafeRead,
 		"virtual_nodes_list":       SafeRead,
 		"rules_adapt":              SafeRead,
@@ -111,6 +114,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"config_plan_render":       SafeWrite,
 		"config_render":            SafeWrite,
 		"config_test":              SafeWrite,
+		"subscriptions_configure":  SafeWrite,
+		"subscriptions_refresh":    SafeWrite,
 		"run_runtime":              ConfirmRequired,
 		"switch_proxy_group":       ConfirmRequired,
 		"apply_router_config":      HighRisk,
@@ -123,6 +128,102 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		if got[name] != level {
 			t.Fatalf("%s safety level = %q, want %q", name, got[name], level)
 		}
+	}
+}
+
+func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
+	dir := t.TempDir()
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscriptions_status",
+			"arguments": map[string]any{
+				"config":      filepath.Join(dir, "localclash-subscriptions.yaml"),
+				"merged":      filepath.Join(dir, "subscription.yaml"),
+				"runtime_dir": filepath.Join(dir, ".runtime", "subscriptions"),
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscriptions_status returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["configured"] != false {
+		t.Fatalf("configured = %v, want false", content["configured"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("subscriptions_status structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) {
+	dir := t.TempDir()
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscriptions_configure",
+			"arguments": map[string]any{
+				"config": filepath.Join(dir, "localclash-subscriptions.yaml"),
+				"sources": []map[string]any{
+					{"id": "primary", "url": "https://example.com/sub?token=secret-token"},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscriptions_configure returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["configured"] != true {
+		t.Fatalf("configured = %v, want true", content["configured"])
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("subscriptions_configure structured content is not serializable: %v", err)
+	}
+	if strings.Contains(string(data), "secret-token") || strings.Contains(string(data), "token=") {
+		t.Fatalf("subscriptions_configure leaked token in %s", data)
+	}
+}
+
+func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
+	paths := setupMCPSubscriptionsFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscriptions_refresh",
+			"arguments": map[string]any{
+				"config":      paths.config,
+				"runtime_dir": paths.runtimeDir,
+				"merged":      paths.merged,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscriptions_refresh returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["refreshed"] != true {
+		t.Fatalf("refreshed = %v, want true", content["refreshed"])
+	}
+	if _, err := os.Stat(paths.merged); err != nil {
+		t.Fatalf("merged subscription missing: %v", err)
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("subscriptions_refresh structured content is not serializable: %v", err)
+	}
+	if strings.Contains(string(data), "secret-token") || strings.Contains(string(data), "token=") {
+		t.Fatalf("subscriptions_refresh leaked token in %s", data)
 	}
 }
 
@@ -677,6 +778,37 @@ packs:
         url: https://example.com/OpenAI.yaml
         path: ./rule-packs/blackmatrix7/OpenAI.yaml
 `)
+	return paths
+}
+
+type mcpSubscriptionsFixture struct {
+	config     string
+	runtimeDir string
+	merged     string
+}
+
+func setupMCPSubscriptionsFixture(t *testing.T) mcpSubscriptionsFixture {
+	t.Helper()
+	dir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+`))
+	}))
+	t.Cleanup(server.Close)
+	paths := mcpSubscriptionsFixture{
+		config:     filepath.Join(dir, "localclash-subscriptions.yaml"),
+		runtimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
+		merged:     filepath.Join(dir, "subscription.yaml"),
+	}
+	writeMCPFile(t, paths.config, fmt.Sprintf(`version: 1
+sources:
+  - id: primary
+    url: %s/sub?token=secret-token
+`, server.URL))
 	return paths
 }
 

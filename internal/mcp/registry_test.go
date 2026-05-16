@@ -24,6 +24,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["packs_get"].SafetyLevel != SafeRead {
 		t.Fatalf("packs_get safety = %q, want %q", byName["packs_get"].SafetyLevel, SafeRead)
 	}
+	if byName["subscriptions_status"].SafetyLevel != SafeRead {
+		t.Fatalf("subscriptions_status safety = %q, want %q", byName["subscriptions_status"].SafetyLevel, SafeRead)
+	}
 	if byName["virtual_nodes_list"].SafetyLevel != SafeRead {
 		t.Fatalf("virtual_nodes_list safety = %q, want %q", byName["virtual_nodes_list"].SafetyLevel, SafeRead)
 	}
@@ -35,6 +38,12 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if byName["config_render"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_render safety = %q, want %q", byName["config_render"].SafetyLevel, SafeWrite)
+	}
+	if byName["subscriptions_configure"].SafetyLevel != SafeWrite {
+		t.Fatalf("subscriptions_configure safety = %q, want %q", byName["subscriptions_configure"].SafetyLevel, SafeWrite)
+	}
+	if byName["subscriptions_refresh"].SafetyLevel != SafeWrite {
+		t.Fatalf("subscriptions_refresh safety = %q, want %q", byName["subscriptions_refresh"].SafetyLevel, SafeWrite)
 	}
 	if byName["run_runtime"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("run_runtime safety = %q, want %q", byName["run_runtime"].SafetyLevel, ConfirmRequired)
