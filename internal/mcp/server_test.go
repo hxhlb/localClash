@@ -47,6 +47,26 @@ func TestServeUsesMCPStdioFraming(t *testing.T) {
 	}
 }
 
+func TestServeAcceptsJSONLineInput(t *testing.T) {
+	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n")
+	var out bytes.Buffer
+
+	if err := NewServer().Serve(context.Background(), in, &out); err != nil {
+		t.Fatal(err)
+	}
+	raw := out.String()
+	if strings.HasPrefix(raw, "Content-Length: ") {
+		t.Fatalf("JSON-line input got framed response %q", raw)
+	}
+	var resp rpcResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("JSON-line initialize error = %+v", resp.Error)
+	}
+}
+
 func TestToolsListIncludesCoreTools(t *testing.T) {
 	resp := NewServer().Handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
 	if resp == nil || resp.Error != nil {

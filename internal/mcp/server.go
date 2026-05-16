@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -61,6 +62,13 @@ type toolContent struct {
 	Text string `json:"text"`
 }
 
+type messageFormat int
+
+const (
+	messageFormatFramed messageFormat = iota
+	messageFormatJSONLine
+)
+
 func ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	return NewServer().Serve(ctx, in, out)
 }
@@ -74,7 +82,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		default:
 		}
 
-		data, err := readMessage(reader)
+		data, format, err := readMessage(reader)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -86,18 +94,47 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		if response == nil {
 			continue
 		}
-		if err := writeMessage(out, response); err != nil {
+		if err := writeMessage(out, response, format); err != nil {
 			return err
 		}
 	}
 }
 
-func readMessage(reader *bufio.Reader) ([]byte, error) {
+func readMessage(reader *bufio.Reader) ([]byte, messageFormat, error) {
+	for {
+		next, err := reader.Peek(1)
+		if err != nil {
+			return nil, messageFormatFramed, err
+		}
+		if next[0] != '\r' && next[0] != '\n' && next[0] != ' ' && next[0] != '\t' {
+			break
+		}
+		if _, err := reader.ReadByte(); err != nil {
+			return nil, messageFormatFramed, err
+		}
+	}
+
+	next, err := reader.Peek(1)
+	if err != nil {
+		return nil, messageFormatFramed, err
+	}
+	if next[0] == '{' {
+		line, err := reader.ReadBytes('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, messageFormatJSONLine, err
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 && err != nil {
+			return nil, messageFormatJSONLine, err
+		}
+		return line, messageFormatJSONLine, nil
+	}
+
 	contentLength := -1
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return nil, messageFormatFramed, err
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
@@ -105,32 +142,36 @@ func readMessage(reader *bufio.Reader) ([]byte, error) {
 		}
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
-			return nil, fmt.Errorf("invalid MCP header %q", line)
+			return nil, messageFormatFramed, fmt.Errorf("invalid MCP header %q", line)
 		}
 		if strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
 			n, err := strconv.Atoi(strings.TrimSpace(value))
 			if err != nil || n < 0 {
-				return nil, fmt.Errorf("invalid Content-Length %q", strings.TrimSpace(value))
+				return nil, messageFormatFramed, fmt.Errorf("invalid Content-Length %q", strings.TrimSpace(value))
 			}
 			contentLength = n
 		}
 	}
 	if contentLength < 0 {
-		return nil, errors.New("missing Content-Length header")
+		return nil, messageFormatFramed, errors.New("missing Content-Length header")
 	}
 	data := make([]byte, contentLength)
 	if _, err := io.ReadFull(reader, data); err != nil {
-		return nil, err
+		return nil, messageFormatFramed, err
 	}
-	return data, nil
+	return data, messageFormatFramed, nil
 }
 
-func writeMessage(out io.Writer, value any) error {
+func writeMessage(out io.Writer, value any, format messageFormat) error {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s", len(data), data)
+	if format == messageFormatJSONLine {
+		_, err = fmt.Fprintf(out, "%s\n", data)
+		return err
+	}
+	_, err = fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s\r\n", len(data), data)
 	return err
 }
 
@@ -144,10 +185,19 @@ func (s *Server) Handle(ctx context.Context, data []byte) *rpcResponse {
 	}
 	switch req.Method {
 	case "initialize":
+		protocolVersion := "2025-06-18"
+		var params struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		if len(req.Params) != 0 && json.Unmarshal(req.Params, &params) == nil && params.ProtocolVersion != "" {
+			protocolVersion = params.ProtocolVersion
+		}
 		return resultResponse(req.ID, map[string]any{
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": protocolVersion,
 			"capabilities": map[string]any{
-				"tools": map[string]any{},
+				"tools": map[string]any{
+					"listChanged": false,
+				},
 			},
 			"serverInfo": map[string]any{
 				"name":    "localclash",

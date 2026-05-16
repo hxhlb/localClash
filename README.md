@@ -75,6 +75,20 @@ The initial server deliberately does not execute `run_runtime`,
 confirmation-required not-implemented error. zashboard remains Mihomo's runtime
 dashboard only, not localClash's configuration UI.
 
+For a real MCP client smoke test, use the local `callCopilot` wrapper after the
+`localclash` server is registered in the Copilot user MCP config
+(`~/.copilot/mcp-config.json`). This is the fixed end-to-end MCP test target for
+localClash:
+
+```bash
+scripts/test-mcp-callcopilot.sh
+```
+
+The script uses `/Volumes/Data/Github/callCopilot/bin/callCopilot` by default
+and runs the `ds` model alias. It starts a Copilot CLI session with the user
+configured localClash MCP server enabled, calls the `doctor` tool, and expects
+`LOCALCLASH_MCP_OK`.
+
 ## Local Data
 
 Do not commit downloaded subscriptions, active router profiles, generated configs, or files containing node credentials.
