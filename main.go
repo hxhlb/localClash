@@ -385,5 +385,5 @@ func runMCP(args []string) error {
 	if len(args) != 0 {
 		return fmt.Errorf("unexpected positional arguments: %v", args)
 	}
-	return mcp.WriteRegistry(os.Stdout)
+	return mcp.ServeStdio(context.Background(), os.Stdin, os.Stdout)
 }

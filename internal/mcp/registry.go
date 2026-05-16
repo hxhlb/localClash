@@ -21,6 +21,14 @@ type Tool struct {
 	Description string      `json:"description"`
 }
 
+type ListedTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"inputSchema"`
+	SafetyLevel SafetyLevel    `json:"safety_level"`
+	Annotations map[string]any `json:"annotations,omitempty"`
+}
+
 func Registry() []Tool {
 	tools := []Tool{
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
@@ -41,4 +49,24 @@ func WriteRegistry(w io.Writer) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(Registry())
+}
+
+func ListedTools() []ListedTool {
+	tools := Registry()
+	out := make([]ListedTool, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, ListedTool{
+			Name:        tool.Name,
+			Description: tool.Description,
+			SafetyLevel: tool.SafetyLevel,
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": true,
+			},
+			Annotations: map[string]any{
+				"safety_level": tool.SafetyLevel,
+			},
+		})
+	}
+	return out
 }

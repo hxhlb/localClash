@@ -51,6 +51,30 @@ user asks an AI agent
 CLI commands remain useful for local development and for environments where an
 MCP client is not available, but they are not the primary product interface.
 
+## MCP Server
+
+Start the local MCP stdio server:
+
+```bash
+go run . mcp
+```
+
+The MCP server is the primary agent interface. It currently exposes read-only
+diagnostic and inspection tools, safe generated-config render/test tools, and
+metadata for future confirm-required or high-risk operations.
+
+Tool safety levels are part of the tool metadata:
+
+- `safe_read`: observation and diagnostics.
+- `safe_write`: writes local generated artifacts or runs local validation.
+- `confirm_required`: must not run without an explicit confirmation flow.
+- `high_risk`: reserved for operations such as applying router config.
+
+The initial server deliberately does not execute `run_runtime`,
+`switch_proxy_group`, or `apply_router_config`; calls to those tools return a
+confirmation-required not-implemented error. zashboard remains Mihomo's runtime
+dashboard only, not localClash's configuration UI.
+
 ## Local Data
 
 Do not commit downloaded subscriptions, active router profiles, generated configs, or files containing node credentials.
