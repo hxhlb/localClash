@@ -138,6 +138,18 @@ URLs, call `subscriptions_configure`, then call `subscriptions_refresh`.
 not the only source of truth. `localclash-subscriptions.yaml` contains sensitive
 subscription URLs and must not be committed.
 
+MCP subscription node inspection tools:
+
+- `subscription_nodes_list`: list safe proxy `name` and `type` summaries from
+  the effective subscription.
+- `subscription_nodes_search`: search subscription proxy names by literal query
+  or regular expression and return safe `name` and `type` summaries.
+
+These tools do not verify network egress location. If a user asks for a region
+such as Hong Kong, an agent should treat that as a proxy-name search, for
+example matching `香港`, `HK`, or `🇭🇰`, and explain that the result is based only
+on subscription proxy names.
+
 MCP packs catalog tools:
 
 - `packs_list`: list and filter adapter-generated pack cache entries from

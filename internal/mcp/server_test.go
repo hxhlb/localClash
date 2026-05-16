@@ -91,7 +91,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscriptions_status", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "subscriptions_status", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -108,19 +108,21 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 
 func TestRegistrySafetyLevels(t *testing.T) {
 	want := map[string]SafetyLevel{
-		"doctor":                  SafeRead,
-		"config_base_inspect":     SafeRead,
-		"config_overlay_inspect":  SafeRead,
-		"packs_get":               SafeRead,
-		"packs_list":              SafeRead,
-		"subscriptions_status":    SafeRead,
-		"virtual_nodes_get":       SafeRead,
-		"virtual_nodes_list":      SafeRead,
-		"config_plan_render":      SafeWrite,
-		"config_render":           SafeWrite,
-		"subscriptions_configure": SafeWrite,
-		"subscriptions_refresh":   SafeWrite,
-		"run_runtime":             ConfirmRequired,
+		"doctor":                    SafeRead,
+		"config_base_inspect":       SafeRead,
+		"config_overlay_inspect":    SafeRead,
+		"packs_get":                 SafeRead,
+		"packs_list":                SafeRead,
+		"subscription_nodes_list":   SafeRead,
+		"subscription_nodes_search": SafeRead,
+		"subscriptions_status":      SafeRead,
+		"virtual_nodes_get":         SafeRead,
+		"virtual_nodes_list":        SafeRead,
+		"config_plan_render":        SafeWrite,
+		"config_render":             SafeWrite,
+		"subscriptions_configure":   SafeWrite,
+		"subscriptions_refresh":     SafeWrite,
+		"run_runtime":               ConfirmRequired,
 	}
 	got := map[string]SafetyLevel{}
 	for _, tool := range Registry() {
@@ -238,6 +240,74 @@ func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
 	}
 	if strings.Contains(string(data), "secret-token") || strings.Contains(string(data), "token=") {
 		t.Fatalf("subscriptions_refresh leaked token in %s", data)
+	}
+}
+
+func TestToolsCallSubscriptionNodesListReturnsSafeSummaries(t *testing.T) {
+	subscription := setupMCPSubscriptionNodesFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscription_nodes_list",
+			"arguments": map[string]any{
+				"subscription": subscription,
+				"limit":        1,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscription_nodes_list returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["match_basis"] != "subscription_proxy_name" {
+		t.Fatalf("match_basis = %v, want subscription_proxy_name", content["match_basis"])
+	}
+	if content["total"] != float64(2) || content["returned"] != float64(1) {
+		t.Fatalf("content = %+v, want total 2 returned 1", content)
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("subscription_nodes_list structured content is not serializable: %v", err)
+	}
+	if strings.Contains(string(data), "secret") || strings.Contains(string(data), "server") || strings.Contains(string(data), "uuid") {
+		t.Fatalf("subscription_nodes_list leaked unsafe fields in %s", data)
+	}
+}
+
+func TestToolsCallSubscriptionNodesSearchReturnsNameMatches(t *testing.T) {
+	subscription := setupMCPSubscriptionNodesFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscription_nodes_search",
+			"arguments": map[string]any{
+				"subscription": subscription,
+				"query":        "香港",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscription_nodes_search returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["total"] != float64(1) {
+		t.Fatalf("content = %+v, want one name match", content)
+	}
+	if !strings.Contains(fmt.Sprint(content["note"]), "do not verify network egress location") {
+		t.Fatalf("note = %v, want egress boundary", content["note"])
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("subscription_nodes_search structured content is not serializable: %v", err)
+	}
+	if strings.Contains(string(data), "secret") || strings.Contains(string(data), "server") || strings.Contains(string(data), "uuid") {
+		t.Fatalf("subscription_nodes_search leaked unsafe fields in %s", data)
 	}
 }
 
@@ -994,6 +1064,23 @@ sources:
     url: %s/sub?token=secret-token
 `, server.URL))
 	return paths
+}
+
+func setupMCPSubscriptionNodesFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	subscription := filepath.Join(dir, "subscription.yaml")
+	writeMCPFile(t, subscription, `proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+  - name: 🇭🇰香港 01 | HK
+    type: vmess
+    server: hk.example.com
+    uuid: private-uuid
+`)
+	return subscription
 }
 
 func writeMCPFile(t *testing.T, path string, content string) {

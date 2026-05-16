@@ -25,6 +25,19 @@ type VirtualNodesGetOptions struct {
 	Limit        int
 }
 
+type SubscriptionNodesListOptions struct {
+	Subscription string
+	Limit        int
+}
+
+type SubscriptionNodesSearchOptions struct {
+	Subscription  string
+	Query         string
+	Patterns      []string
+	CaseSensitive bool
+	Limit         int
+}
+
 type VirtualNodesListResult struct {
 	Subscription    string               `json:"subscription"`
 	Selection       string               `json:"selection"`
@@ -56,6 +69,15 @@ type VirtualNodeDetail struct {
 type VirtualNodeSample struct {
 	Name string `json:"name"`
 	Type string `json:"type,omitempty"`
+}
+
+type SubscriptionNodesResult struct {
+	Subscription string              `json:"subscription"`
+	MatchBasis   string              `json:"match_basis"`
+	Total        int                 `json:"total"`
+	Returned     int                 `json:"returned"`
+	Nodes        []VirtualNodeSample `json:"nodes"`
+	Note         string              `json:"note"`
 }
 
 type safeSubscriptionNode struct {
@@ -149,6 +171,69 @@ func GetVirtualNode(opts VirtualNodesGetOptions) (VirtualNodesGetResult, error) 
 	}, nil
 }
 
+func ListSubscriptionNodes(opts SubscriptionNodesListOptions) (SubscriptionNodesResult, error) {
+	subscription := defaultString(opts.Subscription, "subscription.yaml")
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	nodes, err := loadSafeSubscriptionNodes(subscription)
+	if err != nil {
+		return SubscriptionNodesResult{}, err
+	}
+	samples := subscriptionNodeSamples(nodes)
+	limited := limitVirtualNodeSamples(samples, limit)
+	return SubscriptionNodesResult{
+		Subscription: subscription,
+		MatchBasis:   "subscription_proxy_name",
+		Total:        len(samples),
+		Returned:     len(limited),
+		Nodes:        limited,
+		Note:         subscriptionNodesNote(),
+	}, nil
+}
+
+func SearchSubscriptionNodes(opts SubscriptionNodesSearchOptions) (SubscriptionNodesResult, error) {
+	subscription := defaultString(opts.Subscription, "subscription.yaml")
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if strings.TrimSpace(opts.Query) == "" && len(opts.Patterns) == 0 {
+		return SubscriptionNodesResult{}, fmt.Errorf("query or patterns is required")
+	}
+	nodes, err := loadSafeSubscriptionNodes(subscription)
+	if err != nil {
+		return SubscriptionNodesResult{}, err
+	}
+	matchers, err := buildSubscriptionNodeMatchers(opts)
+	if err != nil {
+		return SubscriptionNodesResult{}, err
+	}
+	var matched []VirtualNodeSample
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		for _, matcher := range matchers {
+			if matcher(node.Name) {
+				if !seen[node.Name] {
+					matched = append(matched, VirtualNodeSample{Name: node.Name, Type: node.Type})
+					seen[node.Name] = true
+				}
+				break
+			}
+		}
+	}
+	limited := limitVirtualNodeSamples(matched, limit)
+	return SubscriptionNodesResult{
+		Subscription: subscription,
+		MatchBasis:   "subscription_proxy_name",
+		Total:        len(matched),
+		Returned:     len(limited),
+		Nodes:        limited,
+		Note:         subscriptionNodesNote(),
+	}, nil
+}
+
 func loadSelectionForVirtualNodes(path string) (resolvedSelection, error) {
 	if strings.TrimSpace(path) != "" {
 		selection, err := LoadSelection(path)
@@ -209,6 +294,52 @@ func loadSafeSubscriptionNodes(path string) ([]safeSubscriptionNode, error) {
 		nodes = append(nodes, safeSubscriptionNode{Name: name, Type: nodeType})
 	}
 	return nodes, nil
+}
+
+func subscriptionNodeSamples(nodes []safeSubscriptionNode) []VirtualNodeSample {
+	out := make([]VirtualNodeSample, 0, len(nodes))
+	for _, node := range nodes {
+		out = append(out, VirtualNodeSample{Name: node.Name, Type: node.Type})
+	}
+	return out
+}
+
+func buildSubscriptionNodeMatchers(opts SubscriptionNodesSearchOptions) ([]func(string) bool, error) {
+	var matchers []func(string) bool
+	if strings.TrimSpace(opts.Query) != "" {
+		query := strings.TrimSpace(opts.Query)
+		if !opts.CaseSensitive {
+			query = strings.ToLower(query)
+		}
+		matchers = append(matchers, func(name string) bool {
+			if !opts.CaseSensitive {
+				name = strings.ToLower(name)
+			}
+			return strings.Contains(name, query)
+		})
+	}
+	for _, pattern := range opts.Patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if !opts.CaseSensitive {
+			pattern = "(?i)" + pattern
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("pattern %q is invalid: %w", pattern, err)
+		}
+		matchers = append(matchers, re.MatchString)
+	}
+	if len(matchers) == 0 {
+		return nil, fmt.Errorf("query or patterns is required")
+	}
+	return matchers, nil
+}
+
+func subscriptionNodesNote() string {
+	return "Matches are based only on subscription proxy names and do not verify network egress location."
 }
 
 func matchVirtualNodeCandidates(nodes []safeSubscriptionNode, label NodeLabel) ([]VirtualNodeSample, error) {

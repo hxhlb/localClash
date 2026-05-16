@@ -252,6 +252,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callPacksList(args)
 	case "packs_get":
 		return s.callPacksGet(args)
+	case "subscription_nodes_list":
+		return s.callSubscriptionNodesList(args)
+	case "subscription_nodes_search":
+		return s.callSubscriptionNodesSearch(args)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "subscriptions_configure":
@@ -458,6 +462,54 @@ func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, erro
 		ConfigPath: in.Config,
 		MergedPath: in.Merged,
 		RuntimeDir: in.RuntimeDir,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callSubscriptionNodesList(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Subscription string `json:"subscription"`
+		Limit        int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Subscription == "" {
+		in.Subscription = s.state.Paths.SubscriptionPath
+	}
+	result, err := rules.ListSubscriptionNodes(rules.SubscriptionNodesListOptions{
+		Subscription: in.Subscription,
+		Limit:        in.Limit,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Subscription  string   `json:"subscription"`
+		Query         string   `json:"query"`
+		Patterns      []string `json:"patterns"`
+		CaseSensitive bool     `json:"case_sensitive"`
+		Limit         int      `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Subscription == "" {
+		in.Subscription = s.state.Paths.SubscriptionPath
+	}
+	result, err := rules.SearchSubscriptionNodes(rules.SubscriptionNodesSearchOptions{
+		Subscription:  in.Subscription,
+		Query:         in.Query,
+		Patterns:      in.Patterns,
+		CaseSensitive: in.CaseSensitive,
+		Limit:         in.Limit,
 	})
 	if err != nil {
 		return toolResult{}, err

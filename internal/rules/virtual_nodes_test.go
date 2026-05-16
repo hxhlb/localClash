@@ -132,6 +132,77 @@ func TestGetVirtualNodeDoesNotLeakCredentials(t *testing.T) {
 	assertNoCredentialLeak(t, result)
 }
 
+func TestListSubscriptionNodesReturnsSafeSummaries(t *testing.T) {
+	_, subscription := writeVirtualNodesFixture(t)
+
+	result, err := ListSubscriptionNodes(SubscriptionNodesListOptions{Subscription: subscription, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MatchBasis != "subscription_proxy_name" {
+		t.Fatalf("match basis = %q, want subscription_proxy_name", result.MatchBasis)
+	}
+	if result.Total != 4 || result.Returned != 2 || len(result.Nodes) != 2 {
+		t.Fatalf("result = %+v, want total 4 returned 2", result)
+	}
+	if result.Nodes[0].Name != "JP Tokyo 01" || result.Nodes[0].Type != "ss" {
+		t.Fatalf("first node = %+v, want safe name/type", result.Nodes[0])
+	}
+	assertNoCredentialLeak(t, result)
+}
+
+func TestSearchSubscriptionNodesMatchesQueryByNameOnly(t *testing.T) {
+	_, subscription := writeVirtualNodesFixture(t)
+
+	result, err := SearchSubscriptionNodes(SubscriptionNodesSearchOptions{Subscription: subscription, Query: "香港"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Nodes) != 1 {
+		t.Fatalf("result = %+v, want one Hong Kong name match", result)
+	}
+	if result.Nodes[0].Name != "🇭🇰香港 01 | HK" || result.Nodes[0].Type != "ss" {
+		t.Fatalf("node = %+v, want HK safe summary", result.Nodes[0])
+	}
+	if !strings.Contains(result.Note, "do not verify network egress location") {
+		t.Fatalf("note = %q, want egress boundary", result.Note)
+	}
+	assertNoCredentialLeak(t, result)
+}
+
+func TestSearchSubscriptionNodesMatchesPatterns(t *testing.T) {
+	_, subscription := writeVirtualNodesFixture(t)
+
+	result, err := SearchSubscriptionNodes(SubscriptionNodesSearchOptions{
+		Subscription: subscription,
+		Patterns:     []string{`\bHK\b`},
+		Limit:        1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || result.Returned != 1 || len(result.Nodes) != 1 {
+		t.Fatalf("result = %+v, want one limited pattern match", result)
+	}
+	assertNoCredentialLeak(t, result)
+}
+
+func TestSearchSubscriptionNodesRejectsInvalidPattern(t *testing.T) {
+	_, subscription := writeVirtualNodesFixture(t)
+
+	if _, err := SearchSubscriptionNodes(SubscriptionNodesSearchOptions{Subscription: subscription, Patterns: []string{"["}}); err == nil {
+		t.Fatal("expected invalid pattern error")
+	}
+}
+
+func TestSearchSubscriptionNodesRequiresQueryOrPattern(t *testing.T) {
+	_, subscription := writeVirtualNodesFixture(t)
+
+	if _, err := SearchSubscriptionNodes(SubscriptionNodesSearchOptions{Subscription: subscription}); err == nil {
+		t.Fatal("expected missing query/pattern error")
+	}
+}
+
 func writeVirtualNodesFixture(t *testing.T) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -170,7 +241,7 @@ proxies:
     type: trojan
     server: sg.example.com
     password: private-password
-  - name: HK 01
+  - name: 🇭🇰香港 01 | HK
     type: ss
     server: hk.example.com
     password: should-not-leak
