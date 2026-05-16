@@ -13,6 +13,7 @@ import (
 	"localclash/internal/corerun"
 	"localclash/internal/dashboard"
 	"localclash/internal/doctor"
+	"localclash/internal/mcp"
 	"localclash/internal/rules"
 	"localclash/internal/subdownload"
 )
@@ -28,6 +29,7 @@ Usage:
   localclash rules render [flags]
   localclash run [flags]
   localclash doctor [flags]
+  localclash mcp
 
 Flags for core download:
   --version string   GitHub release tag, or "latest" (default "latest")
@@ -127,6 +129,9 @@ func run(args []string) error {
 	}
 	if len(args) >= 1 && args[0] == "doctor" {
 		return runDoctor(args[1:])
+	}
+	if len(args) >= 1 && args[0] == "mcp" {
+		return runMCP(args[1:])
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 }
@@ -374,4 +379,11 @@ func runDoctor(args []string) error {
 	}
 	doctor.PrintText(report)
 	return nil
+}
+
+func runMCP(args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", args)
+	}
+	return mcp.WriteRegistry(os.Stdout)
 }
