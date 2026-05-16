@@ -75,6 +75,11 @@ go run . config render --force
 
 The default render path is `generated/mihomo.yaml`. The renderer treats the subscription as a proxy source and owns the runtime rules, rule providers, and proxy groups locally.
 
+The rule model is documented in `docs/rule-model.md`. In short, localClash
+renders a fixed local safety baseline first, then user overrides, optional rule
+packs, the selected base routing preset, and finally fallback. Loyalsoldier is
+the default base routing preset, not an optional rule pack.
+
 Test the generated config:
 
 ```bash
