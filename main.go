@@ -31,7 +31,7 @@ Usage:
   localclash rules render [flags]
   localclash run [flags]
   localclash doctor [flags]
-  localclash mcp
+  localclash mcp [flags]
 
 Flags for core download:
   --version string   GitHub release tag, or "latest" (default "latest")
@@ -93,6 +93,10 @@ Flags for doctor:
   --dashboard string     zashboard directory (default ".runtime/mihomo/ui/zashboard")
   --workdir string       Mihomo runtime data directory for config test (default ".runtime/mihomo")
   --json                print machine-readable JSON report
+
+Flags for mcp:
+  --addr string   HTTP listen address (default "127.0.0.1:8765")
+  --path string   MCP HTTP JSON-RPC path (default "/mcp")
 `
 
 func main() {
@@ -406,10 +410,23 @@ func runDoctor(args []string, state appinit.RuntimeState) error {
 }
 
 func runMCP(args []string, state appinit.RuntimeState) error {
-	if len(args) != 0 {
-		return fmt.Errorf("unexpected positional arguments: %v", args)
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := mcp.HTTPOptions{}
+	fs.StringVar(&opts.Addr, "addr", "127.0.0.1:8765", "HTTP listen address")
+	fs.StringVar(&opts.Path, "path", "/mcp", "MCP HTTP JSON-RPC path")
+
+	if err := fs.Parse(args); err != nil {
+		return err
 	}
-	return mcp.ServeStdioWithState(context.Background(), state, os.Stdin, os.Stdout)
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+	opts = mcp.NormalizeHTTPOptions(opts)
+	fmt.Fprintf(os.Stderr, "localClash MCP HTTP listening on %s\n", mcp.HTTPURL(opts))
+	fmt.Fprintln(os.Stderr, "health check: http://"+opts.Addr+"/health")
+	return mcp.ListenAndServeHTTPWithState(context.Background(), state, opts)
 }
 
 func doctorReportOK(report doctor.Report) bool {

@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,48 +26,41 @@ func TestHandleInitialize(t *testing.T) {
 	}
 }
 
-func TestServeUsesMCPStdioFraming(t *testing.T) {
-	request := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
-	in := strings.NewReader(fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(request), request))
-	var out bytes.Buffer
+func TestHTTPHandlerServesJSONRPC(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
 
-	if err := NewServer().Serve(context.Background(), in, &out); err != nil {
-		t.Fatal(err)
-	}
-	raw := out.String()
-	if !strings.HasPrefix(raw, "Content-Length: ") {
-		t.Fatalf("response %q does not use MCP stdio framing", raw)
-	}
-	parts := strings.SplitN(raw, "\r\n\r\n", 2)
-	if len(parts) != 2 {
-		t.Fatalf("response %q missing header separator", raw)
+	NewServer().HTTPHandler("/mcp").ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
 	}
 	var resp rpcResponse
-	if err := json.Unmarshal([]byte(parts[1]), &resp); err != nil {
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
 	if resp.Error != nil {
-		t.Fatalf("framed initialize error = %+v", resp.Error)
+		t.Fatalf("http initialize error = %+v", resp.Error)
+	}
+	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("missing CORS header: %+v", w.Header())
 	}
 }
 
-func TestServeAcceptsJSONLineInput(t *testing.T) {
-	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n")
-	var out bytes.Buffer
+func TestHTTPHandlerServesHealth(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
 
-	if err := NewServer().Serve(context.Background(), in, &out); err != nil {
+	NewServer().HTTPHandler("/mcp").ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var result map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	raw := out.String()
-	if strings.HasPrefix(raw, "Content-Length: ") {
-		t.Fatalf("JSON-line input got framed response %q", raw)
-	}
-	var resp rpcResponse
-	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
-		t.Fatal(err)
-	}
-	if resp.Error != nil {
-		t.Fatalf("JSON-line initialize error = %+v", resp.Error)
+	if result["status"] != "ok" {
+		t.Fatalf("health = %+v, want ok", result)
 	}
 }
 

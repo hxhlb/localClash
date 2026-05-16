@@ -95,10 +95,17 @@ runtime startup, or conversation through an MCP-capable agent for management.
 
 ## MCP Server
 
-Start the local MCP stdio server:
+Start the local MCP HTTP server:
 
 ```bash
 go run . mcp
+```
+
+By default it listens on `http://127.0.0.1:8765/mcp`, with a health endpoint at
+`http://127.0.0.1:8765/health`. Override the bind address or path when needed:
+
+```bash
+go run . mcp --addr 127.0.0.1:8766 --path /mcp
 ```
 
 The MCP server is the primary agent management interface. It exposes bootstrap,
@@ -217,19 +224,14 @@ This is the MCP form of the runtime loop. `doctor` should be the health-check
 entrypoint, including generated config validation, so agents do not need to call
 a separate Mihomo config-test tool in the normal flow.
 
-For a real MCP client smoke test, use the local `callCopilot` wrapper after the
-`localclash` server is registered in the Copilot user MCP config
-(`~/.copilot/mcp-config.json`). This is the fixed end-to-end MCP test target for
-localClash:
+For a local HTTP MCP smoke test, run:
 
 ```bash
-scripts/test-mcp-callcopilot.sh
+scripts/test-mcp-http.sh
 ```
 
-The script uses `/Volumes/Data/Github/callCopilot/bin/callCopilot` by default
-and runs the `ds` model alias. It starts a Copilot CLI session with the user
-configured localClash MCP server enabled, calls the `doctor` tool, and expects
-`LOCALCLASH_MCP_OK`.
+The script starts `go run . mcp`, posts a JSON-RPC `doctor` tool call to the
+HTTP endpoint, and expects a response containing `"status":"ok"`.
 
 ## Local Data
 

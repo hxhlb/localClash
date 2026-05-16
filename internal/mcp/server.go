@@ -1,15 +1,12 @@
 package mcp
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"net/http"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -70,121 +67,109 @@ type toolContent struct {
 	Text string `json:"text"`
 }
 
-type messageFormat int
-
-const (
-	messageFormatFramed messageFormat = iota
-	messageFormatJSONLine
-)
-
-func ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
-	return NewServer().Serve(ctx, in, out)
+type HTTPOptions struct {
+	Addr string
+	Path string
 }
 
-func ServeStdioWithState(ctx context.Context, state appinit.RuntimeState, in io.Reader, out io.Writer) error {
-	return NewServerWithState(state).Serve(ctx, in, out)
+func NormalizeHTTPOptions(opts HTTPOptions) HTTPOptions {
+	if strings.TrimSpace(opts.Addr) == "" {
+		opts.Addr = "127.0.0.1:8765"
+	}
+	if strings.TrimSpace(opts.Path) == "" {
+		opts.Path = "/mcp"
+	}
+	if !strings.HasPrefix(opts.Path, "/") {
+		opts.Path = "/" + opts.Path
+	}
+	return opts
 }
 
-func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
-	reader := bufio.NewReader(in)
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+func HTTPURL(opts HTTPOptions) string {
+	opts = NormalizeHTTPOptions(opts)
+	return "http://" + opts.Addr + opts.Path
+}
+
+func ListenAndServeHTTPWithState(ctx context.Context, state appinit.RuntimeState, opts HTTPOptions) error {
+	opts = NormalizeHTTPOptions(opts)
+	srv := &http.Server{
+		Addr:              opts.Addr,
+		Handler:           NewServerWithState(state).HTTPHandler(opts.Path),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		err := srv.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
 		}
-
-		data, format, err := readMessage(reader)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
+		errCh <- err
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
+}
 
-		response := s.Handle(ctx, data)
+func (s *Server) HTTPHandler(path string) http.Handler {
+	opts := NormalizeHTTPOptions(HTTPOptions{Path: path})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		writeCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	})
+	mux.HandleFunc(opts.Path, func(w http.ResponseWriter, r *http.Request) {
+		writeCORSHeaders(w)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		defer r.Body.Close()
+		var raw json.RawMessage
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&raw); err != nil {
+			writeJSON(w, http.StatusOK, errorResponse(nil, -32700, "parse error"))
+			return
+		}
+		response := s.Handle(r.Context(), raw)
 		if response == nil {
-			continue
+			w.WriteHeader(http.StatusAccepted)
+			return
 		}
-		if err := writeMessage(out, response, format); err != nil {
-			return err
-		}
-	}
+		writeJSON(w, http.StatusOK, response)
+	})
+	return mux
 }
 
-func readMessage(reader *bufio.Reader) ([]byte, messageFormat, error) {
-	for {
-		next, err := reader.Peek(1)
-		if err != nil {
-			return nil, messageFormatFramed, err
-		}
-		if next[0] != '\r' && next[0] != '\n' && next[0] != ' ' && next[0] != '\t' {
-			break
-		}
-		if _, err := reader.ReadByte(); err != nil {
-			return nil, messageFormatFramed, err
-		}
-	}
-
-	next, err := reader.Peek(1)
-	if err != nil {
-		return nil, messageFormatFramed, err
-	}
-	if next[0] == '{' {
-		line, err := reader.ReadBytes('\n')
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, messageFormatJSONLine, err
-		}
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 && err != nil {
-			return nil, messageFormatJSONLine, err
-		}
-		return line, messageFormatJSONLine, nil
-	}
-
-	contentLength := -1
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return nil, messageFormatFramed, err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			return nil, messageFormatFramed, fmt.Errorf("invalid MCP header %q", line)
-		}
-		if strings.EqualFold(strings.TrimSpace(key), "Content-Length") {
-			n, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || n < 0 {
-				return nil, messageFormatFramed, fmt.Errorf("invalid Content-Length %q", strings.TrimSpace(value))
-			}
-			contentLength = n
-		}
-	}
-	if contentLength < 0 {
-		return nil, messageFormatFramed, errors.New("missing Content-Length header")
-	}
-	data := make([]byte, contentLength)
-	if _, err := io.ReadFull(reader, data); err != nil {
-		return nil, messageFormatFramed, err
-	}
-	return data, messageFormatFramed, nil
+func writeCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version, Mcp-Session-Id")
+	w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
 }
 
-func writeMessage(out io.Writer, value any, format messageFormat) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if format == messageFormatJSONLine {
-		_, err = fmt.Fprintf(out, "%s\n", data)
-		return err
-	}
-	_, err = fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s\r\n", len(data), data)
-	return err
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 func (s *Server) Handle(ctx context.Context, data []byte) *rpcResponse {
