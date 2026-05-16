@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"localclash/internal/appinit"
+	"localclash/internal/rules"
 )
 
 func TestHandleInitialize(t *testing.T) {
@@ -334,6 +337,58 @@ func TestToolsCallPacksListReturnsSerializableResult(t *testing.T) {
 	}
 }
 
+func TestToolsCallPacksListUsesBootstrapCatalog(t *testing.T) {
+	state := appinit.RuntimeState{
+		Rules: appinit.RulesState{
+			CatalogAvailable: true,
+			Packs: []rules.PackSummary{
+				{ID: "blackmatrix7_OpenAI", Source: "blackmatrix7", Name: "OpenAI", Target: "AI", ProviderCount: 1, RuleCount: 1},
+			},
+			Details: map[string]rules.PackDetail{
+				"blackmatrix7_OpenAI": {ID: "blackmatrix7_OpenAI", Source: "blackmatrix7", Name: "OpenAI", Target: "AI"},
+			},
+		},
+	}
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "packs_list",
+			"arguments": map[string]any{"name": "open"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("packs_list returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["total"] != float64(1) {
+		t.Fatalf("packs_list total = %v, want 1", content["total"])
+	}
+}
+
+func TestToolsCallPacksListReturnsBootstrapDiagnostics(t *testing.T) {
+	state := appinit.RuntimeState{
+		Rules: appinit.RulesState{
+			CatalogAvailable: false,
+			Diagnostic:       "rules cache unavailable",
+		},
+	}
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "packs_list",
+			"arguments": map[string]any{},
+		},
+	})
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "rules cache unavailable") {
+		t.Fatalf("response error = %+v, want bootstrap diagnostic", resp.Error)
+	}
+}
+
 func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	setupMCPPackCache(t)
 	resp := callHandle(t, map[string]any{
@@ -356,6 +411,34 @@ func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("packs_get structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
+	state := appinit.RuntimeState{
+		Rules: appinit.RulesState{
+			CatalogAvailable: true,
+			Details: map[string]rules.PackDetail{
+				"blackmatrix7_OpenAI": {ID: "blackmatrix7_OpenAI", Source: "blackmatrix7", Name: "OpenAI", Target: "AI"},
+			},
+		},
+	}
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "packs_get",
+			"arguments": map[string]any{"id": "blackmatrix7_OpenAI"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("packs_get returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	pack := result.StructuredContent.(map[string]any)["pack"].(map[string]any)
+	if pack["id"] != "blackmatrix7_OpenAI" {
+		t.Fatalf("pack = %+v, want OpenAI", pack)
 	}
 }
 
@@ -570,6 +653,37 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  "generated/mihomo.yaml",
+			MihomoRuntimeDir: ".runtime/mihomo",
+			CorePath:         "bin/mihomo",
+		},
+		Config: appinit.ConfigState{
+			Available:  false,
+			Diagnostic: "config render skipped because effective subscription is unavailable",
+		},
+	}
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "run_runtime",
+			"arguments": map[string]any{},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("run_runtime returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if !strings.Contains(content["error"].(string), "effective subscription is unavailable") {
+		t.Fatalf("content = %+v, want bootstrap diagnostic", content)
+	}
+}
+
 func TestRemovedMCPToolsReturnUnknownTool(t *testing.T) {
 	for _, name := range removedMCPTools() {
 		resp := callHandle(t, map[string]any{
@@ -606,11 +720,16 @@ func TestUnknownToolReturnsError(t *testing.T) {
 
 func callHandle(t *testing.T, value any) *rpcResponse {
 	t.Helper()
+	return callHandleWithServer(t, NewServer(), value)
+}
+
+func callHandleWithServer(t *testing.T, server *Server, value any) *rpcResponse {
+	t.Helper()
 	data, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp := NewServer().Handle(context.Background(), data)
+	resp := server.Handle(context.Background(), data)
 	if resp == nil {
 		t.Fatal("nil response")
 	}

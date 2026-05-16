@@ -27,6 +27,19 @@ localClash should expose:
 - Router adapters for OpenClash workflows, with write operations gated by
   explicit user confirmation.
 
+## Main Bootstrap
+
+Every localClash process builds a shared runtime bootstrap state before serving
+CLI commands or MCP tools. This state owns common paths and preflight results
+for the Mihomo core, subscription artifacts, rule sources, packs catalog,
+generated config, and runtime directory.
+
+Bootstrap failures are recorded as diagnostics instead of preventing MCP from
+starting. This lets agents call `subscriptions_status`, `doctor`, or config
+tools to explain and repair missing local state. The packs catalog is prepared
+at bootstrap time, so `packs_list` and `packs_get` consume the shared catalog
+instead of triggering their own rules adaptation or render workflow.
+
 ## Runtime Model
 
 localClash's runtime path is the shortest path from local state to a running

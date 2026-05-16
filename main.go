@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
+	"localclash/internal/appinit"
 	"localclash/internal/configrender"
 	"localclash/internal/coredownload"
 	"localclash/internal/corerun"
@@ -109,6 +111,9 @@ func run(args []string) error {
 		fmt.Print(usage)
 		return nil
 	}
+	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer bootstrapCancel()
+	state := appinit.Bootstrap(bootstrapCtx, appinit.Options{})
 	if len(args) >= 2 && args[0] == "core" && args[1] == "download" {
 		return runCoreDownload(args[2:])
 	}
@@ -119,19 +124,19 @@ func run(args []string) error {
 		return runDashboardDownload(args[2:])
 	}
 	if len(args) >= 2 && args[0] == "config" && args[1] == "render" {
-		return runConfigRender(args[2:])
+		return runConfigRender(args[2:], state)
 	}
 	if len(args) >= 1 && args[0] == "rules" {
-		return runRules(args[1:])
+		return runRules(args[1:], state)
 	}
 	if len(args) >= 1 && args[0] == "run" {
-		return runCore(args[1:])
+		return runCore(args[1:], state)
 	}
 	if len(args) >= 1 && args[0] == "doctor" {
-		return runDoctor(args[1:])
+		return runDoctor(args[1:], state)
 	}
 	if len(args) >= 1 && args[0] == "mcp" {
-		return runMCP(args[1:])
+		return runMCP(args[1:], state)
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 }
@@ -232,17 +237,17 @@ func runDashboardDownload(args []string) error {
 	return nil
 }
 
-func runConfigRender(args []string) error {
+func runConfigRender(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("config render", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	opts := configrender.Options{}
-	fs.StringVar(&opts.SourcePath, "source", "subscription.yaml", "downloaded subscription source YAML")
-	fs.StringVar(&opts.PolicyPath, "policy", "policies/loyalsoldier.yaml", "localClash policy YAML")
+	fs.StringVar(&opts.SourcePath, "source", state.Paths.SubscriptionPath, "downloaded subscription source YAML")
+	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy YAML")
 	fs.StringVar(&opts.Mode, "mode", "", "policy mode; empty means policy default")
-	fs.StringVar(&opts.OutputPath, "output", "generated/mihomo.yaml", "generated Mihomo config path")
+	fs.StringVar(&opts.OutputPath, "output", state.Paths.GeneratedConfig, "generated Mihomo config path")
 	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection YAML; optional")
-	fs.StringVar(&opts.RulesCacheDir, "rules-cache", ".runtime/rules/packs", "runtime pack cache directory")
+	fs.StringVar(&opts.RulesCacheDir, "rules-cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 
 	if err := fs.Parse(args); err != nil {
@@ -250,6 +255,9 @@ func runConfigRender(args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+	if opts.OutputPath == state.Paths.GeneratedConfig && state.Config.Rendered {
+		opts.Force = true
 	}
 
 	result, err := configrender.Render(opts)
@@ -261,27 +269,27 @@ func runConfigRender(args []string) error {
 	return nil
 }
 
-func runRules(args []string) error {
+func runRules(args []string, state appinit.RuntimeState) error {
 	if len(args) == 0 {
 		return fmt.Errorf("rules subcommand is required: adapt or render")
 	}
 	switch args[0] {
 	case "adapt":
-		return runRulesAdapt(args[1:])
+		return runRulesAdapt(args[1:], state)
 	case "render":
-		return runRulesRender(args[1:])
+		return runRulesRender(args[1:], state)
 	default:
 		return fmt.Errorf("unknown rules subcommand %q", args[0])
 	}
 }
 
-func runRulesAdapt(args []string) error {
+func runRulesAdapt(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("rules adapt", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	opts := rules.Options{}
-	fs.StringVar(&opts.SourcesDir, "sources", "rule-sources", "rule source YAML directory")
-	fs.StringVar(&opts.CacheDir, "cache", ".runtime/rules/packs", "runtime pack cache directory")
+	fs.StringVar(&opts.SourcesDir, "sources", state.Paths.RuleSourcesDir, "rule source YAML directory")
+	fs.StringVar(&opts.CacheDir, "cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -302,14 +310,14 @@ func runRulesAdapt(args []string) error {
 	return nil
 }
 
-func runRulesRender(args []string) error {
+func runRulesRender(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("rules render", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	opts := rules.Options{}
 	fs.StringVar(&opts.SelectionPath, "selection", "localclash-packs.yaml", "packs selection YAML")
-	fs.StringVar(&opts.Subscription, "subscription", "subscription.yaml", "subscription YAML for node label classification")
-	fs.StringVar(&opts.CacheDir, "cache", ".runtime/rules/packs", "runtime pack cache directory")
+	fs.StringVar(&opts.Subscription, "subscription", state.Paths.SubscriptionPath, "subscription YAML for node label classification")
+	fs.StringVar(&opts.CacheDir, "cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
 	fs.StringVar(&opts.OutputPath, "output", "-", "output rules fragment path, or - for stdout")
 
 	if err := fs.Parse(args); err != nil {
@@ -326,14 +334,14 @@ func runRulesRender(args []string) error {
 	return rules.WriteFragment(opts.OutputPath, fragment)
 }
 
-func runCore(args []string) error {
+func runCore(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	opts := corerun.Options{}
-	fs.StringVar(&opts.CorePath, "core", "bin/mihomo", "Mihomo core binary path")
-	fs.StringVar(&opts.ConfigPath, "config", "generated/mihomo.yaml", "Mihomo runtime config path")
-	fs.StringVar(&opts.WorkDir, "workdir", ".runtime/mihomo", "Mihomo runtime data directory")
+	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
+	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "Mihomo runtime config path")
+	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
 	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
 	fs.IntVar(&opts.LogRetentionDays, "log-retention", 7, "days of dated Mihomo logs to keep")
 
@@ -344,20 +352,36 @@ func runCore(args []string) error {
 		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	report, err := doctor.Run(ctx, doctor.Options{
+		CorePath:         opts.CorePath,
+		SubscriptionPath: state.Paths.SubscriptionPath,
+		ConfigPath:       opts.ConfigPath,
+		PolicyPath:       state.Paths.PolicyPath,
+		DashboardDir:     ".runtime/mihomo/ui/zashboard",
+		WorkDir:          opts.WorkDir,
+	})
+	if err != nil {
+		return err
+	}
+	if !doctorReportOK(report) {
+		return fmt.Errorf("doctor checks failed; run localclash doctor for details")
+	}
 	return corerun.Run(opts)
 }
 
-func runDoctor(args []string) error {
+func runDoctor(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
 	opts := doctor.Options{}
-	fs.StringVar(&opts.CorePath, "core", "bin/mihomo", "Mihomo core binary path")
-	fs.StringVar(&opts.SubscriptionPath, "subscription", "subscription.yaml", "downloaded subscription YAML")
-	fs.StringVar(&opts.ConfigPath, "config", "generated/mihomo.yaml", "generated Mihomo config path")
-	fs.StringVar(&opts.PolicyPath, "policy", "policies/loyalsoldier.yaml", "localClash policy YAML")
-	fs.StringVar(&opts.DashboardDir, "dashboard", ".runtime/mihomo/ui/zashboard", "zashboard directory")
-	fs.StringVar(&opts.WorkDir, "workdir", ".runtime/mihomo", "Mihomo runtime data directory for config test")
+	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
+	fs.StringVar(&opts.SubscriptionPath, "subscription", state.Paths.SubscriptionPath, "downloaded subscription YAML")
+	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "generated Mihomo config path")
+	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy YAML")
+	fs.StringVar(&opts.DashboardDir, "dashboard", filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard"), "zashboard directory")
+	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory for config test")
 	fs.BoolVar(&opts.JSON, "json", false, "print machine-readable JSON report")
 
 	if err := fs.Parse(args); err != nil {
@@ -381,9 +405,13 @@ func runDoctor(args []string) error {
 	return nil
 }
 
-func runMCP(args []string) error {
+func runMCP(args []string, state appinit.RuntimeState) error {
 	if len(args) != 0 {
 		return fmt.Errorf("unexpected positional arguments: %v", args)
 	}
-	return mcp.ServeStdio(context.Background(), os.Stdin, os.Stdout)
+	return mcp.ServeStdioWithState(context.Background(), state, os.Stdin, os.Stdout)
+}
+
+func doctorReportOK(report doctor.Report) bool {
+	return report.Status != "fail"
 }

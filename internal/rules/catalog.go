@@ -45,6 +45,11 @@ type PackGetResult struct {
 	Pack PackDetail `json:"pack"`
 }
 
+type PackCatalog struct {
+	Packs   []PackSummary         `json:"packs"`
+	Details map[string]PackDetail `json:"details"`
+}
+
 type PackDetail struct {
 	ID            string            `json:"id"`
 	Source        string            `json:"source"`
@@ -73,25 +78,24 @@ type catalogEntry struct {
 }
 
 func ListPacks(opts PackListOptions) (PackListResult, error) {
-	entries, err := loadCatalogEntries(opts.CacheDir)
+	catalog, err := LoadPackCatalog(opts.CacheDir)
 	if err != nil {
 		return PackListResult{}, err
 	}
 
 	nameFilter := strings.ToLower(strings.TrimSpace(opts.Name))
 	var packs []PackSummary
-	for _, entry := range entries {
-		if opts.Source != "" && entry.Cache.Source != opts.Source {
+	for _, pack := range catalog.Packs {
+		if opts.Source != "" && pack.Source != opts.Source {
 			continue
 		}
-		if opts.Target != "" && entry.Pack.Target != opts.Target {
+		if opts.Target != "" && pack.Target != opts.Target {
 			continue
 		}
-		name := packDisplayName(entry.Pack)
-		if nameFilter != "" && !strings.Contains(strings.ToLower(name), nameFilter) && !strings.Contains(strings.ToLower(entry.Pack.ID), nameFilter) {
+		if nameFilter != "" && !strings.Contains(strings.ToLower(pack.Name), nameFilter) && !strings.Contains(strings.ToLower(pack.ID), nameFilter) {
 			continue
 		}
-		packs = append(packs, packSummary(entry))
+		packs = append(packs, pack)
 	}
 
 	if opts.Limit > 0 && len(packs) > opts.Limit {
@@ -105,16 +109,29 @@ func GetPack(opts PackGetOptions) (PackGetResult, error) {
 	if id == "" {
 		return PackGetResult{}, fmt.Errorf("pack id is required")
 	}
-	entries, err := loadCatalogEntries(opts.CacheDir)
+	catalog, err := LoadPackCatalog(opts.CacheDir)
 	if err != nil {
 		return PackGetResult{}, err
 	}
-	for _, entry := range entries {
-		if catalogPackID(entry.Cache.Source, entry.Pack.ID) == id {
-			return PackGetResult{Pack: packDetail(entry)}, nil
-		}
+	if detail, ok := catalog.Details[id]; ok {
+		return PackGetResult{Pack: detail}, nil
 	}
 	return PackGetResult{}, fmt.Errorf("pack %q not found in pack cache", id)
+}
+
+func LoadPackCatalog(cacheDir string) (PackCatalog, error) {
+	entries, err := loadCatalogEntries(cacheDir)
+	if err != nil {
+		return PackCatalog{}, err
+	}
+	catalog := PackCatalog{Details: map[string]PackDetail{}}
+	for _, entry := range entries {
+		summary := packSummary(entry)
+		detail := packDetail(entry)
+		catalog.Packs = append(catalog.Packs, summary)
+		catalog.Details[summary.ID] = detail
+	}
+	return catalog, nil
 }
 
 func ResolvePackRef(cacheDir, id string) (PackRef, error) {

@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"localclash/internal/appinit"
 	"localclash/internal/configinspect"
 	"localclash/internal/configplan"
 	"localclash/internal/configrender"
@@ -21,10 +23,16 @@ import (
 	"localclash/internal/subscriptions"
 )
 
-type Server struct{}
+type Server struct {
+	state *appinit.RuntimeState
+}
 
 func NewServer() *Server {
 	return &Server{}
+}
+
+func NewServerWithState(state appinit.RuntimeState) *Server {
+	return &Server{state: &state}
 }
 
 type rpcRequest struct {
@@ -71,6 +79,10 @@ const (
 
 func ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	return NewServer().Serve(ctx, in, out)
+}
+
+func ServeStdioWithState(ctx context.Context, state appinit.RuntimeState, in io.Reader, out io.Writer) error {
+	return NewServerWithState(state).Serve(ctx, in, out)
 }
 
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
@@ -235,27 +247,27 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "config_overlay_inspect":
 		return callConfigOverlayInspect(args)
 	case "doctor":
-		return callDoctor(ctx, args)
+		return s.callDoctor(ctx, args)
 	case "packs_list":
-		return callPacksList(args)
+		return s.callPacksList(args)
 	case "packs_get":
-		return callPacksGet(args)
+		return s.callPacksGet(args)
 	case "subscriptions_status":
-		return callSubscriptionsStatus(args)
+		return s.callSubscriptionsStatus(args)
 	case "subscriptions_configure":
-		return callSubscriptionsConfigure(args)
+		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":
-		return callSubscriptionsRefresh(ctx, args)
+		return s.callSubscriptionsRefresh(ctx, args)
 	case "virtual_nodes_list":
-		return callVirtualNodesList(args)
+		return s.callVirtualNodesList(args)
 	case "virtual_nodes_get":
-		return callVirtualNodesGet(args)
+		return s.callVirtualNodesGet(args)
 	case "config_plan_render":
-		return callConfigPlanRender(ctx, args)
+		return s.callConfigPlanRender(ctx, args)
 	case "config_render":
-		return callConfigRender(args)
+		return s.callConfigRender(args)
 	case "run_runtime":
-		return callRunRuntime(ctx, args)
+		return s.callRunRuntime(ctx, args)
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
@@ -291,7 +303,7 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		PlanName     string                   `json:"plan_name"`
 		Subscription string                   `json:"subscription"`
@@ -308,6 +320,17 @@ func callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult
 	test := true
 	if in.Test != nil {
 		test = *in.Test
+	}
+	if s.state != nil {
+		if in.Subscription == "" {
+			in.Subscription = s.state.Paths.SubscriptionPath
+		}
+		if in.Policy == "" {
+			in.Policy = s.state.Paths.PolicyPath
+		}
+		if in.RulesCache == "" {
+			in.RulesCache = s.state.Paths.RulesCacheDir
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -327,7 +350,7 @@ func callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult
 	return jsonToolResult(result)
 }
 
-func callPacksList(args json.RawMessage) (toolResult, error) {
+func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Source string `json:"source"`
 		Name   string `json:"name"`
@@ -337,6 +360,13 @@ func callPacksList(args json.RawMessage) (toolResult, error) {
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil {
+		result, err := listPacksFromState(*s.state, in.Source, in.Name, in.Target, in.Limit)
+		if err != nil {
+			return toolResult{}, err
+		}
+		return jsonToolResult(result)
 	}
 	result, err := rules.ListPacks(rules.PackListOptions{
 		CacheDir: in.Cache,
@@ -351,13 +381,27 @@ func callPacksList(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callPacksGet(args json.RawMessage) (toolResult, error) {
+func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		ID    string `json:"id"`
 		Cache string `json:"cache"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil {
+		if !s.state.Rules.CatalogAvailable {
+			return toolResult{}, fmt.Errorf("packs catalog is unavailable: %s", s.state.Rules.Diagnostic)
+		}
+		id := strings.TrimSpace(in.ID)
+		if id == "" {
+			return toolResult{}, fmt.Errorf("pack id is required")
+		}
+		detail, ok := s.state.Rules.Details[id]
+		if !ok {
+			return toolResult{}, fmt.Errorf("pack %q not found in bootstrap packs catalog", id)
+		}
+		return jsonToolResult(rules.PackGetResult{Pack: detail})
 	}
 	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, ID: in.ID})
 	if err != nil {
@@ -366,7 +410,31 @@ func callPacksGet(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
+func listPacksFromState(state appinit.RuntimeState, source, name, target string, limit int) (rules.PackListResult, error) {
+	if !state.Rules.CatalogAvailable {
+		return rules.PackListResult{}, fmt.Errorf("packs catalog is unavailable: %s", state.Rules.Diagnostic)
+	}
+	nameFilter := strings.ToLower(strings.TrimSpace(name))
+	var packs []rules.PackSummary
+	for _, pack := range state.Rules.Packs {
+		if source != "" && pack.Source != source {
+			continue
+		}
+		if target != "" && pack.Target != target {
+			continue
+		}
+		if nameFilter != "" && !strings.Contains(strings.ToLower(pack.Name), nameFilter) && !strings.Contains(strings.ToLower(pack.ID), nameFilter) {
+			continue
+		}
+		packs = append(packs, pack)
+	}
+	if limit > 0 && len(packs) > limit {
+		packs = packs[:limit]
+	}
+	return rules.PackListResult{Total: len(packs), Packs: packs}, nil
+}
+
+func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string `json:"config"`
 		Merged     string `json:"merged"`
@@ -374,6 +442,17 @@ func callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Config == "" {
+			in.Config = s.state.Paths.SubscriptionConfig
+		}
+		if in.Merged == "" {
+			in.Merged = s.state.Paths.SubscriptionPath
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.SubscriptionRuntime
+		}
 	}
 	result, err := subscriptions.Status(subscriptions.StatusOptions{
 		ConfigPath: in.Config,
@@ -386,7 +465,7 @@ func callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
+func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config  string                 `json:"config"`
 		Sources []subscriptions.Source `json:"sources"`
@@ -394,6 +473,9 @@ func callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil && in.Config == "" {
+		in.Config = s.state.Paths.SubscriptionConfig
 	}
 	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
 		ConfigPath: in.Config,
@@ -406,7 +488,7 @@ func callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string   `json:"config"`
 		IDs        []string `json:"ids"`
@@ -417,6 +499,17 @@ func callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolRe
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Config == "" {
+			in.Config = s.state.Paths.SubscriptionConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.SubscriptionRuntime
+		}
+		if in.Merged == "" {
+			in.Merged = s.state.Paths.SubscriptionPath
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -434,7 +527,7 @@ func callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolRe
 	return jsonToolResult(result)
 }
 
-func callVirtualNodesList(args json.RawMessage) (toolResult, error) {
+func (s *Server) callVirtualNodesList(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Subscription string `json:"subscription"`
 		Selection    string `json:"selection"`
@@ -443,6 +536,9 @@ func callVirtualNodesList(args json.RawMessage) (toolResult, error) {
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil && in.Subscription == "" {
+		in.Subscription = s.state.Paths.SubscriptionPath
 	}
 	result, err := rules.ListVirtualNodes(rules.VirtualNodesListOptions{
 		Subscription: in.Subscription,
@@ -456,7 +552,7 @@ func callVirtualNodesList(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callVirtualNodesGet(args json.RawMessage) (toolResult, error) {
+func (s *Server) callVirtualNodesGet(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		ID           string `json:"id"`
 		Subscription string `json:"subscription"`
@@ -465,6 +561,9 @@ func callVirtualNodesGet(args json.RawMessage) (toolResult, error) {
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil && in.Subscription == "" {
+		in.Subscription = s.state.Paths.SubscriptionPath
 	}
 	result, err := rules.GetVirtualNode(rules.VirtualNodesGetOptions{
 		ID:           in.ID,
@@ -478,7 +577,7 @@ func callVirtualNodesGet(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Core         string `json:"core"`
 		CorePath     string `json:"core_path"`
@@ -502,6 +601,26 @@ func callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {
 		DashboardDir:     firstNonEmpty(in.DashboardDir, in.Dashboard),
 		WorkDir:          in.WorkDir,
 	}
+	if s.state != nil {
+		if opts.CorePath == "" {
+			opts.CorePath = s.state.Paths.CorePath
+		}
+		if opts.SubscriptionPath == "" {
+			opts.SubscriptionPath = s.state.Paths.SubscriptionPath
+		}
+		if opts.ConfigPath == "" {
+			opts.ConfigPath = s.state.Paths.GeneratedConfig
+		}
+		if opts.PolicyPath == "" {
+			opts.PolicyPath = s.state.Paths.PolicyPath
+		}
+		if opts.DashboardDir == "" {
+			opts.DashboardDir = filepath.Join(s.state.Paths.MihomoRuntimeDir, "ui", "zashboard")
+		}
+		if opts.WorkDir == "" {
+			opts.WorkDir = s.state.Paths.MihomoRuntimeDir
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	report, err := doctor.Run(ctx, opts)
@@ -511,7 +630,7 @@ func callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(report)
 }
 
-func callConfigRender(args json.RawMessage) (toolResult, error) {
+func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Source         string `json:"source"`
 		Policy         string `json:"policy"`
@@ -533,6 +652,23 @@ func callConfigRender(args json.RawMessage) (toolResult, error) {
 		PacksSelectionPath: in.PacksSelection,
 		RulesCacheDir:      in.RulesCache,
 	}
+	if s.state != nil {
+		if opts.SourcePath == "" {
+			opts.SourcePath = s.state.Paths.SubscriptionPath
+		}
+		if opts.PolicyPath == "" {
+			opts.PolicyPath = s.state.Paths.PolicyPath
+		}
+		if opts.OutputPath == "" {
+			opts.OutputPath = s.state.Paths.GeneratedConfig
+		}
+		if opts.RulesCacheDir == "" {
+			opts.RulesCacheDir = s.state.Paths.RulesCacheDir
+		}
+		if opts.OutputPath == s.state.Paths.GeneratedConfig && s.state.Config.Rendered {
+			opts.Force = true
+		}
+	}
 	result, err := configrender.Render(opts)
 	if err != nil {
 		return toolResult{}, err
@@ -540,7 +676,7 @@ func callConfigRender(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string `json:"config"`
 		RuntimeDir string `json:"runtime_dir"`
@@ -550,6 +686,27 @@ func callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, erro
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Config == "" {
+			in.Config = s.state.Paths.GeneratedConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+		if in.Core == "" {
+			in.Core = s.state.Paths.CorePath
+		}
+		if in.Config == s.state.Paths.GeneratedConfig && !s.state.Config.Available {
+			return jsonToolResult(map[string]any{
+				"started": false,
+				"error":   "generated config is unavailable: " + s.state.Config.Diagnostic,
+				"warnings": []string{
+					"Starting or restarting the proxy runtime may temporarily interrupt network connectivity.",
+					"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
+				},
+			})
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
