@@ -48,8 +48,25 @@ type Component struct {
 }
 
 type Selection struct {
-	Version     int            `yaml:"version"`
-	EnabledPack []SelectedPack `yaml:"enabled_packs"`
+	Version        int                      `yaml:"version"`
+	NodeLabels     map[string]NodeLabel     `yaml:"node_labels,omitempty"`
+	VirtualTargets map[string]VirtualTarget `yaml:"virtual_targets,omitempty"`
+	EnabledPack    []SelectedPack           `yaml:"enabled_packs"`
+}
+
+type NodeLabel struct {
+	Match []string `yaml:"match"`
+}
+
+type VirtualTarget struct {
+	Candidates VirtualTargetCandidates `yaml:"candidates"`
+	Auto       bool                    `yaml:"auto"`
+	Manual     bool                    `yaml:"manual"`
+	Direct     bool                    `yaml:"direct"`
+}
+
+type VirtualTargetCandidates struct {
+	Labels []string `yaml:"labels"`
 }
 
 type SelectedPack struct {
@@ -60,6 +77,7 @@ type SelectedPack struct {
 
 type Fragment struct {
 	RuleProviders map[string]map[string]any `yaml:"rule-providers"`
+	ProxyGroups   []map[string]any          `yaml:"proxy-groups,omitempty"`
 	Rules         []string                  `yaml:"rules"`
 }
 
@@ -67,6 +85,7 @@ type Options struct {
 	SourcesDir    string
 	CacheDir      string
 	SelectionPath string
+	Subscription  string
 	OutputPath    string
 }
 
@@ -79,6 +98,9 @@ func NormalizeOptions(opts Options) Options {
 	}
 	if strings.TrimSpace(opts.SelectionPath) == "" {
 		opts.SelectionPath = "localclash-packs.yaml"
+	}
+	if strings.TrimSpace(opts.Subscription) == "" {
+		opts.Subscription = "subscription.yaml"
 	}
 	return opts
 }
@@ -117,7 +139,11 @@ func Render(opts Options) (Fragment, error) {
 	if err != nil {
 		return Fragment{}, err
 	}
-	return RenderFragment(selection, caches)
+	proxyNames, err := LoadSubscriptionProxyNames(opts.Subscription)
+	if err != nil {
+		return Fragment{}, err
+	}
+	return RenderFragment(selection, caches, proxyNames)
 }
 
 func LoadSources(dir string) ([]Source, error) {
@@ -220,6 +246,34 @@ func LoadSelection(path string) (Selection, error) {
 	return selection, nil
 }
 
+func LoadSubscriptionProxyNames(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var source map[string]any
+	if err := yaml.Unmarshal(data, &source); err != nil {
+		return nil, err
+	}
+	raw, ok := source["proxies"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("subscription %q has no proxies", path)
+	}
+	names := make([]string, 0, len(raw))
+	for _, item := range raw {
+		proxy, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("subscription %q contains an invalid proxy entry", path)
+		}
+		name, ok := proxy["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("subscription %q contains a proxy without name", path)
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
 func WriteFragment(path string, fragment Fragment) error {
 	data, err := yaml.Marshal(fragment)
 	if err != nil {
@@ -235,10 +289,15 @@ func WriteFragment(path string, fragment Fragment) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func RenderFragment(selection Selection, caches map[string]PackCache) (Fragment, error) {
+func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames ...[]string) (Fragment, error) {
 	fragment := Fragment{
 		RuleProviders: map[string]map[string]any{},
 	}
+	targets, err := prepareTargets(selection, firstProxyNames(proxyNames))
+	if err != nil {
+		return Fragment{}, err
+	}
+	usedVirtualTargets := map[string]bool{}
 	for _, enabled := range selection.EnabledPack {
 		cache, ok := caches[enabled.Source]
 		if !ok {
@@ -251,9 +310,12 @@ func RenderFragment(selection Selection, caches map[string]PackCache) (Fragment,
 		if !pack.Renderable {
 			return Fragment{}, fmt.Errorf("pack %q from source %q is not renderable: %s", enabled.Pack, enabled.Source, pack.Reason)
 		}
-		target, err := renderTarget(enabled.Target)
+		target, virtual, err := renderTarget(enabled.Target, targets)
 		if err != nil {
 			return Fragment{}, err
+		}
+		if virtual {
+			usedVirtualTargets[target] = true
 		}
 		for _, component := range pack.Components {
 			providerName := providerName(enabled.Source, pack.ID, component.ID)
@@ -267,7 +329,19 @@ func RenderFragment(selection Selection, caches map[string]PackCache) (Fragment,
 			fragment.Rules = append(fragment.Rules, fmt.Sprintf("RULE-SET,%s,%s", providerName, target))
 		}
 	}
+	proxyGroups, err := materializeVirtualTargets(usedVirtualTargets, targets)
+	if err != nil {
+		return Fragment{}, err
+	}
+	fragment.ProxyGroups = proxyGroups
 	return fragment, nil
+}
+
+func firstProxyNames(values [][]string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	return values[0]
 }
 
 func findPack(packs []Pack, id string) (Pack, bool) {
@@ -279,19 +353,153 @@ func findPack(packs []Pack, id string) (Pack, bool) {
 	return Pack{}, false
 }
 
-func renderTarget(target string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "proxy":
-		return "PROXY", nil
-	case "direct":
-		return "DIRECT", nil
-	case "reject":
-		return "REJECT", nil
-	case "manual":
-		return "MANUAL", nil
-	default:
-		return "", fmt.Errorf("unknown pack target %q", target)
+type preparedTargets struct {
+	classified map[string][]string
+	virtuals   map[string]VirtualTarget
+}
+
+func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, error) {
+	classified, err := ClassifyProxyNames(proxyNames, selection.NodeLabels)
+	if err != nil {
+		return preparedTargets{}, err
 	}
+	for targetName, target := range selection.VirtualTargets {
+		if len(target.Candidates.Labels) == 0 {
+			return preparedTargets{}, fmt.Errorf("virtual target %q has no candidate labels", targetName)
+		}
+		if !target.Auto && !target.Manual && !target.Direct {
+			return preparedTargets{}, fmt.Errorf("virtual target %q has no enabled choices", targetName)
+		}
+		for _, label := range target.Candidates.Labels {
+			if _, ok := selection.NodeLabels[label]; !ok {
+				return preparedTargets{}, fmt.Errorf("virtual target %q references unknown node label %q", targetName, label)
+			}
+		}
+	}
+	return preparedTargets{classified: classified, virtuals: selection.VirtualTargets}, nil
+}
+
+func renderTarget(target string, targets preparedTargets) (string, bool, error) {
+	trimmed := strings.TrimSpace(target)
+	switch strings.ToLower(trimmed) {
+	case "proxy":
+		return "PROXY", false, nil
+	case "direct":
+		return "DIRECT", false, nil
+	case "reject":
+		return "REJECT", false, nil
+	case "manual":
+		return "MANUAL", false, nil
+	default:
+		if _, ok := targets.virtuals[trimmed]; ok {
+			return trimmed, true, nil
+		}
+		return "", false, fmt.Errorf("unknown pack target %q", target)
+	}
+}
+
+func ClassifyProxyNames(proxyNames []string, labels map[string]NodeLabel) (map[string][]string, error) {
+	out := map[string][]string{}
+	labelNames := make([]string, 0, len(labels))
+	for label := range labels {
+		labelNames = append(labelNames, label)
+	}
+	sort.Strings(labelNames)
+	for _, label := range labelNames {
+		nodeLabel := labels[label]
+		compiled := make([]*regexp.Regexp, 0, len(nodeLabel.Match))
+		for _, pattern := range nodeLabel.Match {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return nil, fmt.Errorf("node label %q pattern %q is invalid: %w", label, pattern, err)
+			}
+			compiled = append(compiled, re)
+		}
+		for _, proxyName := range proxyNames {
+			for _, re := range compiled {
+				if re.MatchString(proxyName) {
+					out[label] = appendUniqueString(out[label], proxyName)
+					break
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func materializeVirtualTargets(used map[string]bool, targets preparedTargets) ([]map[string]any, error) {
+	names := make([]string, 0, len(used))
+	for name := range used {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var groups []map[string]any
+	for _, name := range names {
+		target := targets.virtuals[name]
+		candidates := candidateProxies(target, targets.classified)
+		if len(candidates) == 0 {
+			return nil, fmt.Errorf("virtual target %q has no candidate proxies", name)
+		}
+		var choices []string
+		if target.Auto {
+			choices = append(choices, name+"_AUTO")
+		}
+		if target.Manual {
+			choices = append(choices, name+"_MANUAL")
+		}
+		if target.Direct {
+			choices = append(choices, "DIRECT")
+		}
+		if len(choices) == 0 {
+			return nil, fmt.Errorf("virtual target %q has no proxy-group choices", name)
+		}
+		groups = append(groups, map[string]any{
+			"name":    name,
+			"type":    "select",
+			"proxies": choices,
+		})
+		if target.Auto {
+			groups = append(groups, map[string]any{
+				"name":     name + "_AUTO",
+				"type":     "url-test",
+				"proxies":  candidates,
+				"url":      "http://www.gstatic.com/generate_204",
+				"interval": 300,
+			})
+		}
+		if target.Manual {
+			groups = append(groups, map[string]any{
+				"name":    name + "_MANUAL",
+				"type":    "select",
+				"proxies": candidates,
+			})
+		}
+	}
+	return groups, nil
+}
+
+func candidateProxies(target VirtualTarget, classified map[string][]string) []string {
+	var candidates []string
+	seen := map[string]bool{}
+	for _, label := range target.Candidates.Labels {
+		for _, proxy := range classified[label] {
+			if seen[proxy] {
+				continue
+			}
+			seen[proxy] = true
+			candidates = append(candidates, proxy)
+		}
+	}
+	return candidates
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 var unsafeProviderChars = regexp.MustCompile(`[^A-Za-z0-9_]+`)

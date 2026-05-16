@@ -64,6 +64,8 @@ Flags for rules adapt:
 
 Flags for rules render:
   --selection string  packs selection YAML (default "localclash-packs.yaml")
+  --subscription string
+                    subscription YAML for node label classification (default "subscription.yaml")
   --cache string      runtime pack cache directory (default ".runtime/rules/packs")
   --output string     output rules fragment path, or "-" for stdout (default "-")
 
@@ -295,6 +297,7 @@ func runRulesRender(args []string) error {
 
 	opts := rules.Options{}
 	fs.StringVar(&opts.SelectionPath, "selection", "localclash-packs.yaml", "packs selection YAML")
+	fs.StringVar(&opts.Subscription, "subscription", "subscription.yaml", "subscription YAML for node label classification")
 	fs.StringVar(&opts.CacheDir, "cache", ".runtime/rules/packs", "runtime pack cache directory")
 	fs.StringVar(&opts.OutputPath, "output", "-", "output rules fragment path, or - for stdout")
 
