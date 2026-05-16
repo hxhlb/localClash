@@ -13,6 +13,7 @@ import (
 	"localclash/internal/corerun"
 	"localclash/internal/dashboard"
 	"localclash/internal/doctor"
+	"localclash/internal/rules"
 	"localclash/internal/subdownload"
 )
 
@@ -23,6 +24,8 @@ Usage:
   localclash subscription download --url <url> [flags]
   localclash dashboard download [flags]
   localclash config render [flags]
+  localclash rules adapt [flags]
+  localclash rules render [flags]
   localclash run [flags]
   localclash doctor [flags]
 
@@ -54,6 +57,15 @@ Flags for config render:
   --mode string     policy mode; empty means policy default
   --output string   generated Mihomo config path (default "generated/mihomo.yaml")
   --force          overwrite output if it exists
+
+Flags for rules adapt:
+  --sources string  rule source YAML directory (default "rule-sources")
+  --cache string    runtime pack cache directory (default ".runtime/rules/packs")
+
+Flags for rules render:
+  --selection string  packs selection YAML (default "localclash-packs.yaml")
+  --cache string      runtime pack cache directory (default ".runtime/rules/packs")
+  --output string     output rules fragment path, or "-" for stdout (default "-")
 
 Flags for run:
   --core string     Mihomo core binary path (default "bin/mihomo")
@@ -100,6 +112,9 @@ func run(args []string) error {
 	}
 	if len(args) >= 2 && args[0] == "config" && args[1] == "render" {
 		return runConfigRender(args[2:])
+	}
+	if len(args) >= 1 && args[0] == "rules" {
+		return runRules(args[1:])
 	}
 	if len(args) >= 1 && args[0] == "run" {
 		return runCore(args[1:])
@@ -231,6 +246,70 @@ func runConfigRender(args []string) error {
 
 	fmt.Printf("rendered %s mode config to %s (%d proxies, %d rules)\n", result.Mode, result.OutputPath, result.ProxyCount, result.RuleCount)
 	return nil
+}
+
+func runRules(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("rules subcommand is required: adapt or render")
+	}
+	switch args[0] {
+	case "adapt":
+		return runRulesAdapt(args[1:])
+	case "render":
+		return runRulesRender(args[1:])
+	default:
+		return fmt.Errorf("unknown rules subcommand %q", args[0])
+	}
+}
+
+func runRulesAdapt(args []string) error {
+	fs := flag.NewFlagSet("rules adapt", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := rules.Options{}
+	fs.StringVar(&opts.SourcesDir, "sources", "rule-sources", "rule source YAML directory")
+	fs.StringVar(&opts.CacheDir, "cache", ".runtime/rules/packs", "runtime pack cache directory")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	caches, err := rules.Adapt(ctx, opts)
+	if err != nil {
+		return err
+	}
+	for _, cache := range caches {
+		fmt.Printf("adapted %s (%s): %d packs\n", cache.Source, cache.Adapter, len(cache.Packs))
+	}
+	return nil
+}
+
+func runRulesRender(args []string) error {
+	fs := flag.NewFlagSet("rules render", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := rules.Options{}
+	fs.StringVar(&opts.SelectionPath, "selection", "localclash-packs.yaml", "packs selection YAML")
+	fs.StringVar(&opts.CacheDir, "cache", ".runtime/rules/packs", "runtime pack cache directory")
+	fs.StringVar(&opts.OutputPath, "output", "-", "output rules fragment path, or - for stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	fragment, err := rules.Render(opts)
+	if err != nil {
+		return err
+	}
+	return rules.WriteFragment(opts.OutputPath, fragment)
 }
 
 func runCore(args []string) error {

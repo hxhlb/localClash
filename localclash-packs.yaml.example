@@ -1,0 +1,9 @@
+version: 1
+
+enabled_packs:
+  - source: sukkaw
+    pack: ai
+    target: proxy
+  - source: blackmatrix7
+    pack: OpenAI
+    target: proxy
