@@ -240,6 +240,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callRulesAdapt(ctx, args)
 	case "rules_render":
 		return callRulesRender(args)
+	case "virtual_nodes_list":
+		return callVirtualNodesList(args)
+	case "virtual_nodes_get":
+		return callVirtualNodesGet(args)
 	case "inspect_generated_config":
 		return callInspectGeneratedConfig(args)
 	case "config_render":
@@ -286,6 +290,50 @@ func callPacksGet(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, ID: in.ID})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callVirtualNodesList(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Subscription string `json:"subscription"`
+		Selection    string `json:"selection"`
+		IncludeEmpty bool   `json:"include_empty"`
+		SampleLimit  int    `json:"sample_limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := rules.ListVirtualNodes(rules.VirtualNodesListOptions{
+		Subscription: in.Subscription,
+		Selection:    in.Selection,
+		IncludeEmpty: in.IncludeEmpty,
+		SampleLimit:  in.SampleLimit,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callVirtualNodesGet(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		ID           string `json:"id"`
+		Subscription string `json:"subscription"`
+		Selection    string `json:"selection"`
+		Limit        int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := rules.GetVirtualNode(rules.VirtualNodesGetOptions{
+		ID:           in.ID,
+		Subscription: in.Subscription,
+		Selection:    in.Selection,
+		Limit:        in.Limit,
+	})
 	if err != nil {
 		return toolResult{}, err
 	}

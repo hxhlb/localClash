@@ -56,6 +56,7 @@ type Selection struct {
 }
 
 type NodeLabel struct {
+	Name  string   `yaml:"name,omitempty"`
 	Match []string `yaml:"match"`
 }
 

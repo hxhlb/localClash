@@ -37,6 +37,8 @@ func Registry() []Tool {
 		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter generated rule pack cache entries."},
 		{Name: "rules_adapt", SafetyLevel: SafeRead, Description: "Adapt rule sources into runtime pack cache."},
 		{Name: "rules_render", SafetyLevel: SafeRead, Description: "Render selected rule packs into a rules fragment."},
+		{Name: "virtual_nodes_get", SafetyLevel: SafeRead, Description: "Inspect candidates for one node-label virtual node."},
+		{Name: "virtual_nodes_list", SafetyLevel: SafeRead, Description: "List node-label virtual nodes inferred from subscription proxy names."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated Mihomo config from reviewed local inputs."},
 		{Name: "config_test", SafetyLevel: SafeWrite, Description: "Run Mihomo config validation against generated config."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start Mihomo runtime from generated config."},
@@ -89,6 +91,29 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"id": map[string]any{"type": "string", "description": "Catalog pack id, for example blackmatrix7_OpenAI."},
+			},
+			"required": []string{"id"},
+		}
+	case "virtual_nodes_list":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"subscription":  map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"selection":     map[string]any{"type": "string", "description": "Packs selection YAML path. Defaults to localclash-packs.yaml with example fallback."},
+				"include_empty": map[string]any{"type": "boolean", "description": "Include labels with no matched proxy names."},
+				"sample_limit":  map[string]any{"type": "integer", "minimum": 0, "description": "Maximum sample nodes per virtual node. Defaults to 5."},
+			},
+		}
+	case "virtual_nodes_get":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":           map[string]any{"type": "string", "description": "Node label id, for example SG, JP, or US."},
+				"subscription": map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"selection":    map[string]any{"type": "string", "description": "Packs selection YAML path. Defaults to localclash-packs.yaml with example fallback."},
+				"limit":        map[string]any{"type": "integer", "minimum": 0, "description": "Maximum returned candidate nodes. Defaults to 50."},
 			},
 			"required": []string{"id"},
 		}

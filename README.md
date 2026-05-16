@@ -84,6 +84,17 @@ MCP packs catalog tools:
 
 If the pack cache does not exist yet, run `rules_adapt` first.
 
+MCP virtual nodes tools:
+
+- `virtual_nodes_list`: list node-label candidate sets inferred from
+  `subscription.yaml` proxy names using selection YAML regexes.
+- `virtual_nodes_get`: inspect one node-label candidate set and its safe
+  candidate node summaries.
+
+Virtual nodes are localClash compile-time observations only. They are based only
+on provider/node names, are not verified GEO regions, and do not use IP lookup,
+egress probing, capability probing, or runtime proxy-group creation.
+
 For a real MCP client smoke test, use the local `callCopilot` wrapper after the
 `localclash` server is registered in the Copilot user MCP config
 (`~/.copilot/mcp-config.json`). This is the fixed end-to-end MCP test target for

@@ -86,7 +86,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "packs_list", "packs_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
+	for _, name := range []string{"doctor", "packs_list", "packs_get", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -102,6 +102,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"inspect_generated_config": SafeRead,
 		"packs_get":                SafeRead,
 		"packs_list":               SafeRead,
+		"virtual_nodes_get":        SafeRead,
+		"virtual_nodes_list":       SafeRead,
 		"rules_adapt":              SafeRead,
 		"rules_render":             SafeRead,
 		"config_render":            SafeWrite,
@@ -167,6 +169,63 @@ func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("packs_get structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallVirtualNodesListReturnsSerializableResult(t *testing.T) {
+	selection, subscription := setupMCPVirtualNodesFiles(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "virtual_nodes_list",
+			"arguments": map[string]any{
+				"selection":     selection,
+				"subscription":  subscription,
+				"include_empty": true,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("virtual_nodes_list returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["total"] != float64(2) {
+		t.Fatalf("virtual_nodes_list total = %v, want 2", content["total"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("virtual_nodes_list structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallVirtualNodesGetReturnsSerializableResult(t *testing.T) {
+	selection, subscription := setupMCPVirtualNodesFiles(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "virtual_nodes_get",
+			"arguments": map[string]any{
+				"id":           "SG",
+				"selection":    selection,
+				"subscription": subscription,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("virtual_nodes_get returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	node := content["virtual_node"].(map[string]any)
+	if node["id"] != "SG" {
+		t.Fatalf("virtual node id = %v, want SG", node["id"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("virtual_nodes_get structured content is not serializable: %v", err)
 	}
 }
 
@@ -332,4 +391,33 @@ packs:
 	if err := os.WriteFile(filepath.Join(cacheDir, "blackmatrix7.yaml"), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func setupMCPVirtualNodesFiles(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	selection := filepath.Join(dir, "selection.yaml")
+	subscription := filepath.Join(dir, "subscription.yaml")
+	if err := os.WriteFile(selection, []byte(`
+version: 1
+node_labels:
+  EMPTY:
+    match: ["(?i)empty"]
+  SG:
+    match: ["(?i)sg|singapore"]
+virtual_targets: {}
+enabled_packs: []
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(subscription, []byte(`
+proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return selection, subscription
 }
