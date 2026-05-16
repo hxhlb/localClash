@@ -56,6 +56,10 @@ Flags for config render:
   --policy string   localClash policy YAML (default "policies/loyalsoldier.yaml")
   --mode string     policy mode; empty means policy default
   --output string   generated Mihomo config path (default "generated/mihomo.yaml")
+  --packs-selection string
+                 packs selection YAML; optional
+  --rules-cache string
+                 runtime pack cache directory (default ".runtime/rules/packs")
   --force          overwrite output if it exists
 
 Flags for rules adapt:
@@ -232,6 +236,8 @@ func runConfigRender(args []string) error {
 	fs.StringVar(&opts.PolicyPath, "policy", "policies/loyalsoldier.yaml", "localClash policy YAML")
 	fs.StringVar(&opts.Mode, "mode", "", "policy mode; empty means policy default")
 	fs.StringVar(&opts.OutputPath, "output", "generated/mihomo.yaml", "generated Mihomo config path")
+	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection YAML; optional")
+	fs.StringVar(&opts.RulesCacheDir, "rules-cache", ".runtime/rules/packs", "runtime pack cache directory")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 
 	if err := fs.Parse(args); err != nil {

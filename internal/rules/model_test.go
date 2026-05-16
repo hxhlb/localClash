@@ -87,7 +87,6 @@ virtual_targets:
   AI:
     candidates:
       labels: [JP, SG, US]
-    auto: true
     manual: true
     direct: false
 enabled_packs:
@@ -102,8 +101,8 @@ enabled_packs:
 	if len(selection.NodeLabels) != 3 {
 		t.Fatalf("node labels = %d, want 3", len(selection.NodeLabels))
 	}
-	if !selection.VirtualTargets["AI"].Auto || !selection.VirtualTargets["AI"].Manual {
-		t.Fatalf("AI virtual target = %+v, want auto and manual", selection.VirtualTargets["AI"])
+	if !selection.VirtualTargets["AI"].Manual || selection.VirtualTargets["AI"].Auto {
+		t.Fatalf("AI virtual target = %+v, want manual only", selection.VirtualTargets["AI"])
 	}
 }
 
@@ -155,7 +154,6 @@ func TestRenderFragmentMaterializesVirtualTarget(t *testing.T) {
 		VirtualTargets: map[string]VirtualTarget{
 			"AI": {
 				Candidates: VirtualTargetCandidates{Labels: []string{"JP", "SG", "US"}},
-				Auto:       true,
 				Manual:     true,
 				Direct:     false,
 			},
@@ -176,15 +174,34 @@ func TestRenderFragmentMaterializesVirtualTarget(t *testing.T) {
 		t.Fatalf("second rule = %q, want target AI", got)
 	}
 	groupNames := proxyGroupNames(fragment.ProxyGroups)
-	for _, want := range []string{"AI", "AI_AUTO", "AI_MANUAL"} {
-		if !groupNames[want] {
-			t.Fatalf("missing proxy group %q in %+v", want, groupNames)
+	if !groupNames["AI"] {
+		t.Fatalf("missing proxy group AI in %+v", groupNames)
+	}
+	for _, unwanted := range []string{"AI_AUTO", "AI_MANUAL", "JP", "SG", "US"} {
+		if groupNames[unwanted] {
+			t.Fatalf("%q should not be materialized as a proxy group", unwanted)
 		}
 	}
-	for _, unwanted := range []string{"JP", "SG", "US"} {
-		if groupNames[unwanted] {
-			t.Fatalf("label %q should not be materialized as a proxy group", unwanted)
-		}
+}
+
+func TestRenderFragmentRejectsConflictingVirtualTargetModes(t *testing.T) {
+	selection := Selection{
+		NodeLabels: map[string]NodeLabel{
+			"JP": {Match: []string{"🇯🇵"}},
+		},
+		VirtualTargets: map[string]VirtualTarget{
+			"AI": {
+				Candidates: VirtualTargetCandidates{Labels: []string{"JP"}},
+				Auto:       true,
+				Manual:     true,
+			},
+		},
+		EnabledPack: []SelectedPack{
+			{Source: "sukkaw", Pack: "ai", Target: "AI"},
+		},
+	}
+	if _, err := RenderFragment(selection, testPackCaches(), []string{"🇯🇵 Tokyo"}); err == nil {
+		t.Fatal("expected conflicting virtual target mode error")
 	}
 }
 
@@ -205,7 +222,6 @@ func TestRenderFragmentRejectsEmptyVirtualTargetCandidates(t *testing.T) {
 		VirtualTargets: map[string]VirtualTarget{
 			"AI": {
 				Candidates: VirtualTargetCandidates{Labels: []string{"JP"}},
-				Auto:       true,
 				Manual:     true,
 			},
 		},

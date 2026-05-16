@@ -1,46 +1,5 @@
 version: 1
 
-node_labels:
-  JP:
-    match:
-      - "🇯🇵"
-      - "日本"
-      - "东京"
-      - "大阪"
-      - "\\bJP\\b"
-      - "Japan"
-      - "JPN"
-  SG:
-    match:
-      - "🇸🇬"
-      - "新加坡"
-      - "狮城"
-      - "\\bSG\\b"
-      - "Singapore"
-      - "SIN"
-  US:
-    match:
-      - "🇺🇸"
-      - "美国"
-      - "\\bUS\\b"
-      - "USA"
-      - "United States"
-
-virtual_targets:
-  AI:
-    candidates:
-      labels:
-        - JP
-        - SG
-        - US
-    auto: true
-    manual: true
-    direct: false
-
-enabled_packs:
-  - source: sukkaw
-    pack: ai
-    target: AI
-  - source: blackmatrix7
-    pack: OpenAI
-    target: AI
+node_labels: {}
+virtual_targets: {}
+enabled_packs: []

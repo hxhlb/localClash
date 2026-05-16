@@ -8,15 +8,19 @@ import (
 	"sort"
 	"strings"
 
+	rulespkg "localclash/internal/rules"
+
 	"gopkg.in/yaml.v3"
 )
 
 type Options struct {
-	SourcePath string
-	PolicyPath string
-	Mode       string
-	OutputPath string
-	Force      bool
+	SourcePath         string
+	PolicyPath         string
+	Mode               string
+	OutputPath         string
+	PacksSelectionPath string
+	RulesCacheDir      string
+	Force              bool
 }
 
 type Result struct {
@@ -119,7 +123,20 @@ func Render(opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	rendered, err := buildRuntimeConfig(source, pol, mode, proxyNames, proxies)
+	var fragment *rulespkg.Fragment
+	if opts.PacksSelectionPath != "" {
+		renderedFragment, err := rulespkg.Render(rulespkg.Options{
+			SelectionPath: opts.PacksSelectionPath,
+			CacheDir:      opts.RulesCacheDir,
+			Subscription:  opts.SourcePath,
+		})
+		if err != nil {
+			return Result{}, err
+		}
+		fragment = &renderedFragment
+	}
+
+	rendered, err := buildRuntimeConfig(source, pol, mode, proxyNames, proxies, fragment)
 	if err != nil {
 		return Result{}, err
 	}
@@ -139,7 +156,7 @@ func Render(opts Options) (Result, error) {
 		OutputPath: opts.OutputPath,
 		Mode:       modeName,
 		ProxyCount: len(proxyNames),
-		RuleCount:  len(mode.Rules),
+		RuleCount:  len(rendered["rules"].([]string)),
 	}, nil
 }
 
@@ -152,6 +169,9 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.OutputPath == "" {
 		opts.OutputPath = "generated/mihomo.yaml"
+	}
+	if opts.RulesCacheDir == "" {
+		opts.RulesCacheDir = ".runtime/rules/packs"
 	}
 	return opts
 }
@@ -253,7 +273,7 @@ func proxyNames(proxies []any) ([]string, error) {
 	return names, nil
 }
 
-func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, proxyNames []string, proxies []any) (map[string]any, error) {
+func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, proxyNames []string, proxies []any, fragment *rulespkg.Fragment) (map[string]any, error) {
 	config := map[string]any{
 		"mixed-port":          7890,
 		"allow-lan":           false,
@@ -272,15 +292,82 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 	}
 
 	providerNames := providersUsed(mode)
-	config["rule-providers"] = buildRuleProviders(pol, providerNames)
-	config["proxy-groups"] = buildProxyGroups(pol.Groups, proxyNames)
+	ruleProviders := buildRuleProviders(pol, providerNames)
+	if fragment != nil {
+		if err := mergeRuleProviders(ruleProviders, fragment.RuleProviders); err != nil {
+			return nil, err
+		}
+	}
+	config["rule-providers"] = ruleProviders
 
-	rules, err := buildRules(pol, withLocalBaseline(mode))
+	proxyGroups := buildProxyGroups(pol.Groups, proxyNames)
+	if fragment != nil {
+		var err error
+		proxyGroups, err = mergeProxyGroups(proxyGroups, fragment.ProxyGroups)
+		if err != nil {
+			return nil, err
+		}
+	}
+	config["proxy-groups"] = proxyGroups
+
+	rules, err := buildOrderedRules(pol, mode, fragment)
 	if err != nil {
 		return nil, err
 	}
 	config["rules"] = rules
 	return config, nil
+}
+
+func buildOrderedRules(pol policy, mode policyMode, fragment *rulespkg.Fragment) ([]string, error) {
+	baseline, err := buildRules(pol, policyMode{Rules: localBaselineRules})
+	if err != nil {
+		return nil, err
+	}
+	base, err := buildRules(pol, mode)
+	if err != nil {
+		return nil, err
+	}
+	rules := make([]string, 0, len(baseline)+len(base))
+	rules = append(rules, baseline...)
+	if fragment != nil {
+		rules = append(rules, fragment.Rules...)
+	}
+	rules = append(rules, base...)
+	return rules, nil
+}
+
+func mergeRuleProviders(base map[string]any, extra map[string]map[string]any) error {
+	for name, provider := range extra {
+		if _, exists := base[name]; exists {
+			return fmt.Errorf("rule-provider %q already exists", name)
+		}
+		base[name] = provider
+	}
+	return nil
+}
+
+func mergeProxyGroups(base []map[string]any, extra []map[string]any) ([]map[string]any, error) {
+	seen := map[string]bool{}
+	for _, group := range base {
+		name, ok := group["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("proxy-group without name: %v", group)
+		}
+		seen[name] = true
+	}
+	merged := append([]map[string]any{}, base...)
+	for _, group := range extra {
+		name, ok := group["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("proxy-group without name: %v", group)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("proxy-group %q already exists", name)
+		}
+		seen[name] = true
+		merged = append(merged, group)
+	}
+	return merged, nil
 }
 
 func withLocalBaseline(mode policyMode) policyMode {

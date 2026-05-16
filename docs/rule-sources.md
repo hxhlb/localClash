@@ -28,7 +28,6 @@ virtual_targets:
   AI:
     candidates:
       labels: [JP]
-    auto: true
     manual: true
     direct: false
 
@@ -44,6 +43,10 @@ localClash does not use server IP geolocation, hostname geolocation, outbound
 probing, or capability probing for this first version. Labels such as `JP` or
 `US` are not Clash runtime proxy-groups by themselves; they are only used when
 a virtual target such as `AI` asks for candidate nodes.
+
+Virtual targets materialize to one Clash runtime proxy-group in this first
+version. Choose either `auto: true` or `manual: true`; enabling both is rejected
+because it would create competing runtime groups for the same target.
 
 The first CLI surface is intentionally small:
 

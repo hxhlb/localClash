@@ -367,8 +367,14 @@ func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, 
 		if len(target.Candidates.Labels) == 0 {
 			return preparedTargets{}, fmt.Errorf("virtual target %q has no candidate labels", targetName)
 		}
+		if target.Auto && target.Manual {
+			return preparedTargets{}, fmt.Errorf("virtual target %q cannot enable both auto and manual", targetName)
+		}
 		if !target.Auto && !target.Manual && !target.Direct {
 			return preparedTargets{}, fmt.Errorf("virtual target %q has no enabled choices", targetName)
+		}
+		if target.Direct && target.Auto {
+			return preparedTargets{}, fmt.Errorf("virtual target %q cannot combine direct with auto mode", targetName)
 		}
 		for _, label := range target.Candidates.Labels {
 			if _, ok := selection.NodeLabels[label]; !ok {
@@ -437,43 +443,28 @@ func materializeVirtualTargets(used map[string]bool, targets preparedTargets) ([
 	for _, name := range names {
 		target := targets.virtuals[name]
 		candidates := candidateProxies(target, targets.classified)
-		if len(candidates) == 0 {
+		if len(candidates) == 0 && !target.Direct {
 			return nil, fmt.Errorf("virtual target %q has no candidate proxies", name)
 		}
-		var choices []string
 		if target.Auto {
-			choices = append(choices, name+"_AUTO")
+			groups = append(groups, map[string]any{
+				"name":     name,
+				"type":     "url-test",
+				"proxies":  candidates,
+				"url":      "http://www.gstatic.com/generate_204",
+				"interval": 300,
+			})
+			continue
 		}
-		if target.Manual {
-			choices = append(choices, name+"_MANUAL")
-		}
+		choices := append([]string{}, candidates...)
 		if target.Direct {
 			choices = append(choices, "DIRECT")
-		}
-		if len(choices) == 0 {
-			return nil, fmt.Errorf("virtual target %q has no proxy-group choices", name)
 		}
 		groups = append(groups, map[string]any{
 			"name":    name,
 			"type":    "select",
 			"proxies": choices,
 		})
-		if target.Auto {
-			groups = append(groups, map[string]any{
-				"name":     name + "_AUTO",
-				"type":     "url-test",
-				"proxies":  candidates,
-				"url":      "http://www.gstatic.com/generate_204",
-				"interval": 300,
-			})
-		}
-		if target.Manual {
-			groups = append(groups, map[string]any{
-				"name":    name + "_MANUAL",
-				"type":    "select",
-				"proxies": candidates,
-			})
-		}
 	}
 	return groups, nil
 }
