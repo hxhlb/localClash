@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"localclash/internal/configinspect"
+	"localclash/internal/configplan"
 	"localclash/internal/configrender"
 	"localclash/internal/doctor"
 	"localclash/internal/rules"
@@ -251,6 +252,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callVirtualNodesGet(args)
 	case "inspect_generated_config":
 		return callInspectGeneratedConfig(args)
+	case "config_plan_render":
+		return callConfigPlanRender(ctx, args)
 	case "config_render":
 		return callConfigRender(args)
 	case "config_test":
@@ -286,6 +289,42 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	result, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: in.Config, Limit: in.Limit})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		PlanName     string                   `json:"plan_name"`
+		Subscription string                   `json:"subscription"`
+		Policy       string                   `json:"policy"`
+		Mode         string                   `json:"mode"`
+		RulesCache   string                   `json:"rules_cache"`
+		OutputDir    string                   `json:"output_dir"`
+		Test         *bool                    `json:"test"`
+		Overlay      configplan.OverlayIntent `json:"overlay"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	test := true
+	if in.Test != nil {
+		test = *in.Test
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := configplan.Render(ctx, configplan.Options{
+		PlanName:     in.PlanName,
+		Subscription: in.Subscription,
+		Policy:       in.Policy,
+		Mode:         in.Mode,
+		RulesCache:   in.RulesCache,
+		OutputDir:    in.OutputDir,
+		Test:         test,
+		Overlay:      in.Overlay,
+	})
 	if err != nil {
 		return toolResult{}, err
 	}

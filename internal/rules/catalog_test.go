@@ -99,6 +99,50 @@ func TestGetPackUnknownIDReturnsError(t *testing.T) {
 	}
 }
 
+func TestResolvePackRefAcceptsCatalogAndProviderIDs(t *testing.T) {
+	cacheDir := writeCatalogTestCaches(t)
+
+	ref, err := ResolvePackRef(cacheDir, "blackmatrix7_OpenAI")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Source != "blackmatrix7" || ref.Pack != "OpenAI" {
+		t.Fatalf("ref = %+v, want blackmatrix7/OpenAI", ref)
+	}
+
+	writeCatalogTestCache(t, cacheDir, PackCache{
+		Version:    1,
+		Source:     "sukkaw",
+		Adapter:    "sukkaw",
+		Renderable: true,
+		Packs: []Pack{
+			{
+				ID:         "ai",
+				Name:       "AI",
+				Target:     "AI",
+				Renderable: true,
+				Components: []Component{
+					{
+						ID:         "non_ip",
+						Behavior:   "classical",
+						Format:     "text",
+						OrderClass: "non_ip",
+						URL:        "https://example.com/ai.txt",
+						Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+					},
+				},
+			},
+		},
+	})
+	ref, err = ResolvePackRef(cacheDir, "sukkaw_ai_non_ip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.ID != "sukkaw_ai" || ref.Pack != "ai" {
+		t.Fatalf("ref = %+v, want source pack ref for sukkaw ai", ref)
+	}
+}
+
 func writeCatalogTestCaches(t *testing.T) string {
 	t.Helper()
 	cacheDir := filepath.Join(t.TempDir(), "packs")
@@ -127,11 +171,16 @@ func writeCatalogTestCaches(t *testing.T) string {
 		},
 	}
 	for _, cache := range caches {
-		if err := WritePackCache(cacheDir, cache); err != nil {
-			t.Fatal(err)
-		}
+		writeCatalogTestCache(t, cacheDir, cache)
 	}
 	return cacheDir
+}
+
+func writeCatalogTestCache(t *testing.T, cacheDir string, cache PackCache) {
+	t.Helper()
+	if err := WritePackCache(cacheDir, cache); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testCatalogPack(id, target string) Pack {

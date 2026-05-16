@@ -86,7 +86,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "packs_list", "packs_get", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -108,6 +108,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"virtual_nodes_list":       SafeRead,
 		"rules_adapt":              SafeRead,
 		"rules_render":             SafeRead,
+		"config_plan_render":       SafeWrite,
 		"config_render":            SafeWrite,
 		"config_test":              SafeWrite,
 		"run_runtime":              ConfirmRequired,
@@ -122,6 +123,78 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		if got[name] != level {
 			t.Fatalf("%s safety level = %q, want %q", name, got[name], level)
 		}
+	}
+}
+
+func TestToolsCallConfigPlanRenderReturnsSerializableResult(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_plan_render",
+			"arguments": map[string]any{
+				"plan_name":    "ai-test",
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+				"output_dir":   paths.outputDir,
+				"test":         false,
+				"overlay": map[string]any{
+					"packs": []map[string]any{
+						{"id": "blackmatrix7_OpenAI", "target": "AI"},
+					},
+					"virtual_targets": []map[string]any{
+						{"id": "AI", "node_labels": []string{"SG"}, "mode": "manual"},
+					},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_plan_render returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["valid"] != true {
+		t.Fatalf("config_plan_render valid = %v, want true", content["valid"])
+	}
+	if _, err := os.Stat(content["output"].(string)); err != nil {
+		t.Fatalf("plan output missing: %v", err)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("config_plan_render structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallConfigPlanRenderInvalidInputReturnsError(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_plan_render",
+			"arguments": map[string]any{
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+				"output_dir":   paths.outputDir,
+				"test":         false,
+				"overlay": map[string]any{
+					"packs": []map[string]any{
+						{"id": "missing_pack", "target": "DIRECT"},
+					},
+				},
+			},
+		},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected config_plan_render JSON-RPC error")
+	}
+	if !strings.Contains(resp.Error.Message, "missing_pack") {
+		t.Fatalf("error = %+v, want missing pack", resp.Error)
 	}
 }
 
@@ -525,4 +598,94 @@ x-localclash:
 		t.Fatal(err)
 	}
 	return path
+}
+
+type mcpPlanFixture struct {
+	subscription string
+	policy       string
+	cache        string
+	outputDir    string
+}
+
+func setupMCPPlanFixture(t *testing.T) mcpPlanFixture {
+	t.Helper()
+	dir := t.TempDir()
+	t.Chdir(dir)
+	paths := mcpPlanFixture{
+		subscription: filepath.Join(dir, "subscription.yaml"),
+		policy:       filepath.Join(dir, "policy.yaml"),
+		cache:        filepath.Join(dir, ".runtime", "rules", "packs"),
+		outputDir:    filepath.Join(dir, ".runtime", "plans"),
+	}
+	if err := os.MkdirAll(paths.cache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMCPFile(t, paths.subscription, `proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+`)
+	writeMCPFile(t, paths.policy, `rule_source:
+  base_url: https://example.com/rules
+groups:
+  direct: DIRECT
+  reject: REJECT
+  proxy: PROXY
+  auto: AUTO
+  manual: MANUAL
+  apple: Apple
+provider_mapping:
+  applications:
+    path: applications.txt
+    behavior: classical
+    target: direct
+modes:
+  default: whitelist
+  whitelist:
+    rules:
+      - provider: applications
+        target: direct
+      - match: true
+        target: proxy
+  blacklist:
+    rules:
+      - match: true
+        target: direct
+`)
+	writeMCPFile(t, filepath.Join(dir, "localclash-packs.yaml"), `version: 1
+node_labels:
+  SG:
+    match: ["(?i)sg|singapore"]
+virtual_targets: {}
+enabled_packs: []
+`)
+	writeMCPFile(t, filepath.Join(paths.cache, "blackmatrix7.yaml"), `version: 1
+source: blackmatrix7
+adapter: blackmatrix7
+renderable: true
+packs:
+  - id: OpenAI
+    name: OpenAI
+    target: AI
+    renderable: true
+    components:
+      - id: OpenAI
+        behavior: classical
+        format: yaml
+        order_class: mixed
+        url: https://example.com/OpenAI.yaml
+        path: ./rule-packs/blackmatrix7/OpenAI.yaml
+`)
+	return paths
+}
+
+func writeMCPFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

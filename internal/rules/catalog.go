@@ -20,6 +20,13 @@ type PackGetOptions struct {
 	ID       string
 }
 
+type PackRef struct {
+	ID     string
+	Source string
+	Pack   string
+	Name   string
+}
+
 type PackListResult struct {
 	Total int           `json:"total"`
 	Packs []PackSummary `json:"packs"`
@@ -110,6 +117,28 @@ func GetPack(opts PackGetOptions) (PackGetResult, error) {
 	return PackGetResult{}, fmt.Errorf("pack %q not found in pack cache", id)
 }
 
+func ResolvePackRef(cacheDir, id string) (PackRef, error) {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return PackRef{}, fmt.Errorf("pack id is required")
+	}
+	entries, err := loadCatalogEntries(cacheDir)
+	if err != nil {
+		return PackRef{}, err
+	}
+	for _, entry := range entries {
+		if catalogPackID(entry.Cache.Source, entry.Pack.ID) == trimmed {
+			return packRef(entry), nil
+		}
+		for _, component := range entry.Pack.Components {
+			if providerName(entry.Cache.Source, entry.Pack.ID, component.ID) == trimmed {
+				return packRef(entry), nil
+			}
+		}
+	}
+	return PackRef{}, fmt.Errorf("pack %q not found in pack cache", trimmed)
+}
+
 func loadCatalogEntries(cacheDir string) ([]catalogEntry, error) {
 	normalized := NormalizeOptions(Options{CacheDir: cacheDir})
 	caches, err := LoadPackCaches(normalized.CacheDir)
@@ -154,6 +183,15 @@ func packSummary(entry catalogEntry) PackSummary {
 		Target:        entry.Pack.Target,
 		ProviderCount: len(entry.Pack.Components),
 		RuleCount:     len(entry.Pack.Components),
+	}
+}
+
+func packRef(entry catalogEntry) PackRef {
+	return PackRef{
+		ID:     catalogPackID(entry.Cache.Source, entry.Pack.ID),
+		Source: entry.Cache.Source,
+		Pack:   entry.Pack.ID,
+		Name:   packDisplayName(entry.Pack),
 	}
 }
 

@@ -105,6 +105,18 @@ MCP config inspection tools:
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from future replaceable overlay config.
 
+MCP config plan tool:
+
+- `config_plan_render`: accepts a complete desired overlay and renders a
+  candidate Mihomo config into `.runtime/plans/<plan-id>/`.
+
+The plan renderer writes `mihomo.yaml` and `summary.json` under the plan
+directory. It does not overwrite `generated/mihomo.yaml`, does not modify
+`localclash-packs.yaml`, does not start or restart Mihomo, and does not apply
+router/OpenClash changes. If an agent wants to preserve an existing overlay, it
+must first call `config_overlay_inspect` and submit the full desired overlay,
+including the retained packs and virtual targets.
+
 For a real MCP client smoke test, use the local `callCopilot` wrapper after the
 `localclash` server is registered in the Copilot user MCP config
 (`~/.copilot/mcp-config.json`). This is the fixed end-to-end MCP test target for

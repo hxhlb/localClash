@@ -41,6 +41,7 @@ func Registry() []Tool {
 		{Name: "rules_render", SafetyLevel: SafeRead, Description: "Render selected rule packs into a rules fragment."},
 		{Name: "virtual_nodes_get", SafetyLevel: SafeRead, Description: "Inspect candidates for one node-label virtual node."},
 		{Name: "virtual_nodes_list", SafetyLevel: SafeRead, Description: "List node-label virtual nodes inferred from subscription proxy names."},
+		{Name: "config_plan_render", SafetyLevel: SafeWrite, Description: "Render a candidate Mihomo config from a complete desired overlay into .runtime/plans."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated Mihomo config from reviewed local inputs."},
 		{Name: "config_test", SafetyLevel: SafeWrite, Description: "Run Mihomo config validation against generated config."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start Mihomo runtime from generated config."},
@@ -76,6 +77,49 @@ func ListedTools() []ListedTool {
 
 func inputSchemaForTool(name string) map[string]any {
 	switch name {
+	case "config_plan_render":
+		packIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":     map[string]any{"type": "string", "description": "Pack id, for example blackmatrix7_OpenAI or sukkaw_ai_non_ip."},
+				"target": map[string]any{"type": "string", "description": "Desired rule target, for example DIRECT, REJECT, PROXY, or AI."},
+			},
+			"required": []string{"id", "target"},
+		}
+		virtualTargetIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":          map[string]any{"type": "string", "description": "Virtual target id, for example AI."},
+				"node_labels": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Node label ids to collect candidates from."},
+				"mode":        map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized runtime group mode."},
+			},
+			"required": []string{"id", "node_labels", "mode"},
+		}
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"plan_name":    map[string]any{"type": "string", "description": "Human-readable plan slug prefix."},
+				"subscription": map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"policy":       map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
+				"mode":         map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
+				"rules_cache":  map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
+				"output_dir":   map[string]any{"type": "string", "description": "Plan artifact root. Defaults to .runtime/plans."},
+				"test":         map[string]any{"type": "boolean", "description": "Run Mihomo config test. Defaults to true."},
+				"overlay": map[string]any{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]any{
+						"packs":           map[string]any{"type": "array", "items": packIntent},
+						"virtual_targets": map[string]any{"type": "array", "items": virtualTargetIntent},
+					},
+					"required": []string{"packs"},
+				},
+			},
+			"required": []string{"overlay"},
+		}
 	case "config_base_inspect", "config_overlay_inspect":
 		return map[string]any{
 			"type":                 "object",
