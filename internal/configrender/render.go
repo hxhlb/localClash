@@ -82,6 +82,15 @@ var localBaselineRules = []ruleSpec{
 	{IPCIDR6: "fe80::/10", Target: "direct", NoResolve: true},
 }
 
+func LocalBaselineRuleLines() []string {
+	pol := policy{Groups: map[string]string{"direct": "DIRECT"}}
+	rules, err := buildRules(pol, policyMode{Rules: localBaselineRules})
+	if err != nil {
+		return nil
+	}
+	return append([]string{}, rules...)
+}
+
 func Render(opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
 	if err := ensureOutput(opts.OutputPath, opts.Force); err != nil {

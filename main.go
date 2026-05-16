@@ -12,6 +12,7 @@ import (
 	"localclash/internal/coredownload"
 	"localclash/internal/corerun"
 	"localclash/internal/dashboard"
+	"localclash/internal/doctor"
 	"localclash/internal/subdownload"
 )
 
@@ -23,6 +24,7 @@ Usage:
   localclash dashboard download [flags]
   localclash config render [flags]
   localclash run [flags]
+  localclash doctor [flags]
 
 Flags for core download:
   --version string   GitHub release tag, or "latest" (default "latest")
@@ -60,6 +62,15 @@ Flags for run:
   --log string      Mihomo log file path (default "<workdir>/logs/mihomo-YYYY-MM-DD.log")
   --log-retention int
                  days of dated Mihomo logs to keep (default 7)
+
+Flags for doctor:
+  --core string          Mihomo core binary path (default "bin/mihomo")
+  --subscription string  downloaded subscription YAML (default "subscription.yaml")
+  --config string        generated Mihomo config path (default "generated/mihomo.yaml")
+  --policy string        localClash policy YAML (default "policies/loyalsoldier.yaml")
+  --dashboard string     zashboard directory (default ".runtime/mihomo/ui/zashboard")
+  --workdir string       Mihomo runtime data directory for config test (default ".runtime/mihomo")
+  --json                print machine-readable JSON report
 `
 
 func main() {
@@ -92,6 +103,9 @@ func run(args []string) error {
 	}
 	if len(args) >= 1 && args[0] == "run" {
 		return runCore(args[1:])
+	}
+	if len(args) >= 1 && args[0] == "doctor" {
+		return runDoctor(args[1:])
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 }
@@ -238,4 +252,38 @@ func runCore(args []string) error {
 	}
 
 	return corerun.Run(opts)
+}
+
+func runDoctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := doctor.Options{}
+	fs.StringVar(&opts.CorePath, "core", "bin/mihomo", "Mihomo core binary path")
+	fs.StringVar(&opts.SubscriptionPath, "subscription", "subscription.yaml", "downloaded subscription YAML")
+	fs.StringVar(&opts.ConfigPath, "config", "generated/mihomo.yaml", "generated Mihomo config path")
+	fs.StringVar(&opts.PolicyPath, "policy", "policies/loyalsoldier.yaml", "localClash policy YAML")
+	fs.StringVar(&opts.DashboardDir, "dashboard", ".runtime/mihomo/ui/zashboard", "zashboard directory")
+	fs.StringVar(&opts.WorkDir, "workdir", ".runtime/mihomo", "Mihomo runtime data directory for config test")
+	fs.BoolVar(&opts.JSON, "json", false, "print machine-readable JSON report")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	report, err := doctor.Run(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if opts.JSON {
+		return doctor.PrintJSON(report)
+	}
+	doctor.PrintText(report)
+	return nil
 }

@@ -94,3 +94,17 @@ By default this is equivalent to:
 ```
 
 Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
+
+## Doctor
+
+Run a read-only diagnostic report for the local core, subscription, generated config, policy, dashboard, rule references, and Mihomo config test:
+
+```bash
+go run . doctor
+```
+
+Machine-readable output for the future web UI:
+
+```bash
+go run . doctor --json
+```
