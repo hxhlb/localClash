@@ -1,19 +1,55 @@
 # localClash
 
-Natural-language traffic policy tooling for Clash, Mihomo, and OpenClash.
+Local MCP service for AI-assisted Clash, Mihomo, and OpenClash management.
 
 ## Direction
 
-The project is intended to become a local binary that can expose:
+localClash is intended to run near the proxy runtime, such as on a local
+machine, NAS, home server, or router. Its primary interface is MCP: AI agents
+talk to localClash, localClash observes and manages the local Clash/Mihomo or
+OpenClash environment.
 
-- CLI commands for inspection, planning, compilation, and validation.
-- A local HTTP/SSE API for a web UI.
-- An MCP server for agent integrations.
-- Router adapters for OpenClash workflows.
+The project is not an admin Web UI. Conversation with an AI agent is the main
+management surface. zashboard can still be downloaded and served by Mihomo as a
+runtime dashboard, but it is not localClash's configuration UI.
+
+localClash should expose:
+
+- An MCP server as the primary agent interface.
+- CLI commands for bootstrap, debugging, and fallback operation.
+- Deterministic renderers for rules, packs, virtual targets, and runtime
+  Mihomo configs.
+- Read-only diagnostics and runtime inspection for safe agent observation.
+- Router adapters for OpenClash workflows, with write operations gated by
+  explicit user confirmation.
 
 ## Safety Boundary
 
-Models should produce policy intent, not edit Clash YAML directly. A deterministic compiler should turn reviewed intent into Clash/OpenClash artifacts with validation, diff preview, and rollback support.
+AI agents should produce policy intent, plans, and reviewed changes, not edit
+active Clash YAML directly. localClash should turn reviewed intent into
+Clash/OpenClash artifacts with validation, diff preview, config tests, backups,
+and rollback support.
+
+Safe operations include inspection, diagnosis, rendering into generated files,
+and configuration tests. Risky operations such as restarting a runtime, changing
+live proxy groups, overwriting local selection files, or applying router
+configuration must be explicit and auditable.
+
+## Interaction Model
+
+The intended flow is:
+
+```text
+user asks an AI agent
+-> agent calls localClash MCP tools
+-> localClash observes local runtime/config state
+-> agent proposes a plan and diff
+-> user confirms
+-> localClash renders/tests/applies the approved change
+```
+
+CLI commands remain useful for local development and for environments where an
+MCP client is not available, but they are not the primary product interface.
 
 ## Local Data
 
@@ -53,7 +89,7 @@ The default User-Agent is `clash-verge/v1.5.1`, matching the known OpenClash sub
 
 ## Dashboard
 
-Download the zashboard static UI for Mihomo:
+Download the zashboard static UI for Mihomo runtime inspection:
 
 ```bash
 go run . dashboard download --force
@@ -64,6 +100,10 @@ The command downloads the default `dist.zip` release asset. The default output i
 ```text
 http://127.0.0.1:9090/ui
 ```
+
+zashboard is useful for viewing Mihomo runtime state and switching groups, but
+localClash configuration management is expected to happen through MCP-backed
+agent conversation.
 
 ## Config Render
 
@@ -108,7 +148,7 @@ Run a read-only diagnostic report for the local core, subscription, generated co
 go run . doctor
 ```
 
-Machine-readable output for the future web UI:
+Machine-readable output for MCP tools and agent workflows:
 
 ```bash
 go run . doctor --json
