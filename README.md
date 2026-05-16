@@ -95,6 +95,16 @@ Virtual nodes are localClash compile-time observations only. They are based only
 on provider/node names, are not verified GEO regions, and do not use IP lookup,
 egress probing, capability probing, or runtime proxy-group creation.
 
+MCP config inspection tools:
+
+- `config_base_inspect`: inspect the generated base config summary. The base
+  layer is not modifiable through MCP plan tools.
+- `config_overlay_inspect`: inspect the localClash-managed overlay from
+  `x-localclash.overlay` metadata.
+
+Config render writes `x-localclash` metadata into generated configs so agents
+can distinguish immutable base config from future replaceable overlay config.
+
 For a real MCP client smoke test, use the local `callCopilot` wrapper after the
 `localclash` server is registered in the Copilot user MCP config
 (`~/.copilot/mcp-config.json`). This is the fixed end-to-end MCP test target for

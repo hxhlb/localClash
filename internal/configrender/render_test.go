@@ -1,9 +1,13 @@
 package configrender
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"localclash/internal/configmeta"
 )
 
 func TestBuildRulesWhitelistFallback(t *testing.T) {
@@ -121,6 +125,15 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 	if proxyGroupNamesFromConfig(config)["AI"] {
 		t.Fatal("base config should not include AI proxy-group")
 	}
+	metadata := config[configmeta.Key].(map[string]any)
+	overlay := metadata["overlay"].(map[string]any)
+	if overlay["modifiable"] != true {
+		t.Fatalf("overlay modifiable = %v, want true", overlay["modifiable"])
+	}
+	if len(overlay["packs"].([]any)) != 0 {
+		t.Fatalf("overlay packs = %v, want empty", overlay["packs"])
+	}
+	assertNoSensitiveConfigMetadata(t, metadata)
 }
 
 func TestRenderWithPacksSelectionIncludesVirtualTargetFragment(t *testing.T) {
@@ -168,6 +181,21 @@ func TestRenderWithPacksSelectionIncludesVirtualTargetFragment(t *testing.T) {
 	if packIndex > baseIndex {
 		t.Fatalf("pack rule index %d should be before base rule index %d", packIndex, baseIndex)
 	}
+
+	metadata := config["x-localclash"].(map[string]any)
+	overlay := metadata["overlay"].(map[string]any)
+	packs := overlay["packs"].([]any)
+	if len(packs) != 2 {
+		t.Fatalf("overlay packs = %d, want 2", len(packs))
+	}
+	virtualTargets := overlay["virtual_targets"].([]any)
+	if len(virtualTargets) != 1 {
+		t.Fatalf("overlay virtual targets = %d, want 1", len(virtualTargets))
+	}
+	if got := virtualTargets[0].(map[string]any)["mode"]; got != "manual" {
+		t.Fatalf("virtual target mode = %v, want manual", got)
+	}
+	assertNoSensitiveConfigMetadata(t, metadata)
 }
 
 func TestRenderWithPacksSelectionRejectsEmptyVirtualTargetCandidates(t *testing.T) {
@@ -393,4 +421,18 @@ func indexOf(values []string, target string) int {
 		}
 	}
 	return -1
+}
+
+func assertNoSensitiveConfigMetadata(t *testing.T, value any) {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, banned := range []string{"example.com", "password", "server", "cipher", "test", "🇯🇵日本01"} {
+		if strings.Contains(text, banned) {
+			t.Fatalf("metadata leaked %q in %s", banned, text)
+		}
+	}
 }

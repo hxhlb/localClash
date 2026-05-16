@@ -31,6 +31,8 @@ type ListedTool struct {
 
 func Registry() []Tool {
 	tools := []Tool{
+		{Name: "config_base_inspect", SafetyLevel: SafeRead, Description: "Inspect generated base config summary without exposing proxy credentials."},
+		{Name: "config_overlay_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash overlay metadata and summaries."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "inspect_generated_config", SafetyLevel: SafeRead, Description: "Inspect generated Mihomo config structure without applying changes."},
 		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry."},
@@ -74,6 +76,15 @@ func ListedTools() []ListedTool {
 
 func inputSchemaForTool(name string) map[string]any {
 	switch name {
+	case "config_base_inspect", "config_overlay_inspect":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"config": map[string]any{"type": "string", "description": "Mihomo config YAML path. Defaults to generated/mihomo.yaml."},
+				"limit":  map[string]any{"type": "integer", "minimum": 1, "description": "Maximum summary entries per section."},
+			},
+		}
 	case "packs_list":
 		return map[string]any{
 			"type":                 "object",

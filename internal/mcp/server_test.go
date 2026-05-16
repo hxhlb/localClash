@@ -86,7 +86,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "packs_list", "packs_get", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "packs_list", "packs_get", "virtual_nodes_list", "virtual_nodes_get", "rules_adapt", "rules_render", "config_render", "config_test"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -99,6 +99,8 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 func TestRegistrySafetyLevels(t *testing.T) {
 	want := map[string]SafetyLevel{
 		"doctor":                   SafeRead,
+		"config_base_inspect":      SafeRead,
+		"config_overlay_inspect":   SafeRead,
 		"inspect_generated_config": SafeRead,
 		"packs_get":                SafeRead,
 		"packs_list":               SafeRead,
@@ -169,6 +171,58 @@ func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("packs_get structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallConfigBaseInspectReturnsSerializableResult(t *testing.T) {
+	config := setupMCPInspectConfig(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_base_inspect",
+			"arguments": map[string]any{
+				"config": config,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_base_inspect returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["layer"] != "base" || content["modifiable"] != false {
+		t.Fatalf("content = %+v, want base non-modifiable", content)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("config_base_inspect structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallConfigOverlayInspectReturnsSerializableResult(t *testing.T) {
+	config := setupMCPInspectConfig(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_overlay_inspect",
+			"arguments": map[string]any{
+				"config": config,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_overlay_inspect returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["layer"] != "overlay" || content["modifiable"] != true {
+		t.Fatalf("content = %+v, want overlay modifiable", content)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("config_overlay_inspect structured content is not serializable: %v", err)
 	}
 }
 
@@ -420,4 +474,55 @@ proxies:
 		t.Fatal(err)
 	}
 	return selection, subscription
+}
+
+func setupMCPInspectConfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mihomo.yaml")
+	if err := os.WriteFile(path, []byte(`
+mode: rule
+external-controller: 127.0.0.1:9090
+proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [SG 01]
+rule-providers:
+  blackmatrix7_OpenAI:
+    type: http
+    behavior: classical
+rules:
+  - RULE-SET,blackmatrix7_OpenAI,AI
+x-localclash:
+  version: 1
+  base:
+    modifiable: false
+    description: localClash generated base config
+  overlay:
+    modifiable: true
+    packs:
+      - id: blackmatrix7_OpenAI
+        source: blackmatrix7
+        target: AI
+    virtual_targets:
+      - id: AI
+        mode: manual
+        node_labels: [SG]
+    rule_providers:
+      - name: blackmatrix7_OpenAI
+        behavior: classical
+        type: http
+    rules:
+      - type: RULE-SET
+        provider: blackmatrix7_OpenAI
+        target: AI
+    insertion: after local safety baseline, before base rules
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

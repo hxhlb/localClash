@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"localclash/internal/configinspect"
 	"localclash/internal/configrender"
 	"localclash/internal/doctor"
 	"localclash/internal/rules"
@@ -230,6 +231,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		args = []byte("{}")
 	}
 	switch call.Name {
+	case "config_base_inspect":
+		return callConfigBaseInspect(args)
+	case "config_overlay_inspect":
+		return callConfigOverlayInspect(args)
 	case "doctor":
 		return callDoctor(ctx, args)
 	case "packs_list":
@@ -255,6 +260,36 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
+}
+
+func callConfigBaseInspect(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config string `json:"config"`
+		Limit  int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := configinspect.InspectBase(configinspect.Options{ConfigPath: in.Config, Limit: in.Limit})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config string `json:"config"`
+		Limit  int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: in.Config, Limit: in.Limit})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
 }
 
 func callPacksList(args json.RawMessage) (toolResult, error) {

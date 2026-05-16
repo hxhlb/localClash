@@ -194,6 +194,10 @@ func catalogPackID(source, packID string) string {
 	return providerName(source, packID, "")
 }
 
+func PackCatalogID(source, packID string) string {
+	return catalogPackID(source, packID)
+}
+
 func packDisplayName(pack Pack) string {
 	if strings.TrimSpace(pack.Name) != "" {
 		return pack.Name

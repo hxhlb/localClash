@@ -1,0 +1,47 @@
+package configmeta
+
+const Key = "x-localclash"
+
+type Metadata struct {
+	Version int             `yaml:"version" json:"version"`
+	Base    BaseMetadata    `yaml:"base" json:"base"`
+	Overlay OverlayMetadata `yaml:"overlay" json:"overlay"`
+}
+
+type BaseMetadata struct {
+	Modifiable  bool   `yaml:"modifiable" json:"modifiable"`
+	Description string `yaml:"description" json:"description"`
+}
+
+type OverlayMetadata struct {
+	Modifiable     bool                   `yaml:"modifiable" json:"modifiable"`
+	Packs          []OverlayPack          `yaml:"packs" json:"packs"`
+	VirtualTargets []OverlayVirtualTarget `yaml:"virtual_targets" json:"virtual_targets"`
+	RuleProviders  []OverlayRuleProvider  `yaml:"rule_providers" json:"rule_providers"`
+	Rules          []OverlayRule          `yaml:"rules" json:"rules"`
+	Insertion      string                 `yaml:"insertion" json:"insertion"`
+}
+
+type OverlayPack struct {
+	ID     string `yaml:"id" json:"id"`
+	Source string `yaml:"source" json:"source"`
+	Target string `yaml:"target" json:"target"`
+}
+
+type OverlayVirtualTarget struct {
+	ID         string   `yaml:"id" json:"id"`
+	Mode       string   `yaml:"mode" json:"mode"`
+	NodeLabels []string `yaml:"node_labels" json:"node_labels"`
+}
+
+type OverlayRuleProvider struct {
+	Name     string `yaml:"name" json:"name"`
+	Behavior string `yaml:"behavior" json:"behavior"`
+	Type     string `yaml:"type" json:"type"`
+}
+
+type OverlayRule struct {
+	Type     string `yaml:"type" json:"type"`
+	Provider string `yaml:"provider" json:"provider"`
+	Target   string `yaml:"target" json:"target"`
+}

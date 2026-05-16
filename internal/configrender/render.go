@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"localclash/internal/configmeta"
 	rulespkg "localclash/internal/rules"
 
 	"gopkg.in/yaml.v3"
@@ -124,7 +125,13 @@ func Render(opts Options) (Result, error) {
 	}
 
 	var fragment *rulespkg.Fragment
+	var selection *rulespkg.Selection
 	if opts.PacksSelectionPath != "" {
+		loadedSelection, err := rulespkg.LoadSelection(opts.PacksSelectionPath)
+		if err != nil {
+			return Result{}, err
+		}
+		selection = &loadedSelection
 		renderedFragment, err := rulespkg.Render(rulespkg.Options{
 			SelectionPath: opts.PacksSelectionPath,
 			CacheDir:      opts.RulesCacheDir,
@@ -140,6 +147,7 @@ func Render(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	rendered[configmeta.Key] = buildLocalClashMetadata(selection, fragment)
 
 	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
 		return Result{}, err
@@ -158,6 +166,100 @@ func Render(opts Options) (Result, error) {
 		ProxyCount: len(proxyNames),
 		RuleCount:  len(rendered["rules"].([]string)),
 	}, nil
+}
+
+func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.Fragment) configmeta.Metadata {
+	metadata := configmeta.Metadata{
+		Version: 1,
+		Base: configmeta.BaseMetadata{
+			Modifiable:  false,
+			Description: "localClash generated base config",
+		},
+		Overlay: configmeta.OverlayMetadata{
+			Modifiable:     true,
+			Packs:          []configmeta.OverlayPack{},
+			VirtualTargets: []configmeta.OverlayVirtualTarget{},
+			RuleProviders:  []configmeta.OverlayRuleProvider{},
+			Rules:          []configmeta.OverlayRule{},
+			Insertion:      "after local safety baseline, before base rules",
+		},
+	}
+	if selection != nil {
+		usedVirtualTargets := map[string]bool{}
+		for _, enabled := range selection.EnabledPack {
+			metadata.Overlay.Packs = append(metadata.Overlay.Packs, configmeta.OverlayPack{
+				ID:     rulespkg.PackCatalogID(enabled.Source, enabled.Pack),
+				Source: enabled.Source,
+				Target: enabled.Target,
+			})
+			if _, ok := selection.VirtualTargets[enabled.Target]; ok {
+				usedVirtualTargets[enabled.Target] = true
+			}
+		}
+		virtualTargetIDs := make([]string, 0, len(usedVirtualTargets))
+		for id := range usedVirtualTargets {
+			virtualTargetIDs = append(virtualTargetIDs, id)
+		}
+		sort.Strings(virtualTargetIDs)
+		for _, id := range virtualTargetIDs {
+			target := selection.VirtualTargets[id]
+			metadata.Overlay.VirtualTargets = append(metadata.Overlay.VirtualTargets, configmeta.OverlayVirtualTarget{
+				ID:         id,
+				Mode:       virtualTargetMode(target),
+				NodeLabels: append([]string(nil), target.Candidates.Labels...),
+			})
+		}
+	}
+	if fragment != nil {
+		providerNames := make([]string, 0, len(fragment.RuleProviders))
+		for name := range fragment.RuleProviders {
+			providerNames = append(providerNames, name)
+		}
+		sort.Strings(providerNames)
+		for _, name := range providerNames {
+			provider := fragment.RuleProviders[name]
+			metadata.Overlay.RuleProviders = append(metadata.Overlay.RuleProviders, configmeta.OverlayRuleProvider{
+				Name:     name,
+				Type:     stringValue(provider["type"]),
+				Behavior: stringValue(provider["behavior"]),
+			})
+		}
+		for _, line := range fragment.Rules {
+			rule, ok := parseRuleSetLine(line)
+			if ok {
+				metadata.Overlay.Rules = append(metadata.Overlay.Rules, rule)
+			}
+		}
+	}
+	return metadata
+}
+
+func virtualTargetMode(target rulespkg.VirtualTarget) string {
+	switch {
+	case target.Auto:
+		return "auto"
+	case target.Manual:
+		return "manual"
+	case target.Direct:
+		return "direct"
+	default:
+		return ""
+	}
+}
+
+func parseRuleSetLine(line string) (configmeta.OverlayRule, bool) {
+	parts := strings.Split(line, ",")
+	if len(parts) < 3 || parts[0] != "RULE-SET" {
+		return configmeta.OverlayRule{}, false
+	}
+	return configmeta.OverlayRule{Type: parts[0], Provider: parts[1], Target: parts[2]}, true
+}
+
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }
 
 func normalizeOptions(opts Options) Options {
