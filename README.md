@@ -160,8 +160,12 @@ only source of truth. `localclash-subscriptions.yaml` contains sensitive
 subscription URLs and must not be committed. If a saved selector in
 `localclash.yaml` still matches after refresh, localClash updates the selected
 nodes, derives `localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`.
-If a selector no longer matches its minimum requirements, the tool reports that
-agent replanning is required and leaves the active generated config unchanged.
+If exact `nodes` were selected and one of those nodes disappears, the tool
+reports `state: stale_exact_nodes` with `missing_nodes` and leaves the active
+generated config unchanged. New nodes are only reported in `node_diff.added`;
+they do not trigger repair. If a regex selector no longer matches its minimum
+requirements, the tool reports that replanning is required and leaves the active
+generated config unchanged.
 
 MCP subscription node inspection tools:
 

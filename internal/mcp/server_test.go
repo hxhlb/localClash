@@ -455,6 +455,77 @@ packs:
 	}
 }
 
+func TestToolsCallSubscriptionsRefreshReportsStaleExactNodes(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	dir := filepath.Dir(paths.subscription)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`proxies:
+  - name: SG 02
+    type: ss
+    server: sg2.example.com
+    password: secret
+`))
+	}))
+	t.Cleanup(server.Close)
+	subConfig := filepath.Join(dir, "localclash-subscriptions.yaml")
+	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
+	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	generated := filepath.Join(dir, "generated", "mihomo.yaml")
+	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
+sources:
+  - id: primary
+    url: %s/sub?token=secret-token
+`, server.URL))
+	writeMCPFile(t, localClashConfig, `version: 1
+proxy_groups:
+  AI:
+    mode: manual
+    nodes:
+      - SG 01
+    selected_nodes:
+      - SG 01
+    reason: User explicitly selected this line.
+packs:
+  - id: blackmatrix7_OpenAI
+    target: AI
+`)
+	writeMCPFile(t, generated, "sentinel: keep\n")
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscriptions_refresh",
+			"arguments": map[string]any{
+				"config":            subConfig,
+				"runtime_dir":       runtimeDir,
+				"merged":            paths.subscription,
+				"localclash_config": localClashConfig,
+				"selection":         filepath.Join(dir, "localclash-packs.yaml"),
+				"policy":            paths.policy,
+				"rules_cache":       paths.cache,
+				"output":            generated,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscriptions_refresh returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	impact := content["localclash_config"].(map[string]any)
+	if impact["state"] != "stale_exact_nodes" || impact["requires_agent_replan"] == true || impact["applied_auto"] == true {
+		t.Fatalf("localclash impact = %+v, want stale exact nodes without agent replan", impact)
+	}
+	missing := impact["missing_nodes"].([]any)
+	if len(missing) != 1 || missing[0] != "SG 01" {
+		t.Fatalf("missing_nodes = %+v, want SG 01", missing)
+	}
+	if got := readMCPFile(t, generated); got != "sentinel: keep\n" {
+		t.Fatalf("generated config was overwritten: %q", got)
+	}
+}
+
 func TestToolsCallSubscriptionNodesListReturnsSafeSummaries(t *testing.T) {
 	subscription := setupMCPSubscriptionNodesFixture(t)
 	resp := callHandle(t, map[string]any{

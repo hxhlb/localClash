@@ -81,6 +81,18 @@ type SubscriptionNode struct {
 	SourceID string `json:"source_id,omitempty"`
 }
 
+type MissingNodesError struct {
+	GroupID string
+	Nodes   []string
+}
+
+func (err *MissingNodesError) Error() string {
+	if len(err.Nodes) == 1 {
+		return fmt.Sprintf("proxy group %q references unknown subscription node %q", err.GroupID, err.Nodes[0])
+	}
+	return fmt.Sprintf("proxy group %q references %d unknown subscription nodes", err.GroupID, len(err.Nodes))
+}
+
 type subscriptionSources struct {
 	Sources []struct {
 		ID string `yaml:"id"`
@@ -345,19 +357,24 @@ func resolveExactNodes(id string, rawNodes []string, nodes []SubscriptionNode) (
 	}
 	seen := map[string]bool{}
 	var selected []string
+	var missing []string
 	for _, raw := range rawNodes {
 		node := strings.TrimSpace(raw)
 		if node == "" {
 			return nil, fmt.Errorf("proxy group %q has an empty node name", id)
 		}
 		if !available[node] {
-			return nil, fmt.Errorf("proxy group %q references unknown subscription node %q", id, node)
+			missing = append(missing, node)
+			continue
 		}
 		if seen[node] {
 			continue
 		}
 		seen[node] = true
 		selected = append(selected, node)
+	}
+	if len(missing) > 0 {
+		return nil, &MissingNodesError{GroupID: id, Nodes: missing}
 	}
 	if len(selected) == 0 {
 		return nil, fmt.Errorf("proxy group %q has no nodes or match selector", id)

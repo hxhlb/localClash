@@ -1,6 +1,7 @@
 package localconfig
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -108,6 +109,32 @@ func TestResolveExactNodesSupportsExplicitHumanChoice(t *testing.T) {
 	want := []string{"HK Dedicated"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected nodes = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveExactNodesReportsMissingNodes(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: HK 01
+    type: ss
+`)
+
+	_, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"SteamHK": {Mode: "manual", Nodes: []string{"HK Dedicated", "HK Backup"}},
+			},
+		},
+		SubscriptionPath: subscriptionPath,
+	})
+	var missing *MissingNodesError
+	if !errors.As(err, &missing) {
+		t.Fatalf("error = %v, want MissingNodesError", err)
+	}
+	want := []string{"HK Dedicated", "HK Backup"}
+	if missing.GroupID != "SteamHK" || !reflect.DeepEqual(missing.Nodes, want) {
+		t.Fatalf("missing = %+v, want group SteamHK nodes %#v", missing, want)
 	}
 }
 

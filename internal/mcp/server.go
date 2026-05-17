@@ -780,11 +780,13 @@ type nodeDiff struct {
 
 type localClashRefreshImpact struct {
 	Exists              bool                         `json:"exists"`
+	State               string                       `json:"state,omitempty"`
 	ConfigPath          string                       `json:"config_path"`
 	Valid               bool                         `json:"valid"`
 	AppliedAuto         bool                         `json:"applied_auto"`
 	RequiresAgentReplan bool                         `json:"requires_agent_replan"`
 	Error               string                       `json:"error,omitempty"`
+	MissingNodes        []string                     `json:"missing_nodes,omitempty"`
 	GeneratedConfig     string                       `json:"generated_config,omitempty"`
 	SelectionPath       string                       `json:"selection_path,omitempty"`
 	ProxyGroups         []localClashProxyGroupImpact `json:"proxy_groups,omitempty"`
@@ -861,11 +863,21 @@ func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subsc
 		RulesCache:          rulesCache,
 	})
 	if err != nil {
+		var missingNodes *localconfig.MissingNodesError
+		if errors.As(err, &missingNodes) {
+			impact.State = "stale_exact_nodes"
+			impact.Error = err.Error()
+			impact.MissingNodes = append([]string{}, missingNodes.Nodes...)
+			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector"}
+			return impact
+		}
+		impact.State = "requires_agent_replan"
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
 		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call config_plan_render", "call config_plan_apply after review"}
 		return impact
 	}
+	impact.State = "auto_applied"
 	impact.Valid = true
 	impact.ProxyGroups = proxyGroupImpacts(config, resolved.Config)
 	tempDir, err := os.MkdirTemp("", "localclash-refresh-render-*")
