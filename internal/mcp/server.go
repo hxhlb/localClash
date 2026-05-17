@@ -248,6 +248,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callPacksList(args)
 	case "packs_get":
 		return s.callPacksGet(args)
+	case "pack_rules_read":
+		return s.callPackRulesRead(ctx, args)
+	case "pack_rules_prefetch":
+		return s.callPackRulesPrefetch(ctx, args)
+	case "pack_rules_query":
+		return s.callPackRulesQuery(ctx, args)
 	case "subscription_nodes_list":
 		return s.callSubscriptionNodesList(args)
 	case "subscription_nodes_search":
@@ -699,13 +705,134 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 			return toolResult{}, fmt.Errorf("pack %q not found in bootstrap packs catalog", id)
 		}
 		detail = rules.AnnotatePackRuntime(detail, runtimeDir)
-		return jsonToolResult(rules.PackGetResult{Pack: detail})
+		return jsonToolResult(rules.PackGetResult{Pack: detail, NextActions: []string{
+			"Use pack_rules_read with this pack id to inspect provider rule contents.",
+			"Use pack_rules_prefetch with candidate pack ids before pack_rules_query when local provider-cache coverage is incomplete.",
+		}})
 	}
 	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, RuntimeDir: in.RuntimeDir, ID: in.ID})
 	if err != nil {
 		return toolResult{}, err
 	}
 	return jsonToolResult(result)
+}
+
+func (s *Server) callPackRulesRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		ID            string `json:"id"`
+		Component     string `json:"component"`
+		Limit         int    `json:"limit"`
+		Refresh       bool   `json:"refresh"`
+		Cache         string `json:"cache"`
+		Sources       string `json:"sources"`
+		ProviderCache string `json:"provider_cache"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := rules.ReadPackRules(ctx, rules.PackRulesReadOptions{
+		SourcesDir:    in.Sources,
+		CacheDir:      in.Cache,
+		ProviderCache: in.ProviderCache,
+		ID:            in.ID,
+		Component:     in.Component,
+		Limit:         in.Limit,
+		Refresh:       in.Refresh,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callPackRulesPrefetch(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		IDs           []string `json:"ids"`
+		Source        string   `json:"source"`
+		Name          string   `json:"name"`
+		Target        string   `json:"target"`
+		Limit         int      `json:"limit"`
+		Refresh       bool     `json:"refresh"`
+		Cache         string   `json:"cache"`
+		Sources       string   `json:"sources"`
+		ProviderCache string   `json:"provider_cache"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := rules.PrefetchPackRules(ctx, rules.PackRulesPrefetchOptions{
+		SourcesDir:    in.Sources,
+		CacheDir:      in.Cache,
+		ProviderCache: in.ProviderCache,
+		IDs:           in.IDs,
+		Source:        in.Source,
+		Name:          in.Name,
+		Target:        in.Target,
+		Limit:         in.Limit,
+		Refresh:       in.Refresh,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callPackRulesQuery(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Query         string `json:"query"`
+		Source        string `json:"source"`
+		Name          string `json:"name"`
+		Target        string `json:"target"`
+		Limit         int    `json:"limit"`
+		Cache         string `json:"cache"`
+		Sources       string `json:"sources"`
+		ProviderCache string `json:"provider_cache"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	result, err := rules.QueryPackRules(ctx, rules.PackRulesQueryOptions{
+		SourcesDir:    in.Sources,
+		CacheDir:      in.Cache,
+		ProviderCache: in.ProviderCache,
+		Query:         in.Query,
+		Source:        in.Source,
+		Name:          in.Name,
+		Target:        in.Target,
+		Limit:         in.Limit,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) applyPackRulesDefaults(cache, sources, providerCache *string) {
+	if s.state == nil {
+		return
+	}
+	if *cache == "" {
+		*cache = s.state.Paths.RulesCacheDir
+	}
+	if *sources == "" {
+		*sources = s.state.Paths.RuleSourcesDir
+	}
+	if *providerCache == "" {
+		runtimeRoot := s.state.Paths.RuntimeRoot
+		if runtimeRoot == "" {
+			runtimeRoot = ".runtime"
+		}
+		*providerCache = filepath.Join(runtimeRoot, "rules", "provider-cache")
+	}
 }
 
 func listPacksFromState(state appinit.RuntimeState, source, name, target string, limit int) (rules.PackListResult, error) {

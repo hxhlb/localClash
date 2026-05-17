@@ -44,7 +44,8 @@ type PackSummary struct {
 }
 
 type PackGetResult struct {
-	Pack PackDetail `json:"pack"`
+	Pack        PackDetail `json:"pack"`
+	NextActions []string   `json:"next_actions,omitempty"`
 }
 
 type PackCatalog struct {
@@ -70,6 +71,7 @@ type ProviderSummary struct {
 	Type     string `json:"type"`
 	Behavior string `json:"behavior"`
 	Format   string `json:"format"`
+	URL      string `json:"-"`
 	Path     string `json:"path,omitempty"`
 }
 
@@ -115,9 +117,16 @@ func GetPack(opts PackGetOptions) (PackGetResult, error) {
 		return PackGetResult{}, err
 	}
 	if detail, ok := catalog.Details[id]; ok {
-		return PackGetResult{Pack: AnnotatePackRuntime(detail, opts.RuntimeDir)}, nil
+		return PackGetResult{Pack: AnnotatePackRuntime(detail, opts.RuntimeDir), NextActions: packRuleNextActions()}, nil
 	}
 	return PackGetResult{}, fmt.Errorf("pack %q not found in pack cache", id)
+}
+
+func packRuleNextActions() []string {
+	return []string{
+		"Use pack_rules_read with this pack id to inspect provider rule contents.",
+		"Use pack_rules_prefetch with candidate pack ids before pack_rules_query when local provider-cache coverage is incomplete.",
+	}
 }
 
 func AnnotatePackRuntime(detail PackDetail, runtimeDir string) PackDetail {
@@ -240,6 +249,7 @@ func packDetail(entry catalogEntry) PackDetail {
 			Type:     "http",
 			Behavior: component.Behavior,
 			Format:   component.Format,
+			URL:      component.URL,
 			Path:     component.Path,
 		})
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", name, target))

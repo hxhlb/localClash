@@ -49,6 +49,7 @@ func Registry() []Tool {
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, localClash state, and OpenClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},
+		{Name: "pack_rules_query", SafetyLevel: SafeRead, Description: "Search locally cached pack provider rules for a domain or keyword. Does not download provider rules; call pack_rules_prefetch first when cache coverage is incomplete."},
 		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry."},
 		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter generated rule pack cache entries."},
 		{Name: "subscription_nodes_list", SafetyLevel: SafeRead, Description: "List safe subscription proxy name/type summaries without exposing connection credentials."},
@@ -59,6 +60,8 @@ func Registry() []Tool {
 		{Name: "config_draft_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config draft by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime. After a successful apply, call config_intent_inspect to verify the durable proxy groups, custom rules, and packs that remain active."},
 		{Name: "config_draft_render", SafetyLevel: SafeWrite, Description: "Render a candidate localClash config draft and Mihomo config from proxy groups, packs, and custom rules."},
 		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config draft."},
+		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
+		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read provider rules for one pack by id, downloading missing provider-cache entries for that pack only."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
@@ -469,6 +472,53 @@ func inputSchemaForTool(name string) map[string]any {
 				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory used to resolve provider paths. Defaults to .runtime/mihomo."},
 			},
 			"required": []string{"id"},
+		}
+	case "pack_rules_read":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":             map[string]any{"type": "string", "description": "Catalog pack id, for example sukkaw_ai or blackmatrix7_OpenAI."},
+				"component":      map[string]any{"type": "string", "description": "Optional component id such as domainset, non_ip, ip, or mixed provider id."},
+				"limit":          map[string]any{"type": "integer", "minimum": 0, "description": "Maximum sample rules per component. Defaults to 120. Use 0 to omit samples."},
+				"refresh":        map[string]any{"type": "boolean", "description": "Force refetching provider rules instead of using provider-cache."},
+				"cache":          map[string]any{"type": "string", "description": "Pack catalog cache directory. Defaults to .runtime/rules/packs."},
+				"sources":        map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be ensured. Defaults to rule-sources."},
+				"provider_cache": map[string]any{"type": "string", "description": "Provider rules cache directory. Defaults to .runtime/rules/provider-cache."},
+			},
+			"required": []string{"id"},
+		}
+	case "pack_rules_prefetch":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"ids":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Explicit pack ids to prefetch."},
+				"source":         map[string]any{"type": "string", "description": "Exact pack source filter, for example sukkaw or blackmatrix7."},
+				"name":           map[string]any{"type": "string", "description": "Case-insensitive substring filter for pack name or id."},
+				"target":         map[string]any{"type": "string", "description": "Exact target filter."},
+				"limit":          map[string]any{"type": "integer", "minimum": 1, "description": "Maximum packs selected by filters. Defaults to 20."},
+				"refresh":        map[string]any{"type": "boolean", "description": "Force refetching provider rules instead of using provider-cache."},
+				"cache":          map[string]any{"type": "string", "description": "Pack catalog cache directory. Defaults to .runtime/rules/packs."},
+				"sources":        map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be ensured. Defaults to rule-sources."},
+				"provider_cache": map[string]any{"type": "string", "description": "Provider rules cache directory. Defaults to .runtime/rules/provider-cache."},
+			},
+		}
+	case "pack_rules_query":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"query":          map[string]any{"type": "string", "description": "Domain or keyword to search in locally cached provider rules, for example huggingface.co."},
+				"source":         map[string]any{"type": "string", "description": "Optional exact pack source filter."},
+				"name":           map[string]any{"type": "string", "description": "Optional case-insensitive pack name/id filter."},
+				"target":         map[string]any{"type": "string", "description": "Optional exact target filter."},
+				"limit":          map[string]any{"type": "integer", "minimum": 1, "description": "Maximum returned matches. Defaults to 20."},
+				"cache":          map[string]any{"type": "string", "description": "Pack catalog cache directory. Defaults to .runtime/rules/packs."},
+				"sources":        map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be ensured. Defaults to rule-sources."},
+				"provider_cache": map[string]any{"type": "string", "description": "Provider rules cache directory. Defaults to .runtime/rules/provider-cache."},
+			},
+			"required": []string{"query"},
 		}
 	default:
 		return map[string]any{

@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -107,6 +107,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"config_intent_inspect":     SafeRead,
 		"config_overlay_inspect":    SafeRead,
 		"nl_file":                   SafeRead,
+		"pack_rules_query":          SafeRead,
 		"packs_get":                 SafeRead,
 		"packs_list":                SafeRead,
 		"subscription_nodes_list":   SafeRead,
@@ -118,6 +119,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"config_draft_render":       SafeWrite,
 		"proxy_group_build":         SafeWrite,
 		"custom_rules_build":        SafeWrite,
+		"pack_rules_prefetch":       SafeWrite,
+		"pack_rules_read":           SafeWrite,
 		"sed_file":                  SafeWrite,
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
@@ -1065,6 +1068,88 @@ func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
 	}
 }
 
+func TestToolsCallPackRulesReadReturnsRuleSamples(t *testing.T) {
+	cache, providerCache, server := setupMCPPackRulesFixture(t, "DOMAIN-SUFFIX,openai.com\nDOMAIN-SUFFIX,chatgpt.com\n")
+	defer server.Close()
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "pack_rules_read",
+			"arguments": map[string]any{
+				"id":             "sukkaw_ai",
+				"cache":          cache,
+				"provider_cache": providerCache,
+				"limit":          1,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("pack_rules_read returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	summary := content["summary"].(map[string]any)
+	if summary["rule_count"] != float64(2) || summary["domain_suffix_count"] != float64(2) {
+		t.Fatalf("summary = %+v, want two domain suffix rules", summary)
+	}
+	components := content["components"].([]any)
+	component := components[0].(map[string]any)
+	if component["available"] != true || component["truncated"] != true {
+		t.Fatalf("component = %+v, want available truncated sample", component)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("pack_rules_read structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallPackRulesPrefetchThenQuery(t *testing.T) {
+	cache, providerCache, server := setupMCPPackRulesFixture(t, "DOMAIN-SUFFIX,huggingface.co\n")
+	defer server.Close()
+	prefetch := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "pack_rules_prefetch",
+			"arguments": map[string]any{
+				"ids":            []string{"sukkaw_ai"},
+				"cache":          cache,
+				"provider_cache": providerCache,
+			},
+		},
+	})
+	if prefetch.Error != nil {
+		t.Fatalf("pack_rules_prefetch returned JSON-RPC error: %+v", prefetch.Error)
+	}
+	query := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "pack_rules_query",
+			"arguments": map[string]any{
+				"query":          "cdn.huggingface.co",
+				"cache":          cache,
+				"provider_cache": providerCache,
+			},
+		},
+	})
+	if query.Error != nil {
+		t.Fatalf("pack_rules_query returned JSON-RPC error: %+v", query.Error)
+	}
+	result := marshalToolResult(t, query.Result)
+	content := result.StructuredContent.(map[string]any)
+	matches := content["matches"].([]any)
+	if len(matches) != 1 || matches[0].(map[string]any)["pack_id"] != "sukkaw_ai" {
+		t.Fatalf("matches = %+v, want sukkaw_ai hit", matches)
+	}
+	if content["cache_complete"] != true {
+		t.Fatalf("content = %+v, want complete local cache", content)
+	}
+}
+
 func TestToolsCallConfigBaseInspectReturnsSerializableResult(t *testing.T) {
 	config := setupMCPInspectConfig(t)
 	resp := callHandle(t, map[string]any{
@@ -1599,6 +1684,46 @@ packs:
 	if err := os.WriteFile(providerPath, []byte("payload:\n  - DOMAIN,openai.com\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func setupMCPPackRulesFixture(t *testing.T, providerBody string) (string, string, *httptest.Server) {
+	t.Helper()
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "packs")
+	providerCache := filepath.Join(dir, "provider-cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(providerBody))
+	}))
+	if err := rules.WritePackCache(cacheDir, rules.PackCache{
+		Version:    1,
+		Source:     "sukkaw",
+		Adapter:    "sukkaw",
+		Renderable: true,
+		Packs: []rules.Pack{
+			{
+				ID:         "ai",
+				Name:       "ai",
+				Target:     "AI",
+				Renderable: true,
+				Components: []rules.Component{
+					{
+						ID:         "non_ip",
+						Behavior:   "classical",
+						Format:     "text",
+						OrderClass: "non_ip",
+						URL:        server.URL + "/ai.txt",
+						Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return cacheDir, providerCache, server
 }
 
 func setupMCPInspectConfig(t *testing.T) string {

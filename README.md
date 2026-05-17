@@ -186,10 +186,21 @@ MCP packs catalog tools:
   `.runtime/rules/packs/*.yaml`.
 - `packs_get`: inspect one pack's target, provider summaries, and rule summary
   before enabling it in a selection file.
+- `pack_rules_read`: read provider rules for a known pack id, downloading only
+  that pack's missing provider-cache entries.
+- `pack_rules_prefetch`: download provider rules for selected candidate packs
+  into `.runtime/rules/provider-cache/`.
+- `pack_rules_query`: search locally cached provider rules for a domain or
+  keyword. It does not download provider rules; if cache coverage is incomplete,
+  prefetch candidate packs first.
 
 Pack cache generation is an internal ensure step of runtime startup and config
 rendering. Agents should not normally need to call a separate rules adapter
-tool.
+tool. Provider rule content is not downloaded for every pack at startup. For a
+question such as "does huggingface.co have a pack?", use `pack_rules_query`;
+if it reports incomplete cache coverage, use `packs_list` to find semantic
+candidates such as `ai`, call `pack_rules_prefetch`, then query again. For a
+question such as "what does sukkaw_ai cover?", call `pack_rules_read` directly.
 
 MCP config inspection tools:
 

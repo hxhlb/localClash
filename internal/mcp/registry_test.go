@@ -36,6 +36,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["packs_get"].SafetyLevel != SafeRead {
 		t.Fatalf("packs_get safety = %q, want %q", byName["packs_get"].SafetyLevel, SafeRead)
 	}
+	if byName["pack_rules_query"].SafetyLevel != SafeRead {
+		t.Fatalf("pack_rules_query safety = %q, want %q", byName["pack_rules_query"].SafetyLevel, SafeRead)
+	}
 	if byName["subscriptions_status"].SafetyLevel != SafeRead {
 		t.Fatalf("subscriptions_status safety = %q, want %q", byName["subscriptions_status"].SafetyLevel, SafeRead)
 	}
@@ -65,6 +68,12 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if byName["custom_rules_build"].SafetyLevel != SafeWrite {
 		t.Fatalf("custom_rules_build safety = %q, want %q", byName["custom_rules_build"].SafetyLevel, SafeWrite)
+	}
+	if byName["pack_rules_prefetch"].SafetyLevel != SafeWrite {
+		t.Fatalf("pack_rules_prefetch safety = %q, want %q", byName["pack_rules_prefetch"].SafetyLevel, SafeWrite)
+	}
+	if byName["pack_rules_read"].SafetyLevel != SafeWrite {
+		t.Fatalf("pack_rules_read safety = %q, want %q", byName["pack_rules_read"].SafetyLevel, SafeWrite)
 	}
 	if byName["sed_file"].SafetyLevel != SafeWrite {
 		t.Fatalf("sed_file safety = %q, want %q", byName["sed_file"].SafetyLevel, SafeWrite)
