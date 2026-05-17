@@ -54,6 +54,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["config_draft_apply"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_draft_apply safety = %q, want %q", byName["config_draft_apply"].SafetyLevel, SafeWrite)
 	}
+	if !strings.Contains(byName["config_draft_apply"].Description, "config_intent_inspect") {
+		t.Fatalf("config_draft_apply description should guide post-apply intent verification: %q", byName["config_draft_apply"].Description)
+	}
 	if byName["config_draft_render"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_draft_render safety = %q, want %q", byName["config_draft_render"].SafetyLevel, SafeWrite)
 	}

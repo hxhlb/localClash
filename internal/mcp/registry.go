@@ -56,7 +56,7 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
-		{Name: "config_draft_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config draft by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime."},
+		{Name: "config_draft_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config draft by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime. After a successful apply, call config_intent_inspect to verify the durable proxy groups, custom rules, and packs that remain active."},
 		{Name: "config_draft_render", SafetyLevel: SafeWrite, Description: "Render a candidate localClash config draft and Mihomo config from proxy groups, packs, and custom rules."},
 		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config draft."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes."},

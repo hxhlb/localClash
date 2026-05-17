@@ -216,7 +216,9 @@ MCP draft-building tools:
   `localclash-packs.yaml`, and `mihomo.yaml` into `.runtime/drafts/<draft-id>/`.
 - `config_draft_apply`: applies a reviewed draft by writing durable
   `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
-  `generated/mihomo.yaml`.
+  `generated/mihomo.yaml`. After a successful apply, call
+  `config_intent_inspect` to verify the durable proxy groups, custom rules, and
+  packs that remain active.
 
 For pack routing such as "Steam through HK", an agent should first call
 `config_intent_inspect` to discover reusable proxy groups and existing intent,
@@ -238,6 +240,9 @@ not start or restart Mihomo; use `run_runtime` for that confirmed step. If an
 agent wants to preserve existing local intent, it must first inspect current
 local state and submit the full desired config, including retained packs,
 custom rules, and proxy groups.
+The normal reviewed-change loop is:
+`config_intent_inspect` → `config_draft_render` → `config_draft_apply` →
+`config_intent_inspect`.
 
 MCP runtime tool:
 
