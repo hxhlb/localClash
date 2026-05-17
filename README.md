@@ -27,6 +27,9 @@ localClash should expose:
 - Router adapters for OpenClash workflows, with write operations gated by
   explicit user confirmation.
 
+New users should start with [First Use](docs/first-use.md) for the shortest
+path from a fresh checkout to a running local Mihomo runtime.
+
 ## Main Bootstrap
 
 Every localClash process builds a shared runtime bootstrap state before serving
