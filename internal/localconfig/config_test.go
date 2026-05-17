@@ -83,6 +83,59 @@ func TestResolveNameRegexEnforcesMin(t *testing.T) {
 	}
 }
 
+func TestResolveExactNodesSupportsExplicitHumanChoice(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: HK 01
+    type: ss
+  - name: HK Dedicated
+    type: ss
+`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"SteamHK": {Mode: "manual", Nodes: []string{"HK Dedicated"}},
+			},
+		},
+		SubscriptionPath: subscriptionPath,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	got := resolved.Config.ProxyGroups["SteamHK"].SelectedNodes
+	want := []string{"HK Dedicated"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected nodes = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveProxyGroupRejectsAmbiguousMatchAndNodes(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: HK 01
+    type: ss
+`)
+
+	_, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"SteamHK": {
+					Mode:  "manual",
+					Match: &Match{Type: "name_regex", Pattern: "HK"},
+					Nodes: []string{"HK 01"},
+				},
+			},
+		},
+		SubscriptionPath: subscriptionPath,
+	})
+	if err == nil {
+		t.Fatal("Resolve succeeded, want ambiguous match/nodes error")
+	}
+}
+
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

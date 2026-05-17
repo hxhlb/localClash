@@ -280,6 +280,9 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 
 func resolveProxyGroup(id string, group ProxyGroup, nodes []SubscriptionNode) ([]string, error) {
 	if group.Match != nil {
+		if len(group.Nodes) > 0 {
+			return nil, fmt.Errorf("proxy group %q must use either match or nodes, not both", id)
+		}
 		return resolveMatch(id, *group.Match, nodes)
 	}
 	return resolveExactNodes(id, group.Nodes, nodes)

@@ -200,7 +200,7 @@ can distinguish immutable base config from future replaceable overlay config.
 MCP config plan tools:
 
 - `config_plan_render`: accepts a complete desired localClash config, including
-  proxy groups with `name_regex` selectors or exact fallback `nodes`, and
+  proxy groups with either `name_regex` selectors or exact `nodes`, and
   renders candidate `localclash.yaml`, derived `localclash-packs.yaml`, and
   `mihomo.yaml` into `.runtime/plans/<plan-id>/`.
 - `config_plan_apply`: applies a reviewed plan by writing durable
@@ -208,11 +208,12 @@ MCP config plan tools:
   `generated/mihomo.yaml`.
 
 For regional routing requests such as "Steam through HK", an agent should call
-`subscription_nodes_search`, review the returned names, pass a conservative
-`overlay.proxy_groups[].match` such as `type: name_regex` with a short
-`reason`, and point `overlay.packs[].target` at that proxy group id. Regex
-selectors are executable local intent; exact `nodes` remain available only as an
-escape hatch. Name matches are still hints, not proof of network egress region.
+`subscription_nodes_search`, review the returned names, then choose one of two
+first-class modes. Use `overlay.proxy_groups[].match` such as
+`type: name_regex` when the user intent is durable category selection, for
+example "Hong Kong nodes". Use exact `overlay.proxy_groups[].nodes` when the
+user explicitly asks for a specific line. Name matches are still hints, not
+proof of network egress region.
 
 The plan renderer writes candidate artifacts and `summary.json` under the plan
 directory. It does not overwrite active generated files, start or restart

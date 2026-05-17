@@ -216,7 +216,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"id":       map[string]any{"type": "string", "description": "Proxy group id referenced by packs[].target, for example SteamHK."},
 				"match":    matchIntent,
-				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names. Prefer match for refresh-resilient groups; use nodes for explicit locking."},
+				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
 				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test."},
 				"reason":   map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs Agent involvement."},
 				"boundary": map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
