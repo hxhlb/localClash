@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type PackListOptions struct {
@@ -59,7 +57,6 @@ type PackDetail struct {
 	Source        string            `json:"source"`
 	Name          string            `json:"name"`
 	Target        string            `json:"target"`
-	CatalogPath   string            `json:"catalog_path,omitempty"`
 	Renderable    bool              `json:"renderable"`
 	Reason        string            `json:"reason,omitempty"`
 	Providers     []ProviderSummary `json:"providers"`
@@ -69,21 +66,16 @@ type PackDetail struct {
 }
 
 type ProviderSummary struct {
-	Name                string `json:"name"`
-	Type                string `json:"type"`
-	Behavior            string `json:"behavior"`
-	Format              string `json:"format"`
-	URL                 string `json:"url"`
-	Path                string `json:"path,omitempty"`
-	ProviderPath        string `json:"provider_path,omitempty"`
-	ResolvedRuntimePath string `json:"resolved_runtime_path,omitempty"`
-	ProviderFileExists  bool   `json:"provider_file_exists"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Behavior string `json:"behavior"`
+	Format   string `json:"format"`
+	Path     string `json:"path,omitempty"`
 }
 
 type catalogEntry struct {
-	Cache       PackCache
-	Pack        Pack
-	CatalogPath string
+	Cache PackCache
+	Pack  Pack
 }
 
 func ListPacks(opts PackListOptions) (PackListResult, error) {
@@ -134,19 +126,7 @@ func AnnotatePackRuntime(detail PackDetail, runtimeDir string) PackDetail {
 		runtimeDir = ".runtime/mihomo"
 	}
 	for i, provider := range detail.Providers {
-		providerPath := provider.ProviderPath
-		if providerPath == "" {
-			providerPath = provider.Path
-		}
-		provider.ProviderPath = providerPath
-		resolved := resolveProviderRuntimePath(runtimeDir, providerPath)
-		provider.ResolvedRuntimePath = resolved
-		provider.ProviderFileExists = false
-		if resolved != "" {
-			if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
-				provider.ProviderFileExists = true
-			}
-		}
+		provider.Path = resolveProviderRuntimePath(runtimeDir, provider.Path)
 		detail.Providers[i] = provider
 	}
 	return detail
@@ -191,7 +171,7 @@ func ResolvePackRef(cacheDir, id string) (PackRef, error) {
 
 func loadCatalogEntries(cacheDir string) ([]catalogEntry, error) {
 	normalized := NormalizeOptions(Options{CacheDir: cacheDir})
-	cacheFiles, err := os.ReadDir(normalized.CacheDir)
+	caches, err := LoadPackCaches(normalized.CacheDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("pack cache directory %q does not exist; run rules adapt first", normalized.CacheDir)
@@ -199,23 +179,15 @@ func loadCatalogEntries(cacheDir string) ([]catalogEntry, error) {
 		return nil, err
 	}
 
+	sources := make([]string, 0, len(caches))
+	for source := range caches {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+
 	var entries []catalogEntry
-	for _, file := range cacheFiles {
-		if file.IsDir() || !strings.HasSuffix(file.Name(), ".yaml") {
-			continue
-		}
-		catalogPath := filepath.Join(normalized.CacheDir, file.Name())
-		data, err := os.ReadFile(catalogPath)
-		if err != nil {
-			return nil, err
-		}
-		var cache PackCache
-		if err := yaml.Unmarshal(data, &cache); err != nil {
-			return nil, fmt.Errorf("%s: %w", catalogPath, err)
-		}
-		if cache.Source == "" {
-			return nil, fmt.Errorf("%s: source is required", catalogPath)
-		}
+	for _, source := range sources {
+		cache := caches[source]
 		packs := append([]Pack(nil), cache.Packs...)
 		sort.Slice(packs, func(i, j int) bool {
 			left, right := packDisplayName(packs[i]), packDisplayName(packs[j])
@@ -225,7 +197,7 @@ func loadCatalogEntries(cacheDir string) ([]catalogEntry, error) {
 			return left < right
 		})
 		for _, pack := range packs {
-			entries = append(entries, catalogEntry{Cache: cache, Pack: pack, CatalogPath: catalogPath})
+			entries = append(entries, catalogEntry{Cache: cache, Pack: pack})
 		}
 	}
 	if len(entries) == 0 {
@@ -264,13 +236,11 @@ func packDetail(entry catalogEntry) PackDetail {
 	for _, component := range entry.Pack.Components {
 		name := providerName(entry.Cache.Source, entry.Pack.ID, component.ID)
 		providers = append(providers, ProviderSummary{
-			Name:         name,
-			Type:         "http",
-			Behavior:     component.Behavior,
-			Format:       component.Format,
-			URL:          component.URL,
-			Path:         component.Path,
-			ProviderPath: component.Path,
+			Name:     name,
+			Type:     "http",
+			Behavior: component.Behavior,
+			Format:   component.Format,
+			Path:     component.Path,
 		})
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", name, target))
 	}
@@ -279,7 +249,6 @@ func packDetail(entry catalogEntry) PackDetail {
 		Source:        entry.Cache.Source,
 		Name:          packDisplayName(entry.Pack),
 		Target:        entry.Pack.Target,
-		CatalogPath:   filepath.ToSlash(entry.CatalogPath),
 		Renderable:    entry.Pack.Renderable,
 		Reason:        entry.Pack.Reason,
 		Providers:     providers,
@@ -296,6 +265,11 @@ func resolveProviderRuntimePath(runtimeDir, providerPath string) string {
 	}
 	if filepath.IsAbs(providerPath) {
 		return filepath.ToSlash(filepath.Clean(providerPath))
+	}
+	cleanRuntime := filepath.ToSlash(filepath.Clean(runtimeDir))
+	cleanProvider := filepath.ToSlash(filepath.Clean(providerPath))
+	if cleanProvider == cleanRuntime || strings.HasPrefix(cleanProvider, cleanRuntime+"/") {
+		return cleanProvider
 	}
 	return filepath.ToSlash(filepath.Clean(filepath.Join(runtimeDir, providerPath)))
 }

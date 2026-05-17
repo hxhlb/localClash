@@ -616,19 +616,18 @@ func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	if pack["id"] != "blackmatrix7_OpenAI" {
 		t.Fatalf("pack id = %v, want blackmatrix7_OpenAI", pack["id"])
 	}
-	if pack["catalog_path"] != ".runtime/rules/packs/blackmatrix7.yaml" {
-		t.Fatalf("catalog path = %v", pack["catalog_path"])
+	if _, ok := pack["catalog_path"]; ok {
+		t.Fatalf("pack contains catalog_path: %+v", pack)
 	}
 	providers := pack["providers"].([]any)
 	provider := providers[0].(map[string]any)
-	if provider["provider_path"] != "./rule-packs/blackmatrix7/OpenAI.yaml" {
-		t.Fatalf("provider path = %v", provider["provider_path"])
+	if provider["path"] != ".runtime/mihomo/rule-packs/blackmatrix7/OpenAI.yaml" {
+		t.Fatalf("provider path = %v", provider["path"])
 	}
-	if provider["resolved_runtime_path"] != ".runtime/mihomo/rule-packs/blackmatrix7/OpenAI.yaml" {
-		t.Fatalf("resolved runtime path = %v", provider["resolved_runtime_path"])
-	}
-	if provider["provider_file_exists"] != true {
-		t.Fatalf("provider file exists = %v, want true", provider["provider_file_exists"])
+	for _, key := range []string{"url", "provider_path", "resolved_runtime_path", "provider_file_exists"} {
+		if _, ok := provider[key]; ok {
+			t.Fatalf("provider contains %s: %+v", key, provider)
+		}
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("packs_get structured content is not serializable: %v", err)
@@ -641,13 +640,12 @@ func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
 			CatalogAvailable: true,
 			Details: map[string]rules.PackDetail{
 				"blackmatrix7_OpenAI": {
-					ID:          "blackmatrix7_OpenAI",
-					Source:      "blackmatrix7",
-					Name:        "OpenAI",
-					Target:      "AI",
-					CatalogPath: ".runtime/rules/packs/blackmatrix7.yaml",
+					ID:     "blackmatrix7_OpenAI",
+					Source: "blackmatrix7",
+					Name:   "OpenAI",
+					Target: "AI",
 					Providers: []rules.ProviderSummary{
-						{Name: "blackmatrix7_OpenAI", Path: "./rule-packs/blackmatrix7/OpenAI.yaml", ProviderPath: "./rule-packs/blackmatrix7/OpenAI.yaml"},
+						{Name: "blackmatrix7_OpenAI", Path: "./rule-packs/blackmatrix7/OpenAI.yaml"},
 					},
 				},
 			},
@@ -673,8 +671,11 @@ func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
 	}
 	providers := pack["providers"].([]any)
 	provider := providers[0].(map[string]any)
-	if provider["resolved_runtime_path"] != ".runtime/mihomo/rule-packs/blackmatrix7/OpenAI.yaml" {
-		t.Fatalf("provider = %+v, want resolved runtime path", provider)
+	if provider["path"] != ".runtime/mihomo/rule-packs/blackmatrix7/OpenAI.yaml" {
+		t.Fatalf("provider = %+v, want runtime-local path", provider)
+	}
+	if _, ok := provider["provider_file_exists"]; ok {
+		t.Fatalf("provider contains provider_file_exists: %+v", provider)
 	}
 }
 
