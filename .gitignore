@@ -6,6 +6,7 @@ degyax.yaml
 localclash.yaml
 localclash-packs.yaml
 localclash-subscriptions.yaml
+mihomo-preset.yaml
 *.secret.yaml
 *.local.yaml
 subscription*.yaml

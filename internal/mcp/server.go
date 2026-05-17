@@ -23,6 +23,7 @@ import (
 	"localclash/internal/fileops"
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
+	"localclash/internal/runtimepreset"
 	"localclash/internal/subscriptions"
 )
 
@@ -264,6 +265,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionNodesSearch(args)
 	case "runtime_status":
 		return s.callRuntimeStatus(args)
+	case "runtime_preset_status":
+		return s.callRuntimePresetStatus(args)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "tools_list":
@@ -276,6 +279,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callProxyGroupBuild(args)
 	case "custom_rules_build":
 		return callCustomRulesBuild(args)
+	case "runtime_preset_configure":
+		return s.callRuntimePresetConfigure(args)
 	case "config_draft_apply":
 		return s.callConfigDraftApply(ctx, args)
 	case "config_draft_render":
@@ -530,6 +535,7 @@ func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage
 		Policy              string                   `json:"policy"`
 		Mode                string                   `json:"mode"`
 		RulesCache          string                   `json:"rules_cache"`
+		PresetConfig        string                   `json:"preset_config"`
 		OutputDir           string                   `json:"drafts_dir"`
 		ConfigPath          string                   `json:"config"`
 		SubscriptionConfig  string                   `json:"subscription_config"`
@@ -554,6 +560,9 @@ func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
 		}
+		if in.PresetConfig == "" {
+			in.PresetConfig = s.state.Paths.PresetPath
+		}
 		if in.SubscriptionConfig == "" {
 			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
 		}
@@ -569,6 +578,7 @@ func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage
 		Policy:              in.Policy,
 		Mode:                in.Mode,
 		RulesCache:          in.RulesCache,
+		PresetPath:          in.PresetConfig,
 		OutputDir:           in.OutputDir,
 		ConfigPath:          in.ConfigPath,
 		SubscriptionConfig:  in.SubscriptionConfig,
@@ -591,6 +601,7 @@ func (s *Server) callConfigDraftApply(ctx context.Context, args json.RawMessage)
 		Policy              string `json:"policy"`
 		Mode                string `json:"mode"`
 		RulesCache          string `json:"rules_cache"`
+		PresetConfig        string `json:"preset_config"`
 		ConfigPath          string `json:"config"`
 		SubscriptionConfig  string `json:"subscription_config"`
 		SubscriptionRuntime string `json:"subscription_runtime"`
@@ -611,6 +622,9 @@ func (s *Server) callConfigDraftApply(ctx context.Context, args json.RawMessage)
 	if s.state != nil {
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
+		}
+		if in.PresetConfig == "" {
+			in.PresetConfig = s.state.Paths.PresetPath
 		}
 		if in.SubscriptionConfig == "" {
 			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
@@ -641,6 +655,7 @@ func (s *Server) callConfigDraftApply(ctx context.Context, args json.RawMessage)
 		Policy:              in.Policy,
 		Mode:                in.Mode,
 		RulesCache:          in.RulesCache,
+		PresetPath:          in.PresetConfig,
 		ConfigPath:          in.ConfigPath,
 		SubscriptionConfig:  in.SubscriptionConfig,
 		SubscriptionRuntime: in.SubscriptionRuntime,
@@ -982,6 +997,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		Selection        string   `json:"selection"`
 		Policy           string   `json:"policy"`
 		RulesCache       string   `json:"rules_cache"`
+		PresetConfig     string   `json:"preset_config"`
 		Output           string   `json:"output"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
@@ -1005,6 +1021,9 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		}
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
+		}
+		if in.PresetConfig == "" {
+			in.PresetConfig = s.state.Paths.PresetPath
 		}
 		if in.Output == "" {
 			in.Output = s.state.Paths.GeneratedConfig
@@ -1043,7 +1062,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		RefreshResult: result,
 		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
 	}
-	impact := s.evaluateLocalClashAfterRefresh(in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.Output)
+	impact := s.evaluateLocalClashAfterRefresh(in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.PresetConfig, in.Output)
 	if impact.Exists {
 		toolResultValue.LocalClash = &impact
 	}
@@ -1131,7 +1150,7 @@ func buildNodeDiff(before, after []localconfig.SubscriptionNode) nodeDiff {
 	return diff
 }
 
-func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, outputPath string) localClashRefreshImpact {
+func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string) localClashRefreshImpact {
 	impact := localClashRefreshImpact{ConfigPath: configPath, GeneratedConfig: outputPath, SelectionPath: selectionPath}
 	config, err := localconfig.Load(configPath)
 	if err != nil {
@@ -1188,6 +1207,7 @@ func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subsc
 		OutputPath:         outputPath,
 		PacksSelectionPath: tempSelection,
 		RulesCacheDir:      rulesCache,
+		PresetPath:         presetPath,
 		Force:              true,
 	})
 	if err != nil {
@@ -1343,6 +1363,7 @@ func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
 		Force          bool   `json:"force"`
 		PacksSelection string `json:"packs_selection"`
 		RulesCache     string `json:"rules_cache"`
+		PresetConfig   string `json:"preset_config"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
@@ -1355,6 +1376,7 @@ func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
 		Force:              in.Force,
 		PacksSelectionPath: in.PacksSelection,
 		RulesCacheDir:      in.RulesCache,
+		PresetPath:         in.PresetConfig,
 	}
 	if s.state != nil {
 		if opts.SourcePath == "" {
@@ -1368,6 +1390,9 @@ func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
 		}
 		if opts.RulesCacheDir == "" {
 			opts.RulesCacheDir = s.state.Paths.RulesCacheDir
+		}
+		if opts.PresetPath == "" {
+			opts.PresetPath = s.state.Paths.PresetPath
 		}
 		if opts.OutputPath == s.state.Paths.GeneratedConfig && s.state.Config.Rendered {
 			opts.Force = true
@@ -1440,6 +1465,7 @@ func (s *Server) ensureRunnableConfig(configPath string) error {
 		PolicyPath:         s.state.Paths.PolicyPath,
 		OutputPath:         configPath,
 		RulesCacheDir:      s.state.Paths.RulesCacheDir,
+		PresetPath:         s.state.Paths.PresetPath,
 		Force:              true,
 		PacksSelectionPath: "",
 	}
@@ -1471,6 +1497,92 @@ func runtimeErrorResult(message string) map[string]any {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func (s *Server) callRuntimePresetStatus(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config string `json:"config"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Config == "" {
+		in.Config = s.state.Paths.PresetPath
+	}
+	status, err := runtimepreset.StatusFor(in.Config)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(status)
+}
+
+func (s *Server) callRuntimePresetConfigure(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config string `json:"config"`
+		Preset string `json:"preset"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Config == "" {
+		in.Config = s.state.Paths.PresetPath
+	}
+	status, err := runtimepreset.Configure(in.Config, in.Preset)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result := runtimePresetConfigureResult{
+		Status: status,
+		NextActions: []string{
+			"call runtime_status to inspect whether Mihomo is already running",
+			"call run_runtime only after user confirmation if the runtime should start with the updated generated config",
+		},
+	}
+	if s.state != nil {
+		renderResult, renderErr := s.renderGeneratedConfigWithPreset(in.Config)
+		if renderErr != nil {
+			result.RenderError = renderErr.Error()
+			result.NextActions = []string{
+				"call subscriptions_status",
+				"call subscriptions_refresh if subscription.yaml is unavailable",
+				"call config_draft_apply after routing intent changes, or rerun runtime_preset_configure after subscription state is ready",
+			}
+		} else if renderResult != nil {
+			result.Rendered = true
+			result.Render = renderResult
+		}
+	}
+	return jsonToolResult(result)
+}
+
+type runtimePresetConfigureResult struct {
+	runtimepreset.Status
+	Rendered    bool                 `json:"rendered"`
+	Render      *configrender.Result `json:"render,omitempty"`
+	RenderError string               `json:"render_error,omitempty"`
+	NextActions []string             `json:"next_actions"`
+}
+
+func (s *Server) renderGeneratedConfigWithPreset(presetPath string) (*configrender.Result, error) {
+	if s.state == nil || !fileExists(s.state.Paths.SubscriptionPath) {
+		return nil, fmt.Errorf("effective subscription is unavailable; call subscriptions_refresh before rendering generated config")
+	}
+	opts := configrender.Options{
+		SourcePath:    s.state.Paths.SubscriptionPath,
+		PolicyPath:    s.state.Paths.PolicyPath,
+		OutputPath:    s.state.Paths.GeneratedConfig,
+		RulesCacheDir: s.state.Paths.RulesCacheDir,
+		PresetPath:    presetPath,
+		Force:         true,
+	}
+	if s.state.Paths.PacksSelectionPath != "" && fileExists(s.state.Paths.PacksSelectionPath) {
+		opts.PacksSelectionPath = s.state.Paths.PacksSelectionPath
+	}
+	result, err := configrender.Render(opts)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {

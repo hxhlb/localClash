@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_preset_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_preset_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -113,6 +113,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscription_nodes_list":   SafeRead,
 		"subscription_nodes_search": SafeRead,
 		"runtime_status":            SafeRead,
+		"runtime_preset_status":     SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
 		"config_draft_apply":        SafeWrite,
@@ -121,6 +122,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"custom_rules_build":        SafeWrite,
 		"pack_rules_prefetch":       SafeWrite,
 		"pack_rules_read":           SafeWrite,
+		"runtime_preset_configure":  SafeWrite,
 		"sed_file":                  SafeWrite,
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
@@ -179,6 +181,90 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 	}
 	if !strings.Contains(structured.ClientNamingNote, "localclash_doctor") {
 		t.Fatalf("client naming note = %q, want OpenWebUI-style prefix example", structured.ClientNamingNote)
+	}
+}
+
+func TestToolsCallRuntimePresetConfigureAndStatus(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mihomo-preset.yaml")
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{PresetPath: path},
+	})
+
+	configure := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "runtime_preset_configure",
+			"arguments": map[string]any{"preset": "router"},
+		},
+	})
+	if configure.Error != nil {
+		t.Fatalf("runtime_preset_configure returned JSON-RPC error: %+v", configure.Error)
+	}
+	configureResult := marshalToolResult(t, configure.Result)
+	configured := configureResult.StructuredContent.(map[string]any)
+	if configured["active"] != "router" || configured["exists"] != true {
+		t.Fatalf("configure content = %+v, want router active and exists", configured)
+	}
+
+	statusResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "runtime_preset_status",
+			"arguments": map[string]any{},
+		},
+	})
+	if statusResp.Error != nil {
+		t.Fatalf("runtime_preset_status returned JSON-RPC error: %+v", statusResp.Error)
+	}
+	statusResult := marshalToolResult(t, statusResp.Result)
+	status := statusResult.StructuredContent.(map[string]any)
+	if status["active"] != "router" || status["path"] != path {
+		t.Fatalf("status = %+v, want router active at configured path", status)
+	}
+}
+
+func TestToolsCallRuntimePresetConfigureRerendersGeneratedConfig(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	presetPath := filepath.Join(filepath.Dir(paths.subscription), "mihomo-preset.yaml")
+	outputPath := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionPath:    paths.subscription,
+			PolicyPath:          paths.policy,
+			RulesCacheDir:       paths.cache,
+			PacksSelectionPath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-packs.yaml"),
+			GeneratedConfig:     outputPath,
+			PresetPath:          presetPath,
+			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.yaml"),
+			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
+		},
+	})
+
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "runtime_preset_configure",
+			"arguments": map[string]any{"preset": "router"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("runtime_preset_configure returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["active"] != "router" || content["rendered"] != true {
+		t.Fatalf("configure content = %+v, want router active and rendered", content)
+	}
+	generated := readMCPFile(t, outputPath)
+	if !strings.Contains(generated, "mixed-port: 7893") || !strings.Contains(generated, "redir-port: 7892") {
+		t.Fatalf("generated config did not apply router preset:\n%s", generated)
 	}
 }
 

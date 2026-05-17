@@ -66,6 +66,7 @@ Flags for config render:
                  packs selection YAML; optional
   --rules-cache string
                  runtime pack cache directory (default ".runtime/rules/packs")
+  --preset string  runtime preset YAML (default "mihomo-preset.yaml")
   --force          overwrite output if it exists
 
 Flags for rules adapt:
@@ -278,6 +279,7 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 	fs.StringVar(&opts.OutputPath, "output", state.Paths.GeneratedConfig, "generated Mihomo config path")
 	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection YAML; optional")
 	fs.StringVar(&opts.RulesCacheDir, "rules-cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
+	fs.StringVar(&opts.PresetPath, "preset", state.Paths.PresetPath, "runtime preset YAML")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 
 	if err := fs.Parse(args); err != nil {
@@ -295,7 +297,7 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 		return err
 	}
 
-	fmt.Printf("rendered %s mode config to %s (%d proxies, %d rules)\n", result.Mode, result.OutputPath, result.ProxyCount, result.RuleCount)
+	fmt.Printf("rendered %s mode/%s preset config to %s (%d proxies, %d rules)\n", result.Mode, result.Preset, result.OutputPath, result.ProxyCount, result.RuleCount)
 	return nil
 }
 

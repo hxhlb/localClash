@@ -10,6 +10,7 @@ import (
 
 	"localclash/internal/configmeta"
 	rulespkg "localclash/internal/rules"
+	"localclash/internal/runtimepreset"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,12 +22,14 @@ type Options struct {
 	OutputPath         string
 	PacksSelectionPath string
 	RulesCacheDir      string
+	PresetPath         string
 	Force              bool
 }
 
 type Result struct {
 	OutputPath string
 	Mode       string
+	Preset     string
 	ProxyCount int
 	RuleCount  int
 }
@@ -114,6 +117,10 @@ func Render(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	presetName, preset, _, err := runtimepreset.ActivePreset(opts.PresetPath)
+	if err != nil {
+		return Result{}, err
+	}
 
 	proxies, err := readProxies(source)
 	if err != nil {
@@ -147,6 +154,7 @@ func Render(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	runtimepreset.ApplyToConfig(rendered, preset)
 	rendered[configmeta.Key] = buildLocalClashMetadata(selection, fragment)
 
 	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
@@ -163,6 +171,7 @@ func Render(opts Options) (Result, error) {
 	return Result{
 		OutputPath: opts.OutputPath,
 		Mode:       modeName,
+		Preset:     presetName,
 		ProxyCount: len(proxyNames),
 		RuleCount:  len(rendered["rules"].([]string)),
 	}, nil
@@ -281,6 +290,9 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.RulesCacheDir == "" {
 		opts.RulesCacheDir = ".runtime/rules/packs"
+	}
+	if opts.PresetPath == "" {
+		opts.PresetPath = runtimepreset.DefaultPath
 	}
 	return opts
 }

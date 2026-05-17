@@ -17,6 +17,7 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	writeResetFile(t, "localclash.yaml", "version: 1\n")
 	writeResetFile(t, "localclash-packs.yaml", "version: 1\n")
 	writeResetFile(t, "localclash-subscriptions.yaml", "sources: []\n")
+	writeResetFile(t, "mihomo-preset.yaml", "active: router\n")
 	writeResetFile(t, "subscription.yaml", "proxies: []\n")
 	writeResetFile(t, "subscription-backup.yaml", "proxies: []\n")
 
@@ -25,10 +26,10 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.DryRun || len(result.Deleted) != 7 {
-		t.Fatalf("result = %+v, want dry-run with seven delete targets", result)
+	if !result.DryRun || len(result.Deleted) != 8 {
+		t.Fatalf("result = %+v, want dry-run with eight delete targets", result)
 	}
-	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-subscriptions.yaml", "subscription.yaml", "subscription-backup.yaml"} {
+	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-subscriptions.yaml", "mihomo-preset.yaml", "subscription.yaml", "subscription-backup.yaml"} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should remain after dry-run: %v", path, err)
 		}
@@ -49,13 +50,14 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	writeResetFile(t, "localclash.yaml", "version: 1\n")
 	writeResetFile(t, "localclash-packs.yaml", "version: 1\n")
 	writeResetFile(t, "localclash-subscriptions.yaml", "sources: []\n")
+	writeResetFile(t, "mihomo-preset.yaml", "active: router\n")
 	writeResetFile(t, "subscription.yaml", "proxies: []\n")
 
 	var out bytes.Buffer
 	if _, err := Run(Options{Yes: true, Out: &out}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-packs.yaml", "localclash-subscriptions.yaml", "subscription.yaml"} {
+	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-packs.yaml", "localclash-subscriptions.yaml", "mihomo-preset.yaml", "subscription.yaml"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s should be deleted, err=%v", path, err)
 		}

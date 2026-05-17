@@ -16,6 +16,7 @@ import (
 	"localclash/internal/configrender"
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
+	"localclash/internal/runtimepreset"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,6 +27,7 @@ type Options struct {
 	Policy              string
 	Mode                string
 	RulesCache          string
+	PresetPath          string
 	OutputDir           string
 	ConfigPath          string
 	SubscriptionConfig  string
@@ -45,6 +47,7 @@ type ApplyOptions struct {
 	Policy              string
 	Mode                string
 	RulesCache          string
+	PresetPath          string
 	ConfigPath          string
 	SubscriptionConfig  string
 	SubscriptionRuntime string
@@ -98,6 +101,7 @@ type PlanInputs struct {
 	Policy              string `json:"policy"`
 	Mode                string `json:"mode,omitempty"`
 	RulesCache          string `json:"rules_cache"`
+	PresetPath          string `json:"preset_config"`
 	SubscriptionConfig  string `json:"subscription_config,omitempty"`
 	SubscriptionRuntime string `json:"subscription_runtime,omitempty"`
 }
@@ -213,6 +217,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		OutputPath:         outputPath,
 		PacksSelectionPath: selectionPath,
 		RulesCacheDir:      opts.RulesCache,
+		PresetPath:         opts.PresetPath,
 		Force:              true,
 	}); err != nil {
 		return Result{}, err
@@ -232,6 +237,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 			Policy:              opts.Policy,
 			Mode:                opts.Mode,
 			RulesCache:          opts.RulesCache,
+			PresetPath:          opts.PresetPath,
 			SubscriptionConfig:  opts.SubscriptionConfig,
 			SubscriptionRuntime: opts.SubscriptionRuntime,
 		},
@@ -307,6 +313,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		OutputPath:         tempOutput,
 		PacksSelectionPath: tempSelection,
 		RulesCacheDir:      opts.RulesCache,
+		PresetPath:         opts.PresetPath,
 		Force:              true,
 	})
 	if err != nil {
@@ -366,6 +373,9 @@ func normalizeOptions(opts Options) Options {
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
 	}
+	if opts.PresetPath == "" {
+		opts.PresetPath = runtimepreset.DefaultPath
+	}
 	if opts.OutputDir == "" {
 		opts.OutputDir = filepath.Join(".runtime", "drafts")
 	}
@@ -402,6 +412,9 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
+	}
+	if opts.PresetPath == "" {
+		opts.PresetPath = runtimepreset.DefaultPath
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "localclash.yaml"
@@ -455,6 +468,9 @@ func applyPlanInputDefaults(opts ApplyOptions, inputs PlanInputs) ApplyOptions {
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = inputs.RulesCache
+	}
+	if opts.PresetPath == "" {
+		opts.PresetPath = inputs.PresetPath
 	}
 	if opts.SubscriptionConfig == "" {
 		opts.SubscriptionConfig = inputs.SubscriptionConfig

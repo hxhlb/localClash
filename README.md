@@ -216,6 +216,20 @@ MCP config inspection tools:
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from future replaceable overlay config.
 
+MCP runtime preset tools:
+
+- `runtime_preset_status`: inspect the active Mihomo preset and a safe summary.
+- `runtime_preset_configure`: switch the active preset in `mihomo-preset.yaml`
+  to `normal` or `router`, then rerender `generated/mihomo.yaml` when the
+  effective subscription is available. It does not start or restart Mihomo and
+  does not expose individual DNS, TUN, or firewall switches.
+
+`normal` is the standalone local proxy preset and matches the original generated
+Mihomo shell. `router` is a transparent-proxy preset based on the local
+OpenClash redir-host-mix reference. Advanced users can edit
+`mihomo-preset.yaml` directly, or ask an agent to use `nl_file` and `sed_file`
+for explicit line-based edits, but the product MCP path is preset switching.
+
 MCP draft-building tools:
 
 - `proxy_group_build`: build and validate a reusable proxy group target from a
@@ -395,7 +409,9 @@ go run . config render --force
 
 The default render path is `generated/mihomo.yaml`. The renderer treats the
 subscription as a proxy source and owns the runtime rules, rule providers, and
-proxy groups locally. For MCP-managed routing changes, prefer
+proxy groups locally. It also applies the active `mihomo-preset.yaml` runtime
+preset; use `go run . config render --preset <path> --force` to test an
+alternate preset file. For MCP-managed routing changes, prefer
 `config_draft_render` followed by `config_draft_apply`; direct `config render` is
 primarily a CLI/debug helper.
 
@@ -434,8 +450,8 @@ go run . reset
 ```
 
 The command deletes `.runtime/`, `generated/`, `subscription*.yaml`,
-`localclash.yaml`, `localclash-packs.yaml`, and
-`localclash-subscriptions.yaml`. It keeps downloaded binaries in `bin/`, built-in
+`localclash.yaml`, `localclash-packs.yaml`, `localclash-subscriptions.yaml`, and
+`mihomo-preset.yaml`. It keeps downloaded binaries in `bin/`, built-in
 policies, rule sources, source code, docs, and scripts. By default it prints the
 delete plan and requires typing `reset localclash`; use `--dry-run` to inspect
 the plan only or `--yes` for non-interactive SSH/script usage. If Mihomo is

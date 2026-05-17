@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"localclash/internal/configmeta"
+	"localclash/internal/runtimepreset"
 )
 
 func TestBuildRulesWhitelistFallback(t *testing.T) {
@@ -110,6 +111,7 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 		SourcePath: paths.subscription,
 		PolicyPath: paths.policy,
 		OutputPath: filepath.Join(paths.dir, "base.yaml"),
+		PresetPath: filepath.Join(paths.dir, "mihomo-preset.yaml"),
 		Force:      true,
 	})
 	if err != nil {
@@ -145,6 +147,7 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 		OutputPath:         filepath.Join(paths.dir, "with-packs.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
+		PresetPath:         filepath.Join(paths.dir, "mihomo-preset.yaml"),
 		Force:              true,
 	})
 	if err != nil {
@@ -217,10 +220,48 @@ enabled_packs:
 		OutputPath:         filepath.Join(paths.dir, "empty-candidates.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
+		PresetPath:         filepath.Join(paths.dir, "mihomo-preset.yaml"),
 		Force:              true,
 	})
 	if err == nil {
 		t.Fatal("expected empty candidate error")
+	}
+}
+
+func TestRenderAppliesActiveRuntimePreset(t *testing.T) {
+	paths := writeRenderFixture(t)
+	presetPath := filepath.Join(paths.dir, "mihomo-preset.yaml")
+	if _, err := runtimepreset.Configure(presetPath, runtimepreset.Router); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Render(Options{
+		SourcePath:    paths.subscription,
+		PolicyPath:    paths.policy,
+		OutputPath:    filepath.Join(paths.dir, "router.yaml"),
+		PresetPath:    presetPath,
+		RulesCacheDir: paths.cacheDir,
+		Force:         true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Preset != runtimepreset.Router {
+		t.Fatalf("preset = %q, want %q", result.Preset, runtimepreset.Router)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	if config["mixed-port"] != 7893 {
+		t.Fatalf("mixed-port = %v, want router preset port", config["mixed-port"])
+	}
+	if config["allow-lan"] != true {
+		t.Fatalf("allow-lan = %v, want true", config["allow-lan"])
+	}
+	if _, ok := config["proxies"].([]any); !ok {
+		t.Fatalf("proxies should remain generated dynamic config, got %T", config["proxies"])
+	}
+	dns := config["dns"].(map[string]any)
+	if dns["listen"] != "0.0.0.0:7874" {
+		t.Fatalf("dns.listen = %v, want router DNS listen", dns["listen"])
 	}
 }
 

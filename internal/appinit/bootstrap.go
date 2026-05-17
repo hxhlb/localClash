@@ -10,6 +10,7 @@ import (
 
 	"localclash/internal/configrender"
 	"localclash/internal/rules"
+	"localclash/internal/runtimepreset"
 	"localclash/internal/subscriptions"
 )
 
@@ -25,6 +26,7 @@ type Options struct {
 	CorePath            string
 	PolicyPath          string
 	PacksSelectionPath  string
+	PresetPath          string
 }
 
 type RuntimeState struct {
@@ -50,6 +52,7 @@ type RuntimePaths struct {
 	CorePath            string `json:"core_path"`
 	PolicyPath          string `json:"policy_path"`
 	PacksSelectionPath  string `json:"packs_selection_path,omitempty"`
+	PresetPath          string `json:"preset_path"`
 }
 
 type CoreState struct {
@@ -106,6 +109,7 @@ func Bootstrap(ctx context.Context, opts Options) RuntimeState {
 			CorePath:            opts.CorePath,
 			PolicyPath:          opts.PolicyPath,
 			PacksSelectionPath:  opts.PacksSelectionPath,
+			PresetPath:          opts.PresetPath,
 		},
 		Rules:  RulesState{CacheDir: opts.RulesCacheDir, Details: map[string]rules.PackDetail{}},
 		Config: ConfigState{Path: opts.GeneratedConfig},
@@ -151,6 +155,9 @@ func normalizeOptions(opts Options) Options {
 	}
 	if strings.TrimSpace(opts.PacksSelectionPath) == "" && fileExists("localclash-packs.yaml") {
 		opts.PacksSelectionPath = "localclash-packs.yaml"
+	}
+	if strings.TrimSpace(opts.PresetPath) == "" {
+		opts.PresetPath = runtimepreset.DefaultPath
 	}
 	return opts
 }
@@ -245,6 +252,7 @@ func ensureGeneratedConfig(state *RuntimeState, opts Options) {
 		PolicyPath:    opts.PolicyPath,
 		OutputPath:    opts.GeneratedConfig,
 		RulesCacheDir: opts.RulesCacheDir,
+		PresetPath:    opts.PresetPath,
 		Force:         true,
 	}
 	if opts.PacksSelectionPath != "" && fileExists(opts.PacksSelectionPath) {

@@ -82,6 +82,7 @@ func BuildPlan() ([]Target, error) {
 		{Path: "localclash.yaml", Kind: "file"},
 		{Path: "localclash-packs.yaml", Kind: "file"},
 		{Path: "localclash-subscriptions.yaml", Kind: "file"},
+		{Path: "mihomo-preset.yaml", Kind: "file"},
 	}
 	subscriptions, err := filepath.Glob("subscription*.yaml")
 	if err != nil {
