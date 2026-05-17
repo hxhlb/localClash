@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_overlay_inspect", "config_plan_apply", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -113,6 +113,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"runtime_status":            SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
+		"config_plan_apply":         SafeWrite,
 		"config_plan_render":        SafeWrite,
 		"config_render":             SafeWrite,
 		"sed_file":                  SafeWrite,
@@ -486,6 +487,70 @@ func TestToolsCallConfigPlanRenderReturnsSerializableResult(t *testing.T) {
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("config_plan_render structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallConfigPlanApplyPersistsSelectionAndGeneratedConfig(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	renderResp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_plan_render",
+			"arguments": map[string]any{
+				"plan_name":    "ai-test",
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+				"output_dir":   paths.outputDir,
+				"test":         false,
+				"overlay": map[string]any{
+					"packs": []map[string]any{
+						{"id": "blackmatrix7_OpenAI", "target": "AI"},
+					},
+					"proxy_groups": []map[string]any{
+						{"id": "AI", "nodes": []string{"SG 01"}, "mode": "manual"},
+					},
+				},
+			},
+		},
+	})
+	if renderResp.Error != nil {
+		t.Fatalf("config_plan_render returned JSON-RPC error: %+v", renderResp.Error)
+	}
+	renderResult := marshalToolResult(t, renderResp.Result)
+	plan := renderResult.StructuredContent.(map[string]any)
+	applyResp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_plan_apply",
+			"arguments": map[string]any{
+				"plan_id":   plan["plan_id"],
+				"plans_dir": paths.outputDir,
+				"test":      false,
+			},
+		},
+	})
+	if applyResp.Error != nil {
+		t.Fatalf("config_plan_apply returned JSON-RPC error: %+v", applyResp.Error)
+	}
+	result := marshalToolResult(t, applyResp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["applied"] != true || content["valid"] != true {
+		t.Fatalf("config_plan_apply content = %+v, want applied valid", content)
+	}
+	if _, err := os.Stat("generated/mihomo.yaml"); err != nil {
+		t.Fatalf("generated config missing after apply: %v", err)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("config_plan_apply structured content is not serializable: %v", err)
+	}
+	selection := readMCPFile(t, "localclash-packs.yaml")
+	if !strings.Contains(selection, "pack: OpenAI") || !strings.Contains(selection, "target: AI") {
+		t.Fatalf("selection was not updated: %s", selection)
 	}
 }
 
@@ -1335,4 +1400,13 @@ func writeMCPFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func readMCPFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

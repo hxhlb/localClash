@@ -195,6 +195,8 @@ MCP config plan tool:
 - `config_plan_render`: accepts a complete desired overlay, including
   `proxy_groups` with exact subscription proxy `nodes`, and renders a candidate
   Mihomo config into `.runtime/plans/<plan-id>/`.
+- `config_plan_apply`: applies a reviewed plan by writing
+  `localclash-packs.yaml` and regenerating `generated/mihomo.yaml`.
 
 For regional routing requests such as "Steam through HK", an agent should call
 `subscription_nodes_search`, copy exact returned proxy names into
@@ -205,9 +207,12 @@ subscription.
 The plan renderer writes `mihomo.yaml` and `summary.json` under the plan
 directory. It does not overwrite `generated/mihomo.yaml`, does not modify
 `localclash-packs.yaml`, does not start or restart Mihomo, and does not apply
-router/OpenClash changes. If an agent wants to preserve an existing overlay, it
-must first call `config_overlay_inspect` and submit the full desired overlay,
-including the retained packs and proxy groups.
+router/OpenClash changes. After user review, `config_plan_apply` rebuilds the
+persistent packs selection from the plan summary, backs up replaced local
+artifacts, and regenerates `generated/mihomo.yaml`. It still does not start or
+restart Mihomo; use `run_runtime` for that confirmed step. If an agent wants to
+preserve an existing overlay, it must first call `config_overlay_inspect` and
+submit the full desired overlay, including the retained packs and proxy groups.
 
 MCP runtime tool:
 

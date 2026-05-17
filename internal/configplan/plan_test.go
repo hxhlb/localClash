@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"localclash/internal/rules"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -133,6 +135,69 @@ func TestRenderProxyGroupPlan(t *testing.T) {
 		t.Fatalf("proxy group mode = %v, want manual", got)
 	}
 	assertMetadataHasNoSensitiveFields(t, metadata)
+}
+
+func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
+	paths := writePlanFixture(t)
+	generated := filepath.Join(paths.dir, "generated", "mihomo.yaml")
+	selectionPath := filepath.Join(paths.dir, "localclash-packs.yaml")
+	writeFile(t, generated, "sentinel: old generated\n")
+
+	plan, err := Render(context.Background(), Options{
+		PlanName:     "ai-sg",
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"SG 01"}, Mode: "manual"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Apply(context.Background(), ApplyOptions{
+		PlanID:        plan.PlanID,
+		PlansDir:      paths.planDir,
+		Subscription:  paths.subscription,
+		Policy:        paths.policy,
+		RulesCache:    paths.cacheDir,
+		SelectionPath: selectionPath,
+		OutputPath:    generated,
+		Test:          false,
+		Now:           fixedPlanTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied || !result.Valid {
+		t.Fatalf("apply result = %+v, want applied valid plan", result)
+	}
+	if len(result.Backups) != 2 {
+		t.Fatalf("backups = %+v, want selection and generated backups", result.Backups)
+	}
+	selection, err := rules.LoadSelection(selectionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selection.EnabledPack) != 1 || selection.EnabledPack[0].Source != "blackmatrix7" || selection.EnabledPack[0].Pack != "OpenAI" || selection.EnabledPack[0].Target != "AI" {
+		t.Fatalf("selection enabled packs = %+v", selection.EnabledPack)
+	}
+	if got := selection.ProxyGroups["AI"].Nodes; len(got) != 1 || got[0] != "SG 01" {
+		t.Fatalf("AI nodes = %+v, want SG 01", got)
+	}
+	config := readYAMLMap(t, generated)
+	if !proxyGroupNames(config)["AI"] {
+		t.Fatal("generated config missing applied AI proxy group")
+	}
+	if strings.Contains(readFile(t, generated), "sentinel") {
+		t.Fatalf("generated config was not replaced: %s", readFile(t, generated))
+	}
 }
 
 func TestRenderUnknownPackIDReturnsError(t *testing.T) {

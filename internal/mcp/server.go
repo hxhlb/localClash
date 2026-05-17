@@ -257,6 +257,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":
 		return s.callSubscriptionsRefresh(ctx, args)
+	case "config_plan_apply":
+		return s.callConfigPlanApply(ctx, args)
 	case "config_plan_render":
 		return s.callConfigPlanRender(ctx, args)
 	case "config_render":
@@ -390,6 +392,66 @@ func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage)
 		OutputDir:    in.OutputDir,
 		Test:         test,
 		Overlay:      in.Overlay,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callConfigPlanApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		PlanID       string `json:"plan_id"`
+		PlansDir     string `json:"plans_dir"`
+		SummaryPath  string `json:"summary_path"`
+		Subscription string `json:"subscription"`
+		Policy       string `json:"policy"`
+		Mode         string `json:"mode"`
+		RulesCache   string `json:"rules_cache"`
+		Selection    string `json:"selection"`
+		Output       string `json:"output"`
+		BackupDir    string `json:"backup_dir"`
+		Test         *bool  `json:"test"`
+		Core         string `json:"core"`
+		RuntimeDir   string `json:"runtime_dir"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	test := true
+	if in.Test != nil {
+		test = *in.Test
+	}
+	if s.state != nil {
+		if in.Selection == "" && s.state.Paths.PacksSelectionPath != "" {
+			in.Selection = s.state.Paths.PacksSelectionPath
+		}
+		if in.Output == "" {
+			in.Output = s.state.Paths.GeneratedConfig
+		}
+		if in.Core == "" {
+			in.Core = s.state.Paths.CorePath
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := configplan.Apply(ctx, configplan.ApplyOptions{
+		PlanID:        in.PlanID,
+		PlansDir:      in.PlansDir,
+		SummaryPath:   in.SummaryPath,
+		Subscription:  in.Subscription,
+		Policy:        in.Policy,
+		Mode:          in.Mode,
+		RulesCache:    in.RulesCache,
+		SelectionPath: in.Selection,
+		OutputPath:    in.Output,
+		CorePath:      in.Core,
+		WorkDir:       in.RuntimeDir,
+		BackupDir:     in.BackupDir,
+		Test:          test,
 	})
 	if err != nil {
 		return toolResult{}, err

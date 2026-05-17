@@ -33,6 +33,23 @@ type Options struct {
 	Now          time.Time
 }
 
+type ApplyOptions struct {
+	PlanID        string
+	PlansDir      string
+	SummaryPath   string
+	Subscription  string
+	Policy        string
+	Mode          string
+	RulesCache    string
+	SelectionPath string
+	OutputPath    string
+	CorePath      string
+	WorkDir       string
+	BackupDir     string
+	Test          bool
+	Now           time.Time
+}
+
 type OverlayIntent struct {
 	Packs       []OverlayPackIntent       `json:"packs" yaml:"packs"`
 	ProxyGroups []OverlayProxyGroupIntent `json:"proxy_groups" yaml:"proxy_groups"`
@@ -53,11 +70,38 @@ type Result struct {
 	PlanID      string           `json:"plan_id"`
 	Output      string           `json:"output"`
 	SummaryPath string           `json:"summary_path"`
+	Inputs      PlanInputs       `json:"inputs"`
 	Valid       bool             `json:"valid"`
 	MihomoTest  MihomoTestResult `json:"mihomo_test"`
 	Overlay     OverlaySummary   `json:"overlay"`
 	Changes     ChangesSummary   `json:"changes"`
 	Warnings    []string         `json:"warnings"`
+}
+
+type PlanInputs struct {
+	Subscription string `json:"subscription"`
+	Policy       string `json:"policy"`
+	Mode         string `json:"mode,omitempty"`
+	RulesCache   string `json:"rules_cache"`
+}
+
+type ApplyResult struct {
+	Applied       bool                `json:"applied"`
+	PlanID        string              `json:"plan_id"`
+	SummaryPath   string              `json:"summary_path"`
+	SelectionPath string              `json:"selection_path"`
+	OutputPath    string              `json:"output_path"`
+	Valid         bool                `json:"valid"`
+	MihomoTest    MihomoTestResult    `json:"mihomo_test"`
+	Overlay       OverlaySummary      `json:"overlay"`
+	Render        configrender.Result `json:"render"`
+	Backups       []BackupResult      `json:"backups,omitempty"`
+	Warnings      []string            `json:"warnings"`
+}
+
+type BackupResult struct {
+	Source string `json:"source"`
+	Backup string `json:"backup"`
 }
 
 type MihomoTestResult struct {
@@ -142,9 +186,15 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		PlanID:      planID,
 		Output:      outputPath,
 		SummaryPath: summaryPath,
-		Valid:       true,
-		MihomoTest:  MihomoTestResult{Enabled: opts.Test},
-		Overlay:     overlaySummary,
+		Inputs: PlanInputs{
+			Subscription: opts.Subscription,
+			Policy:       opts.Policy,
+			Mode:         opts.Mode,
+			RulesCache:   opts.RulesCache,
+		},
+		Valid:      true,
+		MihomoTest: MihomoTestResult{Enabled: opts.Test},
+		Overlay:    overlaySummary,
 		Changes: ChangesSummary{
 			RuleProvidersAdded: len(overlayInspection.RuleProviders),
 			ProxyGroupsAdded:   len(overlayInspection.ProxyGroups),
@@ -159,6 +209,100 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	if err := writeSummary(summaryPath, result); err != nil {
 		return Result{}, err
 	}
+	return result, nil
+}
+
+func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
+	opts = normalizeApplyLocatorOptions(opts)
+	summaryPath, err := resolveSummaryPath(opts)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	plan, err := readSummary(summaryPath)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if !plan.Valid {
+		return ApplyResult{}, fmt.Errorf("plan %q is not valid and cannot be applied", plan.PlanID)
+	}
+	if opts.PlanID == "" {
+		opts.PlanID = plan.PlanID
+	}
+	opts = normalizeApplyOptions(applyPlanInputDefaults(opts, plan.Inputs))
+
+	intent := intentFromSummary(plan.Overlay)
+	proxyNames, err := rules.LoadSubscriptionProxyNames(opts.Subscription)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	selection, overlaySummary, warnings, err := buildSelection(Options{
+		Subscription: opts.Subscription,
+		RulesCache:   opts.RulesCache,
+		Overlay:      intent,
+	}, proxyNames)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
+	tempDir, err := os.MkdirTemp("", "localclash-plan-apply-*")
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	defer os.RemoveAll(tempDir)
+	tempSelection := filepath.Join(tempDir, "localclash-packs.yaml")
+	tempOutput := filepath.Join(tempDir, "mihomo.yaml")
+	if err := writeSelection(tempSelection, selection); err != nil {
+		return ApplyResult{}, err
+	}
+	renderResult, err := configrender.Render(configrender.Options{
+		SourcePath:         opts.Subscription,
+		PolicyPath:         opts.Policy,
+		Mode:               renderMode(opts.Mode),
+		OutputPath:         tempOutput,
+		PacksSelectionPath: tempSelection,
+		RulesCacheDir:      opts.RulesCache,
+		Force:              true,
+	})
+	if err != nil {
+		return ApplyResult{}, err
+	}
+
+	result := ApplyResult{
+		PlanID:        plan.PlanID,
+		SummaryPath:   summaryPath,
+		SelectionPath: opts.SelectionPath,
+		OutputPath:    opts.OutputPath,
+		Valid:         true,
+		MihomoTest:    MihomoTestResult{Enabled: opts.Test},
+		Overlay:       overlaySummary,
+		Render:        renderResult,
+		Warnings:      append([]string{}, plan.Warnings...),
+	}
+	result.Warnings = append(result.Warnings, warnings...)
+	result.Render.OutputPath = opts.OutputPath
+	if opts.Test {
+		result.MihomoTest.Passed, result.MihomoTest.Output = runMihomoTest(ctx, Options{
+			CorePath: opts.CorePath,
+			WorkDir:  opts.WorkDir,
+		}, tempOutput)
+		result.Valid = result.MihomoTest.Passed
+		if !result.Valid {
+			return result, nil
+		}
+	}
+
+	backups, err := backupApplyTargets(opts)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	result.Backups = backups
+	if err := writeSelection(opts.SelectionPath, selection); err != nil {
+		return ApplyResult{}, err
+	}
+	if err := copyFile(tempOutput, opts.OutputPath); err != nil {
+		return ApplyResult{}, err
+	}
+	result.Applied = true
 	return result, nil
 }
 
@@ -183,6 +327,66 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
+	}
+	return opts
+}
+
+func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
+	if opts.PlansDir == "" {
+		opts.PlansDir = ".runtime/plans"
+	}
+	if opts.Subscription == "" {
+		opts.Subscription = "subscription.yaml"
+	}
+	if opts.Policy == "" {
+		opts.Policy = "policies/loyalsoldier.yaml"
+	}
+	if opts.RulesCache == "" {
+		opts.RulesCache = ".runtime/rules/packs"
+	}
+	if opts.SelectionPath == "" {
+		opts.SelectionPath = "localclash-packs.yaml"
+	}
+	if opts.OutputPath == "" {
+		opts.OutputPath = "generated/mihomo.yaml"
+	}
+	if opts.CorePath == "" {
+		opts.CorePath = "bin/mihomo"
+	}
+	if opts.WorkDir == "" {
+		opts.WorkDir = ".runtime/mihomo"
+	}
+	if opts.BackupDir == "" {
+		opts.BackupDir = ".runtime/backups/config-plan-apply"
+	}
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	return opts
+}
+
+func normalizeApplyLocatorOptions(opts ApplyOptions) ApplyOptions {
+	if opts.PlansDir == "" {
+		opts.PlansDir = ".runtime/plans"
+	}
+	if opts.Now.IsZero() {
+		opts.Now = time.Now()
+	}
+	return opts
+}
+
+func applyPlanInputDefaults(opts ApplyOptions, inputs PlanInputs) ApplyOptions {
+	if opts.Subscription == "" {
+		opts.Subscription = inputs.Subscription
+	}
+	if opts.Policy == "" {
+		opts.Policy = inputs.Policy
+	}
+	if opts.Mode == "" {
+		opts.Mode = inputs.Mode
+	}
+	if opts.RulesCache == "" {
+		opts.RulesCache = inputs.RulesCache
 	}
 	return opts
 }
@@ -300,12 +504,101 @@ func writeTempSelection(selection rules.Selection) (string, func(), error) {
 	return path, func() { _ = os.Remove(path) }, nil
 }
 
+func writeSelection(path string, selection rules.Selection) error {
+	data, err := yaml.Marshal(selection)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
 func writeSummary(path string, result Result) error {
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+func readSummary(path string) (Result, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Result{}, err
+	}
+	var result Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
+func resolveSummaryPath(opts ApplyOptions) (string, error) {
+	if strings.TrimSpace(opts.SummaryPath) != "" {
+		return opts.SummaryPath, nil
+	}
+	id := strings.TrimSpace(opts.PlanID)
+	if id == "" {
+		return "", fmt.Errorf("plan_id is required")
+	}
+	if filepath.Base(id) != id || id == "." || id == ".." {
+		return "", fmt.Errorf("plan_id %q must be a single plan directory name", id)
+	}
+	return filepath.Join(opts.PlansDir, id, "summary.json"), nil
+}
+
+func intentFromSummary(summary OverlaySummary) OverlayIntent {
+	intent := OverlayIntent{
+		Packs:       make([]OverlayPackIntent, 0, len(summary.Packs)),
+		ProxyGroups: make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
+	}
+	for _, pack := range summary.Packs {
+		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Target: pack.Target})
+	}
+	for _, group := range summary.ProxyGroups {
+		intent.ProxyGroups = append(intent.ProxyGroups, OverlayProxyGroupIntent{
+			ID:    group.ID,
+			Nodes: append([]string{}, group.Nodes...),
+			Mode:  group.Mode,
+		})
+	}
+	return intent
+}
+
+func backupApplyTargets(opts ApplyOptions) ([]BackupResult, error) {
+	backupRoot := filepath.Join(opts.BackupDir, buildPlanID(opts.PlanID, opts.Now))
+	targets := []struct {
+		source string
+		name   string
+	}{
+		{source: opts.SelectionPath, name: "localclash-packs.yaml"},
+		{source: opts.OutputPath, name: "mihomo.yaml"},
+	}
+	var backups []BackupResult
+	for _, target := range targets {
+		if !fileExists(target.source) {
+			continue
+		}
+		backup := filepath.Join(backupRoot, target.name)
+		if err := copyFile(target.source, backup); err != nil {
+			return nil, err
+		}
+		backups = append(backups, BackupResult{Source: target.source, Backup: backup})
+	}
+	return backups, nil
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
 }
 
 func runMihomoTest(ctx context.Context, opts Options, configPath string) (bool, string) {
@@ -374,4 +667,9 @@ func isBuiltInTarget(target string) bool {
 	default:
 		return false
 	}
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

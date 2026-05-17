@@ -55,6 +55,7 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
+		{Name: "config_plan_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config plan by writing localclash-packs.yaml and regenerating generated/mihomo.yaml without starting the runtime."},
 		{Name: "config_plan_render", SafetyLevel: SafeWrite, Description: "Render a candidate Mihomo config from a complete desired overlay with exact proxy-group nodes into .runtime/plans."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated Mihomo config from reviewed local inputs."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
@@ -122,6 +123,27 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"openclash_reference_root": map[string]any{"type": "string", "description": "Optional local directory containing OpenClash reference snapshots outside the localClash runtime."},
 			},
+		}
+	case "config_plan_apply":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"plan_id":      map[string]any{"type": "string", "description": "Plan directory id returned by config_plan_render."},
+				"plans_dir":    map[string]any{"type": "string", "description": "Plan artifact root. Defaults to .runtime/plans."},
+				"summary_path": map[string]any{"type": "string", "description": "Optional explicit summary.json path. Use plan_id for normal flows."},
+				"subscription": map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"policy":       map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
+				"mode":         map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
+				"rules_cache":  map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
+				"selection":    map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.yaml."},
+				"output":       map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
+				"backup_dir":   map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-plan-apply."},
+				"test":         map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true."},
+				"core":         map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to bin/mihomo."},
+				"runtime_dir":  map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
+			},
+			"required": []string{"plan_id"},
 		}
 	case "nl_file":
 		return map[string]any{
