@@ -233,6 +233,20 @@ scripts/test-mcp-http.sh
 The script starts `go run . mcp`, posts a JSON-RPC `doctor` tool call to the
 HTTP endpoint, and expects a response containing `"status":"ok"`.
 
+For Open WebUI debugging, the helper script can run a logging proxy in front of
+the localClash MCP HTTP server:
+
+```bash
+python3 scripts/localclash_mcp_openwebui.py serve
+```
+
+The public endpoint stays `http://127.0.0.1:8765/mcp`, while the localClash MCP
+binary listens on an internal loopback port. The proxy prints each MCP request
+and response body to the terminal and appends structured JSONL events to
+`.runtime/logs/localclash-mcp-openwebui.jsonl`. Use `--log-file <path>` to
+write elsewhere, or `--no-log-redaction` when raw MCP bodies are required for a
+local-only diagnosis.
+
 ## Local Data
 
 Do not commit downloaded subscriptions, active router profiles, generated configs, or files containing node credentials.
