@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -46,6 +47,28 @@ func TestHTTPHandlerServesJSONRPC(t *testing.T) {
 	}
 	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatalf("missing CORS header: %+v", w.Header())
+	}
+}
+
+func TestHTTPHandlerLogsToolCallSummary(t *testing.T) {
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tools_list","arguments":{"url":"https://example.invalid/secret","view":"durable"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	stderr := captureStderr(t, func() {
+		NewServer().HTTPHandler("/mcp").ServeHTTP(w, req)
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	for _, want := range []string{"mcp_http", "rpc=tools/call", "tool=tools_list", `view="durable"`, "url=<redacted>", "response=ok"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want %q", stderr, want)
+		}
+	}
+	if strings.Contains(stderr, "https://example.invalid/secret") {
+		t.Fatalf("stderr leaked redacted URL: %q", stderr)
 	}
 }
 
@@ -1828,6 +1851,27 @@ func marshalToolResult(t *testing.T, value any) toolResult {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	original := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = writer
+	defer func() {
+		os.Stderr = original
+		_ = reader.Close()
+	}()
+	fn()
+	_ = writer.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func writeTestExecutable(t *testing.T, path string, content string) {

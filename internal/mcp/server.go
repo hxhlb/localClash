@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -150,20 +151,139 @@ func (s *Server) HTTPHandler(path string) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		started := time.Now()
 		defer r.Body.Close()
 		var raw json.RawMessage
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&raw); err != nil {
-			writeJSON(w, http.StatusOK, errorResponse(nil, -32700, "parse error"))
+			response := errorResponse(nil, -32700, "parse error")
+			logHTTPMCPCall(r, rpcLogSummary{Method: "parse_error"}, http.StatusOK, response, time.Since(started))
+			writeJSON(w, http.StatusOK, response)
 			return
 		}
+		summary := summarizeRPCLog(raw)
 		response := s.Handle(r.Context(), raw)
 		if response == nil {
+			logHTTPMCPCall(r, summary, http.StatusAccepted, nil, time.Since(started))
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
+		logHTTPMCPCall(r, summary, http.StatusOK, response, time.Since(started))
 		writeJSON(w, http.StatusOK, response)
 	})
 	return mux
+}
+
+type rpcLogSummary struct {
+	Method string
+	Tool   string
+	Args   string
+}
+
+func summarizeRPCLog(raw json.RawMessage) rpcLogSummary {
+	var req rpcRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return rpcLogSummary{Method: "parse_error"}
+	}
+	out := rpcLogSummary{Method: req.Method}
+	if req.Method != "tools/call" || len(req.Params) == 0 {
+		return out
+	}
+	var call callParams
+	if err := json.Unmarshal(req.Params, &call); err != nil {
+		return out
+	}
+	out.Tool = call.Name
+	if len(call.Arguments) != 0 {
+		out.Args = summarizeLogArgs(call.Arguments)
+	}
+	return out
+}
+
+func summarizeLogArgs(raw json.RawMessage) string {
+	var values map[string]any
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return "invalid_json"
+	}
+	if len(values) == 0 {
+		return "{}"
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+summarizeLogValue(key, values[key]))
+	}
+	return strings.Join(parts, ",")
+}
+
+func summarizeLogValue(key string, value any) string {
+	if isSensitiveLogKey(key) {
+		return "<redacted>"
+	}
+	switch v := value.(type) {
+	case string:
+		v = strings.ReplaceAll(v, "\n", `\n`)
+		v = strings.ReplaceAll(v, "\r", `\r`)
+		if len(v) > 80 {
+			v = v[:77] + "..."
+		}
+		return strconv.Quote(v)
+	case float64, bool, nil:
+		return fmt.Sprint(v)
+	default:
+		return fmt.Sprintf("<%T>", value)
+	}
+}
+
+func isSensitiveLogKey(key string) bool {
+	lowered := strings.ToLower(key)
+	for _, token := range []string{"url", "token", "secret", "password", "authorization", "cookie", "credential"} {
+		if strings.Contains(lowered, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func logHTTPMCPCall(r *http.Request, summary rpcLogSummary, httpStatus int, response *rpcResponse, duration time.Duration) {
+	parts := []string{
+		"mcp_http",
+		"method=" + r.Method,
+		"path=" + r.URL.Path,
+		"rpc=" + safeLogToken(summary.Method),
+	}
+	if summary.Tool != "" {
+		parts = append(parts, "tool="+safeLogToken(summary.Tool))
+	}
+	if summary.Args != "" {
+		parts = append(parts, "args="+summary.Args)
+	}
+	parts = append(parts,
+		fmt.Sprintf("http_status=%d", httpStatus),
+		fmt.Sprintf("duration_ms=%d", duration.Milliseconds()),
+	)
+	if response == nil {
+		parts = append(parts, "response=notification")
+	} else if response.Error != nil {
+		parts = append(parts,
+			fmt.Sprintf("error_code=%d", response.Error.Code),
+			"error="+strconv.Quote(response.Error.Message),
+		)
+	} else {
+		parts = append(parts, "response=ok")
+	}
+	fmt.Fprintln(os.Stderr, strings.Join(parts, " "))
+}
+
+func safeLogToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "-"
+	}
+	return strings.NewReplacer(" ", "_", "\n", "_", "\r", "_", "\t", "_").Replace(value)
 }
 
 func writeCORSHeaders(w http.ResponseWriter) {
