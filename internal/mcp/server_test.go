@@ -272,6 +272,94 @@ func TestToolsCallRuntimeProfileConfigureRerendersGeneratedConfig(t *testing.T) 
 	}
 }
 
+func TestToolsCallConfigIntentInspectEffectivePreviewRendersWithoutGeneratedConfig(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	generated := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionPath:    paths.subscription,
+			PolicyPath:          paths.policy,
+			RulesCacheDir:       paths.cache,
+			RuntimeProfilePath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.yaml"),
+			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.yaml"),
+			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
+			GeneratedConfig:     generated,
+		},
+	})
+
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "config_intent_inspect",
+			"arguments": map[string]any{"view": "effective_preview", "limit": 5},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_intent_inspect returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["view"] != "effective_preview" {
+		t.Fatalf("view = %v, want effective_preview", content["view"])
+	}
+	if content["subscription_available"] != true || content["preview_rendered"] != true {
+		t.Fatalf("preview content = %+v, want available rendered preview", content)
+	}
+	intent := content["intent"].(map[string]any)
+	if intent["exists"] != false {
+		t.Fatalf("intent = %+v, want no durable localclash intent", intent)
+	}
+	effective := content["effective_summary"].(map[string]any)
+	if int(effective["rules_count"].(float64)) <= 0 || int(effective["proxies_count"].(float64)) != 1 {
+		t.Fatalf("effective summary = %+v, want rules and one proxy", effective)
+	}
+	baseline := content["local_safety_baseline"].(map[string]any)
+	if int(baseline["rule_count"].(float64)) == 0 {
+		t.Fatalf("baseline = %+v, want local safety rules", baseline)
+	}
+	if _, err := os.Stat(generated); !os.IsNotExist(err) {
+		t.Fatalf("generated config should not be written, stat err=%v", err)
+	}
+}
+
+func TestToolsCallConfigIntentInspectEffectivePreviewReportsMissingSubscription(t *testing.T) {
+	dir := t.TempDir()
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
+			PolicyPath:          filepath.Join(dir, "policy.yaml"),
+			RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.yaml"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.yaml"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+	})
+
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "config_intent_inspect",
+			"arguments": map[string]any{"view": "effective_preview"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_intent_inspect returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["subscription_available"] != false || content["preview_rendered"] == true {
+		t.Fatalf("preview content = %+v, want missing subscription without render", content)
+	}
+	actions := content["next_actions"].([]any)
+	if len(actions) == 0 {
+		t.Fatalf("next_actions missing in %+v", content)
+	}
+}
+
 func TestToolsCallNLFileReturnsNumberedText(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

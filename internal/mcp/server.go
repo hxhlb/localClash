@@ -381,30 +381,28 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 
 func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, error) {
 	var in struct {
+		View                string `json:"view"`
 		Config              string `json:"config"`
 		Subscription        string `json:"subscription"`
 		SubscriptionConfig  string `json:"subscription_config"`
 		SubscriptionRuntime string `json:"subscription_runtime"`
 		RulesCache          string `json:"rules_cache"`
+		Policy              string `json:"policy"`
+		Mode                string `json:"mode"`
+		RuntimeProfile      string `json:"runtime_profile"`
 		Limit               int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil {
-		if in.Subscription == "" {
-			in.Subscription = s.state.Paths.SubscriptionPath
-		}
-		if in.SubscriptionConfig == "" {
-			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
-		}
-		if in.SubscriptionRuntime == "" {
-			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
-		}
-		if in.RulesCache == "" {
-			in.RulesCache = s.state.Paths.RulesCacheDir
-		}
+	view := strings.TrimSpace(in.View)
+	if view == "" {
+		view = "durable"
 	}
+	if view != "durable" && view != "working" && view != "effective_preview" {
+		return toolResult{}, fmt.Errorf("unsupported config_intent_inspect view %q", in.View)
+	}
+	s.applyConfigIntentInspectDefaults(&in.Subscription, &in.Policy, &in.RulesCache, &in.RuntimeProfile, &in.SubscriptionConfig, &in.SubscriptionRuntime)
 	result, err := configinspect.InspectIntent(configinspect.IntentOptions{
 		ConfigPath:          in.Config,
 		Subscription:        in.Subscription,
@@ -416,7 +414,219 @@ func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, erro
 	if err != nil {
 		return toolResult{}, err
 	}
+	if view == "durable" {
+		return jsonToolResult(result)
+	}
+	return s.configIntentInspectWorkingResult(configIntentInspectWorkingInput{
+		View:                view,
+		Config:              in.Config,
+		Subscription:        in.Subscription,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+		RulesCache:          in.RulesCache,
+		Policy:              in.Policy,
+		Mode:                in.Mode,
+		RuntimeProfile:      in.RuntimeProfile,
+		Limit:               in.Limit,
+		Intent:              result,
+	})
+}
+
+type configIntentInspectWorkingInput struct {
+	View                string
+	Config              string
+	Subscription        string
+	SubscriptionConfig  string
+	SubscriptionRuntime string
+	RulesCache          string
+	Policy              string
+	Mode                string
+	RuntimeProfile      string
+	Limit               int
+	Intent              configinspect.IntentResult
+}
+
+func (s *Server) configIntentInspectWorkingResult(in configIntentInspectWorkingInput) (toolResult, error) {
+	if in.Config == "" {
+		in.Config = "localclash.yaml"
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	baseline := configrender.LocalBaselineRuleLines()
+	result := configIntentInspectContextResult{
+		View:                  in.View,
+		SubscriptionAvailable: fileExists(in.Subscription),
+		Inputs: configIntentInspectInputs{
+			Subscription:        in.Subscription,
+			Policy:              in.Policy,
+			Mode:                in.Mode,
+			RulesCache:          in.RulesCache,
+			RuntimeProfilePath:  in.RuntimeProfile,
+			LocalClashConfig:    in.Config,
+			SubscriptionConfig:  in.SubscriptionConfig,
+			SubscriptionRuntime: in.SubscriptionRuntime,
+		},
+		BasePolicy:          configIntentInspectPolicy{Path: in.Policy, Mode: in.Mode},
+		LocalSafetyBaseline: configIntentInspectRuleSlice{RuleCount: len(baseline), Rules: limitStrings(baseline, limit)},
+		Intent:              in.Intent,
+		NextActions:         []string{},
+	}
+	if status, err := runtimeprofile.StatusFor(in.RuntimeProfile); err == nil {
+		result.RuntimeProfile = &status
+	} else {
+		result.Warnings = append(result.Warnings, "runtime profile unavailable: "+err.Error())
+	}
+	if in.View == "working" {
+		if !result.SubscriptionAvailable {
+			result.NextActions = append(result.NextActions, "call subscriptions_status", "call subscriptions_configure if no sources are configured", "call subscriptions_refresh to create subscription.yaml before previewing effective rules")
+		} else {
+			result.NextActions = append(result.NextActions, "use view=effective_preview when the agent needs the effective generated rules without requiring Mihomo to have been started")
+		}
+		return jsonToolResult(result)
+	}
+	if !result.SubscriptionAvailable {
+		result.NextActions = append(result.NextActions, "call subscriptions_status", "call subscriptions_configure if no sources are configured", "call subscriptions_refresh to create subscription.yaml before previewing effective rules")
+		return jsonToolResult(result)
+	}
+	if err := renderConfigIntentPreview(&result, in); err != nil {
+		return toolResult{}, err
+	}
 	return jsonToolResult(result)
+}
+
+type configIntentInspectContextResult struct {
+	View                  string                       `json:"view"`
+	SubscriptionAvailable bool                         `json:"subscription_available"`
+	PreviewRendered       bool                         `json:"preview_rendered"`
+	PreviewSource         string                       `json:"preview_source,omitempty"`
+	Inputs                configIntentInspectInputs    `json:"inputs"`
+	RuntimeProfile        *runtimeprofile.Status       `json:"runtime_profile,omitempty"`
+	BasePolicy            configIntentInspectPolicy    `json:"base_policy"`
+	LocalSafetyBaseline   configIntentInspectRuleSlice `json:"local_safety_baseline"`
+	Intent                configinspect.IntentResult   `json:"intent"`
+	Overlay               *configinspect.OverlayResult `json:"overlay,omitempty"`
+	Effective             *configinspect.BaseSummary   `json:"effective_summary,omitempty"`
+	Warnings              []string                     `json:"warnings,omitempty"`
+	NextActions           []string                     `json:"next_actions,omitempty"`
+}
+
+type configIntentInspectInputs struct {
+	Subscription        string `json:"subscription"`
+	Policy              string `json:"policy"`
+	Mode                string `json:"mode,omitempty"`
+	RulesCache          string `json:"rules_cache"`
+	RuntimeProfilePath  string `json:"runtime_profile"`
+	LocalClashConfig    string `json:"localclash_config"`
+	SubscriptionConfig  string `json:"subscription_config"`
+	SubscriptionRuntime string `json:"subscription_runtime"`
+}
+
+type configIntentInspectPolicy struct {
+	Path string `json:"path"`
+	Mode string `json:"mode,omitempty"`
+}
+
+type configIntentInspectRuleSlice struct {
+	RuleCount int      `json:"rule_count"`
+	Rules     []string `json:"rules_sample"`
+}
+
+func renderConfigIntentPreview(result *configIntentInspectContextResult, in configIntentInspectWorkingInput) error {
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	tempDir, err := os.MkdirTemp("", "localclash-intent-preview-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+	var selectionPath string
+	if in.Intent.Exists && in.Intent.Resolved {
+		config, err := localconfig.Load(in.Config)
+		if err != nil {
+			result.Warnings = append(result.Warnings, "localClash intent cannot be loaded for effective preview: "+err.Error())
+		} else {
+			resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+				Config:              config,
+				SubscriptionPath:    in.Subscription,
+				SubscriptionConfig:  in.SubscriptionConfig,
+				SubscriptionRuntime: in.SubscriptionRuntime,
+				RulesCache:          in.RulesCache,
+			})
+			if err != nil {
+				result.Warnings = append(result.Warnings, "localClash intent cannot be resolved for effective preview: "+err.Error())
+			} else {
+				selectionPath = filepath.Join(tempDir, "localclash-packs.yaml")
+				if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
+					return err
+				}
+			}
+		}
+	} else if in.Intent.Exists && in.Intent.ResolveError != "" {
+		result.Warnings = append(result.Warnings, "localClash intent is present but unresolved: "+in.Intent.ResolveError)
+	}
+
+	outputPath := filepath.Join(tempDir, "mihomo.yaml")
+	renderResult, err := configrender.Render(configrender.Options{
+		SourcePath:         in.Subscription,
+		PolicyPath:         in.Policy,
+		Mode:               in.Mode,
+		OutputPath:         outputPath,
+		PacksSelectionPath: selectionPath,
+		RulesCacheDir:      in.RulesCache,
+		RuntimeProfilePath: in.RuntimeProfile,
+		Force:              true,
+	})
+	if err != nil {
+		return err
+	}
+	result.PreviewRendered = true
+	result.PreviewSource = "temporary_render"
+	result.BasePolicy.Mode = renderResult.Mode
+	base, err := configinspect.InspectBase(configinspect.Options{ConfigPath: outputPath, Limit: limit})
+	if err != nil {
+		return err
+	}
+	result.Effective = &base.Summary
+	overlay, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: outputPath, Limit: limit})
+	if err != nil {
+		return err
+	}
+	result.Overlay = &overlay
+	switch {
+	case !in.Intent.Exists:
+		result.NextActions = append(result.NextActions, "no durable localClash overlay exists; effective rules are local safety baseline plus base policy only", "use proxy_group_build, packs_list or pack_rules_query, then config_draft_render and config_draft_apply to add custom routing")
+	case in.Intent.Resolved:
+		result.NextActions = append(result.NextActions, "review effective_summary and overlay before starting or applying runtime changes")
+	default:
+		result.NextActions = append(result.NextActions, "repair localclash.yaml intent before applying or starting runtime")
+	}
+	return nil
+}
+
+func (s *Server) applyConfigIntentInspectDefaults(subscription, policy, rulesCache, runtimeProfile, subscriptionConfig, subscriptionRuntime *string) {
+	setDefault := func(value *string, fallback string) {
+		if *value == "" && fallback != "" {
+			*value = fallback
+		}
+	}
+	if s.state != nil {
+		setDefault(subscription, s.state.Paths.SubscriptionPath)
+		setDefault(policy, s.state.Paths.PolicyPath)
+		setDefault(rulesCache, s.state.Paths.RulesCacheDir)
+		setDefault(runtimeProfile, s.state.Paths.RuntimeProfilePath)
+		setDefault(subscriptionConfig, s.state.Paths.SubscriptionConfig)
+		setDefault(subscriptionRuntime, s.state.Paths.SubscriptionRuntime)
+	}
+	setDefault(subscription, "subscription.yaml")
+	setDefault(policy, "policies/loyalsoldier.yaml")
+	setDefault(rulesCache, filepath.Join(".runtime", "rules", "packs"))
+	setDefault(runtimeProfile, runtimeprofile.DefaultPath)
+	setDefault(subscriptionConfig, "localclash-subscriptions.yaml")
+	setDefault(subscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
 }
 
 func (s *Server) callProxyGroupBuild(args json.RawMessage) (toolResult, error) {

@@ -211,10 +211,13 @@ MCP config inspection tools:
 
 - `config_base_inspect`: inspect the generated base config summary. The base
   layer is not modifiable through MCP plan tools.
-- `config_intent_inspect`: inspect the durable `localclash.yaml` routing intent,
-  including reusable proxy groups, custom rules, and packs. Agents should call
-  this before draft rendering when they need to preserve or reuse existing
-  localClash intent.
+- `config_intent_inspect`: inspect localClash routing intent. The default
+  `view=durable` reads `localclash.yaml`; `view=working` adds current
+  subscription, runtime profile, and base policy context; `view=effective_preview`
+  renders a temporary, non-persistent Mihomo preview so agents can answer what
+  rules exist after subscription refresh even before Mihomo has ever started.
+  Agents should call this before draft rendering when they need to preserve or
+  reuse existing localClash intent.
 - `config_overlay_inspect`: inspect the localClash-managed overlay from
   `x-localclash.overlay` metadata.
 
