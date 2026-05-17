@@ -51,6 +51,7 @@ type Component struct {
 type Selection struct {
 	Version     int                   `yaml:"version"`
 	ProxyGroups map[string]ProxyGroup `yaml:"proxy_groups,omitempty"`
+	CustomRules []CustomRule          `yaml:"custom_rules,omitempty"`
 	EnabledPack []SelectedPack        `yaml:"enabled_packs"`
 }
 
@@ -65,6 +66,19 @@ type SelectedPack struct {
 	Source string `yaml:"source"`
 	Pack   string `yaml:"pack"`
 	Target string `yaml:"target"`
+}
+
+type CustomRule struct {
+	ID     string           `yaml:"id" json:"id"`
+	Target string           `yaml:"target" json:"target"`
+	Reason string           `yaml:"reason,omitempty" json:"reason,omitempty"`
+	Rules  []CustomRuleLine `yaml:"rules" json:"rules"`
+}
+
+type CustomRuleLine struct {
+	Type      string `yaml:"type" json:"type"`
+	Value     string `yaml:"value" json:"value"`
+	NoResolve bool   `yaml:"no_resolve,omitempty" json:"no_resolve,omitempty"`
 }
 
 type Fragment struct {
@@ -290,6 +304,20 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		return Fragment{}, err
 	}
 	usedProxyGroups := map[string]bool{}
+	for _, custom := range selection.CustomRules {
+		target, proxyGroup, err := renderTarget(custom.Target, targets)
+		if err != nil {
+			return Fragment{}, err
+		}
+		if proxyGroup {
+			usedProxyGroups[target] = true
+		}
+		lines, err := renderCustomRuleLines(custom, target)
+		if err != nil {
+			return Fragment{}, err
+		}
+		fragment.Rules = append(fragment.Rules, lines...)
+	}
 	for _, enabled := range selection.EnabledPack {
 		cache, ok := caches[enabled.Source]
 		if !ok {
@@ -327,6 +355,53 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 	}
 	fragment.ProxyGroups = proxyGroups
 	return fragment, nil
+}
+
+func renderCustomRuleLines(custom CustomRule, target string) ([]string, error) {
+	id := strings.TrimSpace(custom.ID)
+	if id == "" {
+		return nil, fmt.Errorf("custom rule id is required")
+	}
+	if strings.TrimSpace(target) == "" {
+		return nil, fmt.Errorf("custom rule %q target is required", id)
+	}
+	if len(custom.Rules) == 0 {
+		return nil, fmt.Errorf("custom rule %q rules is required", id)
+	}
+	lines := make([]string, 0, len(custom.Rules))
+	for _, rule := range custom.Rules {
+		line, err := renderCustomRuleLine(id, rule, target)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, line)
+	}
+	return lines, nil
+}
+
+func renderCustomRuleLine(id string, rule CustomRuleLine, target string) (string, error) {
+	value := strings.TrimSpace(rule.Value)
+	if value == "" {
+		return "", fmt.Errorf("custom rule %q contains an empty value", id)
+	}
+	var kind string
+	switch strings.ToLower(strings.TrimSpace(rule.Type)) {
+	case "domain":
+		kind = "DOMAIN"
+	case "domain_suffix":
+		kind = "DOMAIN-SUFFIX"
+	case "ip_cidr":
+		kind = "IP-CIDR"
+	case "ip_cidr6":
+		kind = "IP-CIDR6"
+	default:
+		return "", fmt.Errorf("custom rule %q type %q is unsupported", id, rule.Type)
+	}
+	line := fmt.Sprintf("%s,%s,%s", kind, value, target)
+	if rule.NoResolve {
+		line += ",no-resolve"
+	}
+	return line, nil
 }
 
 func firstProxyNames(values [][]string) []string {

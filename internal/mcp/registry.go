@@ -55,8 +55,10 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
-		{Name: "config_plan_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config plan by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime."},
-		{Name: "config_plan_render", SafetyLevel: SafeWrite, Description: "Render a candidate localClash config and Mihomo config from selector-based or exact proxy-group intent into .runtime/plans."},
+		{Name: "config_draft_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config draft by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime."},
+		{Name: "config_draft_render", SafetyLevel: SafeWrite, Description: "Render a candidate localClash config draft and Mihomo config from proxy groups, packs, and custom rules."},
+		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config draft."},
+		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start the Mihomo runtime from generated config. Requires external Agent/MCP client confirmation; starting or restarting the proxy runtime may temporarily interrupt network connectivity, and the Agent itself may be disconnected if it depends on the current network/proxy path."},
@@ -123,14 +125,14 @@ func inputSchemaForTool(name string) map[string]any {
 				"openclash_reference_root": map[string]any{"type": "string", "description": "Optional local directory containing OpenClash reference snapshots outside the localClash runtime."},
 			},
 		}
-	case "config_plan_apply":
+	case "config_draft_apply":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"plan_id":              map[string]any{"type": "string", "description": "Plan directory id returned by config_plan_render."},
-				"plans_dir":            map[string]any{"type": "string", "description": "Plan artifact root. Defaults to .runtime/plans."},
-				"summary_path":         map[string]any{"type": "string", "description": "Optional explicit summary.json path. Use plan_id for normal flows."},
+				"draft_id":             map[string]any{"type": "string", "description": "Draft directory id returned by config_draft_render."},
+				"drafts_dir":           map[string]any{"type": "string", "description": "Draft artifact root. Defaults to .runtime/drafts."},
+				"summary_path":         map[string]any{"type": "string", "description": "Optional explicit summary.json path. Use draft_id for normal flows."},
 				"config":               map[string]any{"type": "string", "description": "Persistent localClash config path. Defaults to localclash.yaml."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
@@ -140,12 +142,12 @@ func inputSchemaForTool(name string) map[string]any {
 				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
 				"selection":            map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.yaml."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
-				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-plan-apply."},
+				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-draft-apply."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to bin/mihomo."},
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
 			},
-			"required": []string{"plan_id"},
+			"required": []string{"draft_id"},
 		}
 	case "nl_file":
 		return map[string]any{
@@ -186,7 +188,59 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"path", "edits"},
 		}
-	case "config_plan_render":
+	case "proxy_group_build":
+		matchIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"type":           map[string]any{"type": "string", "enum": []string{"name_regex"}, "description": "Selector type. name_regex matches subscription proxy names only."},
+				"pattern":        map[string]any{"type": "string", "description": "Regular expression matched against subscription proxy names."},
+				"source_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional subscription source ids to constrain matches."},
+				"min":            map[string]any{"type": "integer", "minimum": 0, "description": "Minimum required matches. Defaults to 1."},
+				"max":            map[string]any{"type": "integer", "minimum": 0, "description": "Maximum matches to materialize. 0 means unlimited."},
+				"case_sensitive": map[string]any{"type": "boolean", "description": "Whether pattern matching is case-sensitive. Defaults to false."},
+			},
+			"required": []string{"type", "pattern"},
+		}
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":                   map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
+				"match":                matchIntent,
+				"nodes":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
+				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test."},
+				"reason":               map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
+				"boundary":             map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
+				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
+				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+			},
+			"required": []string{"id", "mode"},
+		}
+	case "custom_rules_build":
+		ruleIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6"}, "description": "Mihomo rule type to generate."},
+				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, or CIDR value."},
+				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR rules when needed."},
+			},
+			"required": []string{"type", "value"},
+		}
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
+				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, or a proxy group id built by proxy_group_build."},
+				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
+				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
+			},
+			"required": []string{"id", "target", "rules"},
+		}
+	case "config_draft_render":
 		matchIntent := map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -210,6 +264,27 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "target"},
 		}
+		ruleIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6"}, "description": "Mihomo rule type to generate."},
+				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, or CIDR value."},
+				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR rules when needed."},
+			},
+			"required": []string{"type", "value"},
+		}
+		customRuleIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
+				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, or a proxy group id."},
+				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
+				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
+			},
+			"required": []string{"id", "target", "rules"},
+		}
 		proxyGroupIntent := map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -227,13 +302,13 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"plan_name":            map[string]any{"type": "string", "description": "Human-readable plan slug prefix."},
+				"draft_name":           map[string]any{"type": "string", "description": "Human-readable draft slug prefix."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
 				"policy":               map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
 				"mode":                 map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
 				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"output_dir":           map[string]any{"type": "string", "description": "Plan artifact root. Defaults to .runtime/plans."},
-				"config":               map[string]any{"type": "string", "description": "Candidate localClash config filename in the plan. Defaults to localclash.yaml."},
+				"drafts_dir":           map[string]any{"type": "string", "description": "Draft artifact root. Defaults to .runtime/drafts."},
+				"config":               map[string]any{"type": "string", "description": "Candidate localClash config filename in the draft. Defaults to localclash.yaml."},
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
 				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test. Defaults to true."},
@@ -242,9 +317,9 @@ func inputSchemaForTool(name string) map[string]any {
 					"additionalProperties": false,
 					"properties": map[string]any{
 						"packs":        map[string]any{"type": "array", "items": packIntent},
+						"custom_rules": map[string]any{"type": "array", "items": customRuleIntent},
 						"proxy_groups": map[string]any{"type": "array", "items": proxyGroupIntent},
 					},
-					"required": []string{"packs"},
 				},
 			},
 			"required": []string{"overlay"},

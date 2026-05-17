@@ -43,5 +43,6 @@ type OverlayRuleProvider struct {
 type OverlayRule struct {
 	Type     string `yaml:"type" json:"type"`
 	Provider string `yaml:"provider" json:"provider"`
+	Value    string `yaml:"value,omitempty" json:"value,omitempty"`
 	Target   string `yaml:"target" json:"target"`
 }

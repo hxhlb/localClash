@@ -260,12 +260,14 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":
 		return s.callSubscriptionsRefresh(ctx, args)
-	case "config_plan_apply":
-		return s.callConfigPlanApply(ctx, args)
-	case "config_plan_render":
-		return s.callConfigPlanRender(ctx, args)
-	case "config_render":
-		return s.callConfigRender(args)
+	case "proxy_group_build":
+		return s.callProxyGroupBuild(args)
+	case "custom_rules_build":
+		return callCustomRulesBuild(args)
+	case "config_draft_apply":
+		return s.callConfigDraftApply(ctx, args)
+	case "config_draft_render":
+		return s.callConfigDraftRender(ctx, args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
 	case "sed_file":
@@ -355,14 +357,123 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callProxyGroupBuild(args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PlanName            string                   `json:"plan_name"`
+		ID                  string             `json:"id"`
+		Mode                string             `json:"mode"`
+		Match               *localconfig.Match `json:"match"`
+		Nodes               []string           `json:"nodes"`
+		Reason              string             `json:"reason"`
+		Boundary            string             `json:"boundary"`
+		Subscription        string             `json:"subscription"`
+		SubscriptionConfig  string             `json:"subscription_config"`
+		SubscriptionRuntime string             `json:"subscription_runtime"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Subscription == "" {
+			in.Subscription = s.state.Paths.SubscriptionPath
+		}
+		if in.SubscriptionConfig == "" {
+			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
+		}
+		if in.SubscriptionRuntime == "" {
+			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
+		}
+	}
+	id := strings.TrimSpace(in.ID)
+	if id == "" {
+		return toolResult{}, fmt.Errorf("id is required")
+	}
+	group := localconfig.ProxyGroup{
+		Mode:     in.Mode,
+		Match:    in.Match,
+		Nodes:    append([]string{}, in.Nodes...),
+		Reason:   in.Reason,
+		Boundary: in.Boundary,
+	}
+	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+		Config:              localconfig.Config{ProxyGroups: map[string]localconfig.ProxyGroup{id: group}},
+		SubscriptionPath:    in.Subscription,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	resolvedGroup := resolved.Config.ProxyGroups[id]
+	proxyGroupIntent := configplan.OverlayProxyGroupIntent{
+		ID:       id,
+		Mode:     resolvedGroup.Mode,
+		Match:    resolvedGroup.Match,
+		Nodes:    append([]string{}, resolvedGroup.Nodes...),
+		Reason:   resolvedGroup.Reason,
+		Boundary: resolvedGroup.Boundary,
+	}
+	return jsonToolResult(map[string]any{
+		"proxy_group":    proxyGroupIntent,
+		"id":             id,
+		"target":         id,
+		"selected_nodes": resolvedGroup.SelectedNodes,
+	})
+}
+
+func callCustomRulesBuild(args json.RawMessage) (toolResult, error) {
+	var in localconfig.CustomRule
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	id := strings.TrimSpace(in.ID)
+	target := strings.TrimSpace(in.Target)
+	if id == "" {
+		return toolResult{}, fmt.Errorf("id is required")
+	}
+	if target == "" {
+		return toolResult{}, fmt.Errorf("target is required")
+	}
+	if len(in.Rules) == 0 {
+		return toolResult{}, fmt.Errorf("rules is required")
+	}
+	selection := rules.Selection{
+		Version: 1,
+		CustomRules: []rules.CustomRule{{
+			ID:     id,
+			Target: "DIRECT",
+			Reason: in.Reason,
+			Rules:  customRuleLinesForBuild(in.Rules),
+		}},
+	}
+	if _, err := rules.RenderFragment(selection, map[string]rules.PackCache{}); err != nil {
+		return toolResult{}, err
+	}
+	in.ID = id
+	in.Target = target
+	return jsonToolResult(map[string]any{
+		"custom_rule": in,
+		"id":          id,
+		"target":      target,
+		"rule_count":  len(in.Rules),
+	})
+}
+
+func customRuleLinesForBuild(lines []localconfig.CustomRuleLine) []rules.CustomRuleLine {
+	out := make([]rules.CustomRuleLine, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, rules.CustomRuleLine{Type: line.Type, Value: line.Value, NoResolve: line.NoResolve})
+	}
+	return out
+}
+
+func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		DraftName           string                   `json:"draft_name"`
 		Subscription        string                   `json:"subscription"`
 		Policy              string                   `json:"policy"`
 		Mode                string                   `json:"mode"`
 		RulesCache          string                   `json:"rules_cache"`
-		OutputDir           string                   `json:"output_dir"`
+		OutputDir           string                   `json:"drafts_dir"`
 		ConfigPath          string                   `json:"config"`
 		SubscriptionConfig  string                   `json:"subscription_config"`
 		SubscriptionRuntime string                   `json:"subscription_runtime"`
@@ -396,7 +507,7 @@ func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := configplan.Render(ctx, configplan.Options{
-		PlanName:            in.PlanName,
+		PlanName:            in.DraftName,
 		Subscription:        in.Subscription,
 		Policy:              in.Policy,
 		Mode:                in.Mode,
@@ -414,10 +525,10 @@ func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage)
 	return jsonToolResult(result)
 }
 
-func (s *Server) callConfigPlanApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callConfigDraftApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PlanID              string `json:"plan_id"`
-		PlansDir            string `json:"plans_dir"`
+		DraftID             string `json:"draft_id"`
+		DraftsDir           string `json:"drafts_dir"`
 		SummaryPath         string `json:"summary_path"`
 		Subscription        string `json:"subscription"`
 		Policy              string `json:"policy"`
@@ -466,8 +577,8 @@ func (s *Server) callConfigPlanApply(ctx context.Context, args json.RawMessage) 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := configplan.Apply(ctx, configplan.ApplyOptions{
-		PlanID:              in.PlanID,
-		PlansDir:            in.PlansDir,
+		PlanID:              in.DraftID,
+		PlansDir:            in.DraftsDir,
 		SummaryPath:         in.SummaryPath,
 		Subscription:        in.Subscription,
 		Policy:              in.Policy,
@@ -868,13 +979,13 @@ func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subsc
 			impact.State = "stale_exact_nodes"
 			impact.Error = err.Error()
 			impact.MissingNodes = append([]string{}, missingNodes.Nodes...)
-			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector"}
+			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector", "call proxy_group_build", "call config_draft_render", "call config_draft_apply after review"}
 			return impact
 		}
 		impact.State = "requires_agent_replan"
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
-		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call config_plan_render", "call config_plan_apply after review"}
+		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call proxy_group_build", "call config_draft_render", "call config_draft_apply after review"}
 		return impact
 	}
 	impact.State = "auto_applied"

@@ -58,8 +58,9 @@ type ApplyOptions struct {
 }
 
 type OverlayIntent struct {
-	Packs       []OverlayPackIntent       `json:"packs" yaml:"packs"`
-	ProxyGroups []OverlayProxyGroupIntent `json:"proxy_groups" yaml:"proxy_groups"`
+	Packs       []OverlayPackIntent       `json:"packs,omitempty" yaml:"packs,omitempty"`
+	CustomRules []OverlayCustomRuleIntent `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
+	ProxyGroups []OverlayProxyGroupIntent `json:"proxy_groups,omitempty" yaml:"proxy_groups,omitempty"`
 }
 
 type OverlayPackIntent struct {
@@ -77,8 +78,10 @@ type OverlayProxyGroupIntent struct {
 	Boundary string             `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 }
 
+type OverlayCustomRuleIntent = localconfig.CustomRule
+
 type Result struct {
-	PlanID      string           `json:"plan_id"`
+	PlanID      string           `json:"draft_id"`
 	Output      string           `json:"output"`
 	SummaryPath string           `json:"summary_path"`
 	ConfigPath  string           `json:"config_path"`
@@ -101,7 +104,7 @@ type PlanInputs struct {
 
 type ApplyResult struct {
 	Applied       bool                `json:"applied"`
-	PlanID        string              `json:"plan_id"`
+	PlanID        string              `json:"draft_id"`
 	SummaryPath   string              `json:"summary_path"`
 	ConfigPath    string              `json:"config_path"`
 	SelectionPath string              `json:"selection_path"`
@@ -127,6 +130,7 @@ type MihomoTestResult struct {
 
 type OverlaySummary struct {
 	Packs       []OverlayPackSummary       `json:"packs"`
+	CustomRules []OverlayCustomRuleSummary `json:"custom_rules"`
 	ProxyGroups []OverlayProxyGroupSummary `json:"proxy_groups"`
 }
 
@@ -147,6 +151,14 @@ type OverlayProxyGroupSummary struct {
 	Boundary      string             `json:"boundary,omitempty"`
 }
 
+type OverlayCustomRuleSummary struct {
+	ID        string                       `json:"id"`
+	Target    string                       `json:"target"`
+	RuleCount int                          `json:"rule_count"`
+	Reason    string                       `json:"reason,omitempty"`
+	Rules     []localconfig.CustomRuleLine `json:"rules,omitempty"`
+}
+
 type ChangesSummary struct {
 	RuleProvidersAdded int `json:"rule_providers_added"`
 	ProxyGroupsAdded   int `json:"proxy_groups_added"`
@@ -155,8 +167,8 @@ type ChangesSummary struct {
 
 func Render(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
-	if len(opts.Overlay.Packs) == 0 {
-		return Result{}, fmt.Errorf("overlay.packs is required")
+	if len(opts.Overlay.Packs) == 0 && len(opts.Overlay.CustomRules) == 0 {
+		return Result{}, fmt.Errorf("overlay.packs or overlay.custom_rules is required")
 	}
 
 	config := configFromOverlay(opts.Overlay)
@@ -355,7 +367,7 @@ func normalizeOptions(opts Options) Options {
 		opts.RulesCache = ".runtime/rules/packs"
 	}
 	if opts.OutputDir == "" {
-		opts.OutputDir = ".runtime/plans"
+		opts.OutputDir = filepath.Join(".runtime", "drafts")
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "localclash.yaml"
@@ -380,7 +392,7 @@ func normalizeOptions(opts Options) Options {
 
 func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 	if opts.PlansDir == "" {
-		opts.PlansDir = ".runtime/plans"
+		opts.PlansDir = filepath.Join(".runtime", "drafts")
 	}
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.yaml"
@@ -413,7 +425,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.WorkDir = ".runtime/mihomo"
 	}
 	if opts.BackupDir == "" {
-		opts.BackupDir = ".runtime/backups/config-plan-apply"
+		opts.BackupDir = filepath.Join(".runtime", "backups", "config-draft-apply")
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
@@ -423,7 +435,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 
 func normalizeApplyLocatorOptions(opts ApplyOptions) ApplyOptions {
 	if opts.PlansDir == "" {
-		opts.PlansDir = ".runtime/plans"
+		opts.PlansDir = filepath.Join(".runtime", "drafts")
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
@@ -458,6 +470,7 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 		Version:     1,
 		ProxyGroups: map[string]localconfig.ProxyGroup{},
 		Packs:       make([]localconfig.Pack, 0, len(overlay.Packs)),
+		CustomRules: make([]localconfig.CustomRule, 0, len(overlay.CustomRules)),
 	}
 	for _, group := range overlay.ProxyGroups {
 		config.ProxyGroups[group.ID] = localconfig.ProxyGroup{
@@ -471,16 +484,29 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	for _, pack := range overlay.Packs {
 		config.Packs = append(config.Packs, localconfig.Pack{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
 	}
+	for _, custom := range overlay.CustomRules {
+		config.CustomRules = append(config.CustomRules, custom)
+	}
 	return config
 }
 
 func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 	summary := OverlaySummary{
 		Packs:       make([]OverlayPackSummary, 0, len(resolved.Packs)),
+		CustomRules: make([]OverlayCustomRuleSummary, 0, len(resolved.CustomRules)),
 		ProxyGroups: make([]OverlayProxyGroupSummary, 0, len(resolved.ProxyGroups)),
 	}
 	for _, pack := range resolved.Packs {
 		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+	}
+	for _, custom := range resolved.CustomRules {
+		summary.CustomRules = append(summary.CustomRules, OverlayCustomRuleSummary{
+			ID:        custom.ID,
+			Target:    custom.Target,
+			RuleCount: custom.RuleCount,
+			Reason:    custom.Reason,
+			Rules:     append([]localconfig.CustomRuleLine{}, custom.Rules...),
+		})
 	}
 	for _, group := range resolved.ProxyGroups {
 		nodes := append([]string{}, group.SelectedNodes...)
@@ -663,10 +689,10 @@ func resolveSummaryPath(opts ApplyOptions) (string, error) {
 	}
 	id := strings.TrimSpace(opts.PlanID)
 	if id == "" {
-		return "", fmt.Errorf("plan_id is required")
+		return "", fmt.Errorf("draft_id is required")
 	}
 	if filepath.Base(id) != id || id == "." || id == ".." {
-		return "", fmt.Errorf("plan_id %q must be a single plan directory name", id)
+		return "", fmt.Errorf("draft_id %q must be a single draft directory name", id)
 	}
 	return filepath.Join(opts.PlansDir, id, "summary.json"), nil
 }
@@ -674,10 +700,19 @@ func resolveSummaryPath(opts ApplyOptions) (string, error) {
 func intentFromSummary(summary OverlaySummary) OverlayIntent {
 	intent := OverlayIntent{
 		Packs:       make([]OverlayPackIntent, 0, len(summary.Packs)),
+		CustomRules: make([]OverlayCustomRuleIntent, 0, len(summary.CustomRules)),
 		ProxyGroups: make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
 	}
 	for _, pack := range summary.Packs {
 		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+	}
+	for _, custom := range summary.CustomRules {
+		intent.CustomRules = append(intent.CustomRules, localconfig.CustomRule{
+			ID:     custom.ID,
+			Target: custom.Target,
+			Reason: custom.Reason,
+			Rules:  append([]localconfig.CustomRuleLine{}, custom.Rules...),
+		})
 	}
 	for _, group := range summary.ProxyGroups {
 		intent.ProxyGroups = append(intent.ProxyGroups, OverlayProxyGroupIntent{

@@ -225,7 +225,7 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			})
 		}
 		for _, line := range fragment.Rules {
-			rule, ok := parseRuleSetLine(line)
+			rule, ok := parseOverlayRuleLine(line)
 			if ok {
 				metadata.Overlay.Rules = append(metadata.Overlay.Rules, rule)
 			}
@@ -247,12 +247,19 @@ func proxyGroupMode(group rulespkg.ProxyGroup) string {
 	}
 }
 
-func parseRuleSetLine(line string) (configmeta.OverlayRule, bool) {
+func parseOverlayRuleLine(line string) (configmeta.OverlayRule, bool) {
 	parts := strings.Split(line, ",")
-	if len(parts) < 3 || parts[0] != "RULE-SET" {
+	if len(parts) < 3 {
 		return configmeta.OverlayRule{}, false
 	}
-	return configmeta.OverlayRule{Type: parts[0], Provider: parts[1], Target: parts[2]}, true
+	switch parts[0] {
+	case "RULE-SET":
+		return configmeta.OverlayRule{Type: parts[0], Provider: parts[1], Target: parts[2]}, true
+	case "DOMAIN", "DOMAIN-SUFFIX", "IP-CIDR", "IP-CIDR6":
+		return configmeta.OverlayRule{Type: parts[0], Value: parts[1], Target: parts[2]}, true
+	default:
+		return configmeta.OverlayRule{}, false
+	}
 }
 
 func stringValue(value any) string {

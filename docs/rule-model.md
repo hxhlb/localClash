@@ -224,24 +224,30 @@ Current code already has:
 - doctor checks for baseline injection, rule targets, provider references, and
   `mihomo -t`
 
+Current code now has:
+
+- a localClash user config file model
+- renderer support for selected third-party packs
+- renderer support for inline `custom_rules`
+- MCP draft tools for proxy groups, custom rules, and reviewed config apply
+
 Current code does not yet have:
 
-- a localClash user config file
-- standalone rule pack files
-- renderer support for selected packs
+- standalone local rule pack files
 - UI support for base policy and rule pack selection
-- doctor checks for pack schema or pack target references
+- doctor checks for custom rule schema or custom rule target references
 
 ## Development Sequence
 
 Build this in small steps:
 
-1. Define the localClash user config file.
-2. Add declarative `rule-packs/*.yaml`.
-3. Teach the renderer to insert enabled packs before the base preset.
-4. Add doctor checks for pack parsing, target validity, and missing providers.
-5. Add CLI flags for config path and dry-run diff.
-6. Expose the same model through the local web UI.
+1. Extend MCP draft tools until agents can express common routing intent without
+   editing YAML directly.
+2. Add declarative `rule-packs/*.yaml` for localClash-owned reusable packs.
+3. Add doctor checks for pack parsing, custom rule validity, target validity,
+   and missing providers.
+4. Add CLI flags for config path and dry-run diff.
+5. Expose the same model through the local web UI.
 
 Do not start by adding many pack contents. First make the mechanism correct.
 
@@ -259,4 +265,3 @@ A correct implementation must satisfy:
 - doctor can explain missing files, invalid rules, missing targets, missing
   providers, and failed `mihomo -t`
 - sensitive local files remain ignored by git
-

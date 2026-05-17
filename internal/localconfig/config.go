@@ -16,6 +16,7 @@ import (
 type Config struct {
 	Version     int                   `json:"version" yaml:"version"`
 	ProxyGroups map[string]ProxyGroup `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
+	CustomRules []CustomRule          `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
 	Packs       []Pack                `json:"packs" yaml:"packs,omitempty"`
 }
 
@@ -43,6 +44,19 @@ type Pack struct {
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
+type CustomRule struct {
+	ID     string           `json:"id" yaml:"id"`
+	Target string           `json:"target" yaml:"target"`
+	Reason string           `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Rules  []CustomRuleLine `json:"rules" yaml:"rules"`
+}
+
+type CustomRuleLine struct {
+	Type      string `json:"type" yaml:"type"`
+	Value     string `json:"value" yaml:"value"`
+	NoResolve bool   `json:"no_resolve,omitempty" yaml:"no_resolve,omitempty"`
+}
+
 type ResolveOptions struct {
 	Config              Config
 	SubscriptionPath    string
@@ -55,6 +69,7 @@ type Resolved struct {
 	Config      Config             `json:"config"`
 	Selection   rules.Selection    `json:"selection"`
 	ProxyGroups []ProxyGroupResult `json:"proxy_groups"`
+	CustomRules []CustomRuleResult `json:"custom_rules"`
 	Packs       []PackResult       `json:"packs"`
 	Warnings    []string           `json:"warnings"`
 }
@@ -73,6 +88,14 @@ type PackResult struct {
 	ID     string `json:"id"`
 	Target string `json:"target"`
 	Reason string `json:"reason,omitempty"`
+}
+
+type CustomRuleResult struct {
+	ID        string           `json:"id"`
+	Target    string           `json:"target"`
+	RuleCount int              `json:"rule_count"`
+	Reason    string           `json:"reason,omitempty"`
+	Rules     []CustomRuleLine `json:"rules,omitempty"`
 }
 
 type SubscriptionNode struct {
@@ -212,7 +235,13 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		packResults = append(packResults, PackResult{ID: ref.ID, Target: target, Reason: pack.Reason})
 	}
 	resolvedConfig.Packs = resolvedPacks
-	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, Packs: packResults}, nil
+	resolvedCustomRules, customRuleResults, err := resolveCustomRules(resolvedConfig.CustomRules, selection.ProxyGroups)
+	if err != nil {
+		return Resolved{}, err
+	}
+	resolvedConfig.CustomRules = resolvedCustomRules
+	selection.CustomRules = customRulesForSelection(resolvedCustomRules)
+	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, CustomRules: customRuleResults, Packs: packResults}, nil
 }
 
 type SubscriptionNodeOptions struct {
@@ -380,6 +409,89 @@ func resolveExactNodes(id string, rawNodes []string, nodes []SubscriptionNode) (
 		return nil, fmt.Errorf("proxy group %q has no nodes or match selector", id)
 	}
 	return selected, nil
+}
+
+func resolveCustomRules(customRules []CustomRule, proxyGroups map[string]rules.ProxyGroup) ([]CustomRule, []CustomRuleResult, error) {
+	resolved := make([]CustomRule, 0, len(customRules))
+	results := make([]CustomRuleResult, 0, len(customRules))
+	ids := map[string]bool{}
+	for _, custom := range customRules {
+		id := strings.TrimSpace(custom.ID)
+		if id == "" {
+			return nil, nil, fmt.Errorf("custom rule id is required")
+		}
+		if ids[id] {
+			return nil, nil, fmt.Errorf("custom rule %q is defined more than once", id)
+		}
+		ids[id] = true
+		target := strings.TrimSpace(custom.Target)
+		if target == "" {
+			return nil, nil, fmt.Errorf("custom rule %q target is required", id)
+		}
+		if !isBuiltInTarget(target) {
+			if _, ok := proxyGroups[target]; !ok {
+				return nil, nil, fmt.Errorf("custom rule target %q requires a matching proxy group", target)
+			}
+		}
+		if len(custom.Rules) == 0 {
+			return nil, nil, fmt.Errorf("custom rule %q rules is required", id)
+		}
+		lines := make([]CustomRuleLine, 0, len(custom.Rules))
+		for _, rule := range custom.Rules {
+			line, err := normalizeCustomRuleLine(id, rule)
+			if err != nil {
+				return nil, nil, err
+			}
+			lines = append(lines, line)
+		}
+		custom.ID = id
+		custom.Target = target
+		custom.Rules = lines
+		resolved = append(resolved, custom)
+		results = append(results, CustomRuleResult{
+			ID:        id,
+			Target:    target,
+			RuleCount: len(lines),
+			Reason:    custom.Reason,
+			Rules:     append([]CustomRuleLine{}, lines...),
+		})
+	}
+	return resolved, results, nil
+}
+
+func normalizeCustomRuleLine(id string, rule CustomRuleLine) (CustomRuleLine, error) {
+	rule.Type = strings.ToLower(strings.TrimSpace(rule.Type))
+	rule.Value = strings.TrimSpace(rule.Value)
+	if rule.Value == "" {
+		return CustomRuleLine{}, fmt.Errorf("custom rule %q contains an empty value", id)
+	}
+	switch rule.Type {
+	case "domain", "domain_suffix", "ip_cidr", "ip_cidr6":
+	default:
+		return CustomRuleLine{}, fmt.Errorf("custom rule %q type %q is unsupported", id, rule.Type)
+	}
+	return rule, nil
+}
+
+func customRulesForSelection(customRules []CustomRule) []rules.CustomRule {
+	out := make([]rules.CustomRule, 0, len(customRules))
+	for _, custom := range customRules {
+		lines := make([]rules.CustomRuleLine, 0, len(custom.Rules))
+		for _, line := range custom.Rules {
+			lines = append(lines, rules.CustomRuleLine{
+				Type:      line.Type,
+				Value:     line.Value,
+				NoResolve: line.NoResolve,
+			})
+		}
+		out = append(out, rules.CustomRule{
+			ID:     custom.ID,
+			Target: custom.Target,
+			Reason: custom.Reason,
+			Rules:  lines,
+		})
+	}
+	return out
 }
 
 func normalizeResolveOptions(opts ResolveOptions) ResolveOptions {

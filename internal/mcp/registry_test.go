@@ -48,11 +48,17 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["subscription_nodes_search"].SafetyLevel != SafeRead {
 		t.Fatalf("subscription_nodes_search safety = %q, want %q", byName["subscription_nodes_search"].SafetyLevel, SafeRead)
 	}
-	if byName["config_plan_apply"].SafetyLevel != SafeWrite {
-		t.Fatalf("config_plan_apply safety = %q, want %q", byName["config_plan_apply"].SafetyLevel, SafeWrite)
+	if byName["config_draft_apply"].SafetyLevel != SafeWrite {
+		t.Fatalf("config_draft_apply safety = %q, want %q", byName["config_draft_apply"].SafetyLevel, SafeWrite)
 	}
-	if byName["config_plan_render"].SafetyLevel != SafeWrite {
-		t.Fatalf("config_plan_render safety = %q, want %q", byName["config_plan_render"].SafetyLevel, SafeWrite)
+	if byName["config_draft_render"].SafetyLevel != SafeWrite {
+		t.Fatalf("config_draft_render safety = %q, want %q", byName["config_draft_render"].SafetyLevel, SafeWrite)
+	}
+	if byName["proxy_group_build"].SafetyLevel != SafeWrite {
+		t.Fatalf("proxy_group_build safety = %q, want %q", byName["proxy_group_build"].SafetyLevel, SafeWrite)
+	}
+	if byName["custom_rules_build"].SafetyLevel != SafeWrite {
+		t.Fatalf("custom_rules_build safety = %q, want %q", byName["custom_rules_build"].SafetyLevel, SafeWrite)
 	}
 	if byName["sed_file"].SafetyLevel != SafeWrite {
 		t.Fatalf("sed_file safety = %q, want %q", byName["sed_file"].SafetyLevel, SafeWrite)
@@ -72,7 +78,7 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
 		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)
 	}
-	for _, name := range []string{"config_test", "config_render", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
+	for _, name := range []string{"config_test", "config_render", "config_plan_apply", "config_plan_render", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
 		if byName[name].Name != "" {
 			t.Fatalf("removed tool %q should not be registered", name)
 		}
