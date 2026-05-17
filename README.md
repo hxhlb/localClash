@@ -117,6 +117,17 @@ tools. It should not expose every internal CLI/debug helper as a product-level
 tool. Rules adaptation, rules fragment rendering, and raw Mihomo config testing
 are internal pipeline or CLI/debug capabilities, not MCP product tools.
 
+Deploy the router MCP server:
+
+```bash
+scripts/deploy-router.sh --host root@192.168.6.1
+```
+
+The script builds `bin/linux-arm64/localclash`, installs it to the router at
+`/usr/local/bin/localclash`, ensures `/usr/bin/localclash` is available, installs
+the OpenWrt procd service `/etc/init.d/localclash-mcp`, and restarts the MCP HTTP
+server on `http://192.168.6.1:8765/mcp`.
+
 Tool safety levels are part of the tool metadata:
 
 - `safe_read`: observation and diagnostics.
