@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -102,6 +102,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 func TestRegistrySafetyLevels(t *testing.T) {
 	want := map[string]SafetyLevel{
 		"doctor":                    SafeRead,
+		"environment_inspect":       SafeRead,
 		"config_base_inspect":       SafeRead,
 		"config_overlay_inspect":    SafeRead,
 		"nl_file":                   SafeRead,
@@ -757,6 +758,60 @@ func TestToolsCallDoctorReturnsSerializableResult(t *testing.T) {
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("doctor structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallEnvironmentInspectReturnsSerializableResult(t *testing.T) {
+	dir := t.TempDir()
+	refRoot := filepath.Join(dir, "openclash-reference")
+	if err := os.MkdirAll(filepath.Join(refRoot, "snapshot"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.yaml"),
+			GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+			RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+			CorePath:           filepath.Join(dir, "bin", "mihomo"),
+		},
+	}
+	server := NewServerWithState(state)
+	req, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "environment_inspect",
+			"arguments": map[string]any{
+				"openclash_reference_root": refRoot,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := server.Handle(context.Background(), req)
+	if resp.Error != nil {
+		t.Fatalf("environment_inspect returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if _, ok := content["host"].(map[string]any); !ok {
+		t.Fatalf("content = %+v, want host object", content)
+	}
+	if _, ok := content["network_capabilities"]; ok {
+		t.Fatalf("content uses old network_capabilities field: %+v", content)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("environment_inspect structured content is not serializable: %v", err)
+	}
+	data, _ := json.Marshal(result.StructuredContent)
+	for _, secret := range []string{"subscription-url", "server.example.com"} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("environment_inspect leaked %q in %s", secret, data)
+		}
 	}
 }
 

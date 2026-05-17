@@ -16,6 +16,7 @@ import (
 	"localclash/internal/configrender"
 	"localclash/internal/corerun"
 	"localclash/internal/doctor"
+	"localclash/internal/envinspect"
 	"localclash/internal/fileops"
 	"localclash/internal/rules"
 	"localclash/internal/subscriptions"
@@ -234,6 +235,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callConfigOverlayInspect(args)
 	case "doctor":
 		return s.callDoctor(ctx, args)
+	case "environment_inspect":
+		return s.callEnvironmentInspect(ctx, args)
 	case "nl_file":
 		return callNLFile(args)
 	case "packs_list":
@@ -676,6 +679,24 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 		return toolResult{}, err
 	}
 	return jsonToolResult(report)
+}
+
+func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		OpenClashReferenceRoot string `json:"openclash_reference_root"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	opts := envinspect.Options{OpenClashReferenceRoot: in.OpenClashReferenceRoot}
+	if s.state != nil {
+		opts.Paths = s.state.Paths
+	}
+	result, err := envinspect.Inspect(ctx, opts)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
 }
 
 func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {

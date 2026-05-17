@@ -46,6 +46,7 @@ func Registry() []Tool {
 		{Name: "config_base_inspect", SafetyLevel: SafeRead, Description: "Inspect generated base config summary without exposing proxy credentials."},
 		{Name: "config_overlay_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash overlay metadata and summaries."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
+		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, localClash state, and OpenClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},
 		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry."},
 		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter generated rule pack cache entries."},
@@ -113,6 +114,14 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties":           map[string]any{},
+		}
+	case "environment_inspect":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"openclash_reference_root": map[string]any{"type": "string", "description": "Optional local directory containing OpenClash reference snapshots outside the localClash runtime."},
+			},
 		}
 	case "nl_file":
 		return map[string]any{
