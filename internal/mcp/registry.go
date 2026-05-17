@@ -54,7 +54,7 @@ func Registry() []Tool {
 		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter generated rule pack cache entries."},
 		{Name: "subscription_nodes_list", SafetyLevel: SafeRead, Description: "List safe subscription proxy name/type summaries without exposing connection credentials."},
 		{Name: "subscription_nodes_search", SafetyLevel: SafeRead, Description: "Search subscription proxy names and return safe name/type summaries; does not verify network egress location."},
-		{Name: "runtime_preset_status", SafetyLevel: SafeRead, Description: "Inspect the active Mihomo runtime preset and its safe summary without exposing proxy credentials."},
+		{Name: "runtime_profile_status", SafetyLevel: SafeRead, Description: "Inspect the active Mihomo runtime profile and its safe summary without exposing proxy credentials."},
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
@@ -64,7 +64,7 @@ func Registry() []Tool {
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read provider rules for one pack by id, downloading missing provider-cache entries for that pack only."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_draft_render.overlay.proxy_groups when a draft should use it."},
-		{Name: "runtime_preset_configure", SafetyLevel: SafeWrite, Description: "Switch the active Mihomo runtime preset between normal and router by writing mihomo-preset.yaml, then rerender generated/mihomo.yaml when the effective subscription is available. This does not edit DNS/TUN details directly and does not start or restart Mihomo."},
+		{Name: "runtime_profile_configure", SafetyLevel: SafeWrite, Description: "Switch the active Mihomo runtime mode and/or core by writing localclash-runtime.yaml, then rerender generated/mihomo.yaml when the effective subscription is available. This does not edit DNS/TUN details directly and does not start or restart Mihomo."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start the Mihomo runtime from generated config, rendering generated/mihomo.yaml first when the effective subscription is available but the generated config is missing. Requires external Agent/MCP client confirmation; starting or restarting the proxy runtime may temporarily interrupt network connectivity, and the Agent itself may be disconnected if it depends on the current network/proxy path."},
@@ -146,12 +146,12 @@ func inputSchemaForTool(name string) map[string]any {
 				"policy":               map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
 				"mode":                 map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
 				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"preset_config":        map[string]any{"type": "string", "description": "Runtime preset YAML path. Defaults to mihomo-preset.yaml."},
+				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
 				"selection":            map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.yaml."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
 				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-draft-apply."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true."},
-				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to bin/mihomo."},
+				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
 			},
 			"required": []string{"draft_id"},
@@ -216,7 +216,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"id":                   map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
 				"match":                matchIntent,
 				"nodes":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test."},
+				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test, smart requires the smart core."},
 				"reason":               map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
 				"boundary":             map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
@@ -299,7 +299,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"id":       map[string]any{"type": "string", "description": "Proxy group id referenced by packs[].target, for example SteamHK."},
 				"match":    matchIntent,
 				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test."},
+				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test, smart requires the smart core."},
 				"reason":   map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs Agent involvement."},
 				"boundary": map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
 			},
@@ -314,7 +314,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"policy":               map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
 				"mode":                 map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
 				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"preset_config":        map[string]any{"type": "string", "description": "Runtime preset YAML path. Defaults to mihomo-preset.yaml."},
+				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
 				"drafts_dir":           map[string]any{"type": "string", "description": "Draft artifact root. Defaults to .runtime/drafts."},
 				"config":               map[string]any{"type": "string", "description": "Candidate localClash config filename in the draft. Defaults to localclash.yaml."},
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
@@ -362,28 +362,28 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"config":      map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to generated/mihomo.yaml."},
 				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path. Defaults to bin/mihomo."},
+				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path. Defaults to the active runtime profile core path."},
 				"foreground":  map[string]any{"type": "boolean", "description": "Foreground mode is not supported by MCP run_runtime; use CLI run for foreground execution."},
 				"log_file":    map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 			},
 		}
-	case "runtime_preset_status":
+	case "runtime_profile_status":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config": map[string]any{"type": "string", "description": "Runtime preset YAML path. Defaults to mihomo-preset.yaml."},
+				"config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
 			},
 		}
-	case "runtime_preset_configure":
+	case "runtime_profile_configure":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"preset": map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Runtime preset to activate."},
-				"config": map[string]any{"type": "string", "description": "Runtime preset YAML path. Defaults to mihomo-preset.yaml."},
+				"mode":   map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Runtime mode to activate."},
+				"core":   map[string]any{"type": "string", "enum": []string{"meta", "smart"}, "description": "Runtime core flavor to activate."},
+				"config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
 			},
-			"required": []string{"preset"},
 		}
 	case "runtime_status":
 		return map[string]any{
@@ -471,7 +471,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"selection":         map[string]any{"type": "string", "description": "Derived pack selection path. Defaults to localclash-packs.yaml."},
 				"policy":            map[string]any{"type": "string", "description": "Policy directory used when auto-rendering after selector refresh."},
 				"rules_cache":       map[string]any{"type": "string", "description": "Rule pack cache directory used when auto-rendering after selector refresh."},
-				"preset_config":     map[string]any{"type": "string", "description": "Runtime preset YAML path used when auto-rendering after selector refresh. Defaults to mihomo-preset.yaml."},
+				"runtime_profile":   map[string]any{"type": "string", "description": "Runtime profile YAML path used when auto-rendering after selector refresh. Defaults to localclash-runtime.yaml."},
 				"output":            map[string]any{"type": "string", "description": "Generated Mihomo config path to update when selector refresh succeeds. Defaults to generated/mihomo.yaml."},
 			},
 		}

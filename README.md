@@ -218,19 +218,21 @@ MCP config inspection tools:
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from future replaceable overlay config.
 
-MCP runtime preset tools:
+MCP runtime profile tools:
 
-- `runtime_preset_status`: inspect the active Mihomo preset and a safe summary.
-- `runtime_preset_configure`: switch the active preset in `mihomo-preset.yaml`
-  to `normal` or `router`, then rerender `generated/mihomo.yaml` when the
+- `runtime_profile_status`: inspect the active mode, core, core path, and safe
+  Mihomo summary.
+- `runtime_profile_configure`: switch `mode` (`normal` or `router`) and/or
+  `core` (`meta` or `smart`) in `localclash-runtime.yaml`, then rerender
+  `generated/mihomo.yaml` when the
   effective subscription is available. It does not start or restart Mihomo and
   does not expose individual DNS, TUN, or firewall switches.
 
-`normal` is the standalone local proxy preset and matches the original generated
-Mihomo shell. `router` is a transparent-proxy preset based on the local
+`normal` is the standalone local proxy profile and matches the original generated
+Mihomo shell. `router` is a transparent-proxy profile based on the local
 OpenClash redir-host-mix reference. Advanced users can edit
-`mihomo-preset.yaml` directly, or ask an agent to use `nl_file` and `sed_file`
-for explicit line-based edits, but the product MCP path is preset switching.
+`localclash-runtime.yaml` directly, or ask an agent to use `nl_file` and `sed_file`
+for explicit line-based edits, but the product MCP path is profile switching.
 
 MCP draft-building tools:
 
@@ -353,13 +355,16 @@ credentials.
 
 ## Core Download
 
-Download the matching Mihomo core for the machine running the command:
+Download the current host Mihomo Meta core:
 
 ```bash
 go run . core download
 ```
 
-By default the command detects the current OS and CPU architecture, selects the matching `MetaCubeX/mihomo` release asset, decompresses it, and writes the binary to `bin/mihomo` or `bin/mihomo.exe`.
+By default the command targets the current host and downloads only the host
+`meta` core from `MetaCubeX/mihomo`, for example
+`bin/darwin-arm64/mihomo-meta` on macOS arm64. It does not silently download a
+Linux Smart core on macOS.
 
 To inspect the selected release asset without downloading:
 
@@ -367,10 +372,17 @@ To inspect the selected release asset without downloading:
 go run . core download --dry-run
 ```
 
-To download a core for another target, pass `--os` and `--arch` explicitly:
+To download router cores, make the router target explicit. This downloads Linux
+`meta` and OpenClash `smart` cores for the requested architecture:
 
 ```bash
-go run . core download --os linux --arch arm64 --output bin/clash_meta
+go run . core download --target router --arch arm64 --force
+```
+
+To download one exact flavor or custom output path:
+
+```bash
+go run . core download --target router --flavor smart --arch arm64 --output bin/linux-arm64/mihomo-smart
 ```
 
 ## Subscription Download
@@ -411,9 +423,9 @@ go run . config render --force
 
 The default render path is `generated/mihomo.yaml`. The renderer treats the
 subscription as a proxy source and owns the runtime rules, rule providers, and
-proxy groups locally. It also applies the active `mihomo-preset.yaml` runtime
-preset; use `go run . config render --preset <path> --force` to test an
-alternate preset file. For MCP-managed routing changes, prefer
+proxy groups locally. It also applies the active `localclash-runtime.yaml` runtime
+profile; use `go run . config render --runtime-profile <path> --force` to test an
+alternate profile file. For MCP-managed routing changes, prefer
 `config_draft_render` followed by `config_draft_apply`; direct `config render` is
 primarily a CLI/debug helper.
 
@@ -425,7 +437,7 @@ the default base routing preset, not an optional rule pack.
 Test the generated config:
 
 ```bash
-./bin/mihomo -d .runtime/mihomo -f generated/mihomo.yaml -t
+./bin/darwin-arm64/mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml -t
 ```
 
 Run the generated config:
@@ -437,7 +449,7 @@ go run . run
 By default this is equivalent to:
 
 ```bash
-./bin/mihomo -d .runtime/mihomo -f generated/mihomo.yaml
+./bin/darwin-arm64/mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml
 ```
 
 Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
@@ -453,7 +465,7 @@ go run . reset
 
 The command deletes `.runtime/`, `generated/`, `subscription*.yaml`,
 `localclash.yaml`, `localclash-packs.yaml`, `localclash-subscriptions.yaml`, and
-`mihomo-preset.yaml`. It keeps downloaded binaries in `bin/`, built-in
+`localclash-runtime.yaml`. It keeps downloaded binaries in `bin/`, built-in
 policies, rule sources, source code, docs, and scripts. By default it prints the
 delete plan and requires typing `reset localclash`; use `--dry-run` to inspect
 the plan only or `--yes` for non-interactive SSH/script usage. If Mihomo is

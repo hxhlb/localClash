@@ -120,6 +120,29 @@ func TestRenderFragmentMaterializesProxyGroup(t *testing.T) {
 	}
 }
 
+func TestRenderFragmentMaterializesSmartProxyGroup(t *testing.T) {
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"AI": {
+				Nodes: []string{"SG Singapore", "JP Tokyo"},
+				Smart: true,
+			},
+		},
+		EnabledPack: []SelectedPack{{Source: "sukkaw", Pack: "ai", Target: "AI"}},
+	}
+	fragment, err := RenderFragment(selection, testPackCaches(), []string{"SG Singapore", "JP Tokyo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragment.ProxyGroups) != 1 {
+		t.Fatalf("proxy groups = %+v, want one smart group", fragment.ProxyGroups)
+	}
+	group := fragment.ProxyGroups[0]
+	if group["type"] != "smart" || group["uselightgbm"] != true || group["prefer-asn"] != true {
+		t.Fatalf("smart group = %+v, want smart defaults", group)
+	}
+}
+
 func TestRenderFragmentRendersCustomRulesBeforePacks(t *testing.T) {
 	selection := Selection{
 		ProxyGroups: map[string]ProxyGroup{

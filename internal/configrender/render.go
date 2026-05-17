@@ -10,7 +10,7 @@ import (
 
 	"localclash/internal/configmeta"
 	rulespkg "localclash/internal/rules"
-	"localclash/internal/runtimepreset"
+	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,16 +22,17 @@ type Options struct {
 	OutputPath         string
 	PacksSelectionPath string
 	RulesCacheDir      string
-	PresetPath         string
+	RuntimeProfilePath string
 	Force              bool
 }
 
 type Result struct {
-	OutputPath string
-	Mode       string
-	Preset     string
-	ProxyCount int
-	RuleCount  int
+	OutputPath  string
+	Mode        string
+	RuntimeMode string
+	Core        string
+	ProxyCount  int
+	RuleCount   int
 }
 
 type policy struct {
@@ -117,7 +118,7 @@ func Render(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	presetName, preset, _, err := runtimepreset.ActivePreset(opts.PresetPath)
+	runtimeFile, profile, _, err := runtimeprofile.ActiveProfile(opts.RuntimeProfilePath)
 	if err != nil {
 		return Result{}, err
 	}
@@ -154,7 +155,7 @@ func Render(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	runtimepreset.ApplyToConfig(rendered, preset)
+	runtimeprofile.ApplyToConfig(rendered, profile)
 	rendered[configmeta.Key] = buildLocalClashMetadata(selection, fragment)
 
 	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
@@ -169,11 +170,12 @@ func Render(opts Options) (Result, error) {
 	}
 
 	return Result{
-		OutputPath: opts.OutputPath,
-		Mode:       modeName,
-		Preset:     presetName,
-		ProxyCount: len(proxyNames),
-		RuleCount:  len(rendered["rules"].([]string)),
+		OutputPath:  opts.OutputPath,
+		Mode:        modeName,
+		RuntimeMode: runtimeFile.Mode,
+		Core:        runtimeFile.Core,
+		ProxyCount:  len(proxyNames),
+		RuleCount:   len(rendered["rules"].([]string)),
 	}, nil
 }
 
@@ -247,6 +249,8 @@ func proxyGroupMode(group rulespkg.ProxyGroup) string {
 	switch {
 	case group.Auto:
 		return "auto"
+	case group.Smart:
+		return "smart"
 	case group.Manual:
 		return "manual"
 	case group.Direct:
@@ -291,8 +295,8 @@ func normalizeOptions(opts Options) Options {
 	if opts.RulesCacheDir == "" {
 		opts.RulesCacheDir = ".runtime/rules/packs"
 	}
-	if opts.PresetPath == "" {
-		opts.PresetPath = runtimepreset.DefaultPath
+	if opts.RuntimeProfilePath == "" {
+		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	return opts
 }

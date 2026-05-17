@@ -113,6 +113,7 @@ target_options:
   - proxy
   - direct
   - manual
+  - smart
 rules:
   - domain_suffix: openai.com
   - domain_suffix: chatgpt.com
@@ -136,7 +137,7 @@ enabled_rule_packs:
 The UI should save this localClash config and trigger a render. It should not
 patch the generated Mihomo runtime config.
 
-### 4. Base Routing Preset
+### 4. Base Routing RuntimeProfile
 
 The base routing preset defines the public internet routing philosophy. The
 default preset is currently Loyalsoldier.

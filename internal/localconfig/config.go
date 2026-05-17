@@ -200,8 +200,10 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 			ruleGroup.Manual = true
 		case "auto":
 			ruleGroup.Auto = true
+		case "smart":
+			ruleGroup.Smart = true
 		default:
-			return Resolved{}, fmt.Errorf("proxy group %q mode must be manual or auto", id)
+			return Resolved{}, fmt.Errorf("proxy group %q mode must be manual, auto, or smart", id)
 		}
 		selection.ProxyGroups[id] = ruleGroup
 		groupResults = append(groupResults, ProxyGroupResult{

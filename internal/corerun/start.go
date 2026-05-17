@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"localclash/internal/runtimeprofile"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,7 +115,7 @@ func normalizeStartOptions(opts StartOptions) StartOptions {
 	opts.WorkDir = strings.TrimSpace(opts.WorkDir)
 	opts.LogPath = strings.TrimSpace(opts.LogPath)
 	if opts.CorePath == "" {
-		opts.CorePath = "bin/mihomo"
+		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "generated/mihomo.yaml"

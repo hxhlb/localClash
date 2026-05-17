@@ -14,6 +14,7 @@ import (
 
 	"localclash/internal/appinit"
 	"localclash/internal/rules"
+	"localclash/internal/runtimeprofile"
 )
 
 func TestHandleInitialize(t *testing.T) {
@@ -84,7 +85,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_preset_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_preset_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -113,7 +114,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscription_nodes_list":   SafeRead,
 		"subscription_nodes_search": SafeRead,
 		"runtime_status":            SafeRead,
-		"runtime_preset_status":     SafeRead,
+		"runtime_profile_status":    SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
 		"config_draft_apply":        SafeWrite,
@@ -122,7 +123,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"custom_rules_build":        SafeWrite,
 		"pack_rules_prefetch":       SafeWrite,
 		"pack_rules_read":           SafeWrite,
-		"runtime_preset_configure":  SafeWrite,
+		"runtime_profile_configure": SafeWrite,
 		"sed_file":                  SafeWrite,
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
@@ -184,11 +185,11 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 	}
 }
 
-func TestToolsCallRuntimePresetConfigureAndStatus(t *testing.T) {
+func TestToolsCallRuntimeProfileConfigureAndStatus(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "mihomo-preset.yaml")
+	path := filepath.Join(dir, "localclash-runtime.yaml")
 	server := NewServerWithState(appinit.RuntimeState{
-		Paths: appinit.RuntimePaths{PresetPath: path},
+		Paths: appinit.RuntimePaths{RuntimeProfilePath: path},
 	})
 
 	configure := callHandleWithServer(t, server, map[string]any{
@@ -196,17 +197,17 @@ func TestToolsCallRuntimePresetConfigureAndStatus(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "runtime_preset_configure",
-			"arguments": map[string]any{"preset": "router"},
+			"name":      "runtime_profile_configure",
+			"arguments": map[string]any{"mode": "router", "core": "smart"},
 		},
 	})
 	if configure.Error != nil {
-		t.Fatalf("runtime_preset_configure returned JSON-RPC error: %+v", configure.Error)
+		t.Fatalf("runtime_profile_configure returned JSON-RPC error: %+v", configure.Error)
 	}
 	configureResult := marshalToolResult(t, configure.Result)
 	configured := configureResult.StructuredContent.(map[string]any)
-	if configured["active"] != "router" || configured["exists"] != true {
-		t.Fatalf("configure content = %+v, want router active and exists", configured)
+	if configured["mode"] != "router" || configured["core"] != "smart" || configured["exists"] != true {
+		t.Fatalf("configure content = %+v, want router smart and exists", configured)
 	}
 
 	statusResp := callHandleWithServer(t, server, map[string]any{
@@ -214,23 +215,26 @@ func TestToolsCallRuntimePresetConfigureAndStatus(t *testing.T) {
 		"id":      2,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "runtime_preset_status",
+			"name":      "runtime_profile_status",
 			"arguments": map[string]any{},
 		},
 	})
 	if statusResp.Error != nil {
-		t.Fatalf("runtime_preset_status returned JSON-RPC error: %+v", statusResp.Error)
+		t.Fatalf("runtime_profile_status returned JSON-RPC error: %+v", statusResp.Error)
 	}
 	statusResult := marshalToolResult(t, statusResp.Result)
 	status := statusResult.StructuredContent.(map[string]any)
-	if status["active"] != "router" || status["path"] != path {
-		t.Fatalf("status = %+v, want router active at configured path", status)
+	if status["mode"] != "router" || status["core"] != "smart" || status["path"] != path {
+		t.Fatalf("status = %+v, want router smart at configured path", status)
+	}
+	if server.state.Paths.CorePath != runtimeprofile.SmartCorePath {
+		t.Fatalf("server core path = %q, want smart core path", server.state.Paths.CorePath)
 	}
 }
 
-func TestToolsCallRuntimePresetConfigureRerendersGeneratedConfig(t *testing.T) {
+func TestToolsCallRuntimeProfileConfigureRerendersGeneratedConfig(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	presetPath := filepath.Join(filepath.Dir(paths.subscription), "mihomo-preset.yaml")
+	profilePath := filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.yaml")
 	outputPath := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
@@ -239,7 +243,7 @@ func TestToolsCallRuntimePresetConfigureRerendersGeneratedConfig(t *testing.T) {
 			RulesCacheDir:       paths.cache,
 			PacksSelectionPath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-packs.yaml"),
 			GeneratedConfig:     outputPath,
-			PresetPath:          presetPath,
+			RuntimeProfilePath:  profilePath,
 			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.yaml"),
 			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
 		},
@@ -250,17 +254,17 @@ func TestToolsCallRuntimePresetConfigureRerendersGeneratedConfig(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "runtime_preset_configure",
-			"arguments": map[string]any{"preset": "router"},
+			"name":      "runtime_profile_configure",
+			"arguments": map[string]any{"mode": "router"},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("runtime_preset_configure returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("runtime_profile_configure returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["active"] != "router" || content["rendered"] != true {
-		t.Fatalf("configure content = %+v, want router active and rendered", content)
+	if content["mode"] != "router" || content["rendered"] != true {
+		t.Fatalf("configure content = %+v, want router mode and rendered", content)
 	}
 	generated := readMCPFile(t, outputPath)
 	if !strings.Contains(generated, "mixed-port: 7893") || !strings.Contains(generated, "redir-port: 7892") {
@@ -1573,7 +1577,7 @@ func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 		Paths: appinit.RuntimePaths{
 			GeneratedConfig:  "generated/mihomo.yaml",
 			MihomoRuntimeDir: ".runtime/mihomo",
-			CorePath:         "bin/mihomo",
+			CorePath:         "bin/mihomo-meta",
 		},
 		Config: appinit.ConfigState{
 			Available:  false,

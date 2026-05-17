@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"localclash/internal/runtimeprofile"
 )
 
 type Options struct {
@@ -57,7 +59,7 @@ func normalizeOptions(opts Options) Options {
 	opts.WorkDir = strings.TrimSpace(opts.WorkDir)
 	opts.LogPath = strings.TrimSpace(opts.LogPath)
 	if opts.CorePath == "" {
-		opts.CorePath = "bin/mihomo"
+		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "generated/mihomo.yaml"

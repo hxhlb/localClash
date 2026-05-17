@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"localclash/internal/appinit"
-	"localclash/internal/runtimepreset"
+	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
 )
@@ -155,7 +155,7 @@ type LocalClashState struct {
 	SubscriptionPresent        bool   `json:"subscription_present"`
 	SubscriptionSourcesPresent bool   `json:"subscription_sources_present"`
 	GeneratedConfigPresent     bool   `json:"generated_config_present"`
-	RuntimePresetPresent       bool   `json:"runtime_preset_present"`
+	RuntimeProfilePresent      bool   `json:"runtime_profile_present"`
 	RuntimeDirPresent          bool   `json:"runtime_dir_present"`
 	RulesPackCachePresent      bool   `json:"rules_pack_cache_present"`
 	CorePresent                bool   `json:"core_present"`
@@ -274,10 +274,10 @@ func normalizeOptions(opts Options) Options {
 		opts.Paths.RulesCacheDir = filepath.Join(opts.Paths.RuntimeRoot, "rules", "packs")
 	}
 	if opts.Paths.CorePath == "" {
-		opts.Paths.CorePath = "bin/mihomo"
+		opts.Paths.CorePath = runtimeprofile.MetaCorePath
 	}
-	if opts.Paths.PresetPath == "" {
-		opts.Paths.PresetPath = runtimepreset.DefaultPath
+	if opts.Paths.RuntimeProfilePath == "" {
+		opts.Paths.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	return opts
 }
@@ -476,12 +476,12 @@ func inspectLocalClash(opts Options) LocalClashState {
 		SubscriptionPresent:        fileExists(workPath(opts.WorkDir, opts.Paths.SubscriptionPath)),
 		SubscriptionSourcesPresent: fileExists(workPath(opts.WorkDir, opts.Paths.SubscriptionConfig)),
 		GeneratedConfigPresent:     fileExists(workPath(opts.WorkDir, opts.Paths.GeneratedConfig)),
-		RuntimePresetPresent:       fileExists(workPath(opts.WorkDir, opts.Paths.PresetPath)),
+		RuntimeProfilePresent:      fileExists(workPath(opts.WorkDir, opts.Paths.RuntimeProfilePath)),
 		RuntimeDirPresent:          dirExists(workPath(opts.WorkDir, opts.Paths.MihomoRuntimeDir)),
 		RulesPackCachePresent:      dirExists(workPath(opts.WorkDir, opts.Paths.RulesCacheDir)),
 		CorePresent:                fileExists(workPath(opts.WorkDir, opts.Paths.CorePath)),
 	}
-	state.Present = state.SubscriptionPresent || state.SubscriptionSourcesPresent || state.GeneratedConfigPresent || state.RuntimePresetPresent || state.RuntimeDirPresent || state.CorePresent
+	state.Present = state.SubscriptionPresent || state.SubscriptionSourcesPresent || state.GeneratedConfigPresent || state.RuntimeProfilePresent || state.RuntimeDirPresent || state.CorePresent
 	return state
 }
 
@@ -578,7 +578,7 @@ func observeFiles(opts Options, openClashConfigPath string) []FileObservation {
 		workPath(opts.WorkDir, opts.Paths.SubscriptionPath),
 		workPath(opts.WorkDir, opts.Paths.SubscriptionConfig),
 		workPath(opts.WorkDir, opts.Paths.GeneratedConfig),
-		workPath(opts.WorkDir, opts.Paths.PresetPath),
+		workPath(opts.WorkDir, opts.Paths.RuntimeProfilePath),
 		workPath(opts.WorkDir, opts.Paths.CorePath),
 		workPath(opts.WorkDir, opts.Paths.MihomoRuntimeDir),
 		workPath(opts.WorkDir, opts.Paths.RulesCacheDir),

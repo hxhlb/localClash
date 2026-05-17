@@ -16,7 +16,7 @@ import (
 	"localclash/internal/configrender"
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
-	"localclash/internal/runtimepreset"
+	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,7 +27,7 @@ type Options struct {
 	Policy              string
 	Mode                string
 	RulesCache          string
-	PresetPath          string
+	RuntimeProfilePath  string
 	OutputDir           string
 	ConfigPath          string
 	SubscriptionConfig  string
@@ -47,7 +47,7 @@ type ApplyOptions struct {
 	Policy              string
 	Mode                string
 	RulesCache          string
-	PresetPath          string
+	RuntimeProfilePath  string
 	ConfigPath          string
 	SubscriptionConfig  string
 	SubscriptionRuntime string
@@ -101,7 +101,7 @@ type PlanInputs struct {
 	Policy              string `json:"policy"`
 	Mode                string `json:"mode,omitempty"`
 	RulesCache          string `json:"rules_cache"`
-	PresetPath          string `json:"preset_config"`
+	RuntimeProfilePath  string `json:"runtime_profile"`
 	SubscriptionConfig  string `json:"subscription_config,omitempty"`
 	SubscriptionRuntime string `json:"subscription_runtime,omitempty"`
 }
@@ -217,7 +217,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		OutputPath:         outputPath,
 		PacksSelectionPath: selectionPath,
 		RulesCacheDir:      opts.RulesCache,
-		PresetPath:         opts.PresetPath,
+		RuntimeProfilePath: opts.RuntimeProfilePath,
 		Force:              true,
 	}); err != nil {
 		return Result{}, err
@@ -237,7 +237,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 			Policy:              opts.Policy,
 			Mode:                opts.Mode,
 			RulesCache:          opts.RulesCache,
-			PresetPath:          opts.PresetPath,
+			RuntimeProfilePath:  opts.RuntimeProfilePath,
 			SubscriptionConfig:  opts.SubscriptionConfig,
 			SubscriptionRuntime: opts.SubscriptionRuntime,
 		},
@@ -313,7 +313,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		OutputPath:         tempOutput,
 		PacksSelectionPath: tempSelection,
 		RulesCacheDir:      opts.RulesCache,
-		PresetPath:         opts.PresetPath,
+		RuntimeProfilePath: opts.RuntimeProfilePath,
 		Force:              true,
 	})
 	if err != nil {
@@ -373,8 +373,8 @@ func normalizeOptions(opts Options) Options {
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
 	}
-	if opts.PresetPath == "" {
-		opts.PresetPath = runtimepreset.DefaultPath
+	if opts.RuntimeProfilePath == "" {
+		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	if opts.OutputDir == "" {
 		opts.OutputDir = filepath.Join(".runtime", "drafts")
@@ -389,7 +389,7 @@ func normalizeOptions(opts Options) Options {
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	if opts.CorePath == "" {
-		opts.CorePath = "bin/mihomo"
+		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.WorkDir == "" {
 		opts.WorkDir = ".runtime/mihomo"
@@ -413,8 +413,8 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
 	}
-	if opts.PresetPath == "" {
-		opts.PresetPath = runtimepreset.DefaultPath
+	if opts.RuntimeProfilePath == "" {
+		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "localclash.yaml"
@@ -432,7 +432,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.OutputPath = "generated/mihomo.yaml"
 	}
 	if opts.CorePath == "" {
-		opts.CorePath = "bin/mihomo"
+		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.WorkDir == "" {
 		opts.WorkDir = ".runtime/mihomo"
@@ -469,8 +469,8 @@ func applyPlanInputDefaults(opts ApplyOptions, inputs PlanInputs) ApplyOptions {
 	if opts.RulesCache == "" {
 		opts.RulesCache = inputs.RulesCache
 	}
-	if opts.PresetPath == "" {
-		opts.PresetPath = inputs.PresetPath
+	if opts.RuntimeProfilePath == "" {
+		opts.RuntimeProfilePath = inputs.RuntimeProfilePath
 	}
 	if opts.SubscriptionConfig == "" {
 		opts.SubscriptionConfig = inputs.SubscriptionConfig
@@ -582,8 +582,8 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q is defined more than once", id)
 		}
 		mode := strings.ToLower(strings.TrimSpace(group.Mode))
-		if mode != "manual" && mode != "auto" {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q mode must be manual or auto", id)
+		if mode != "manual" && mode != "auto" && mode != "smart" {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q mode must be manual, auto, or smart", id)
 		}
 		if len(group.Nodes) == 0 {
 			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q nodes is required", id)
@@ -593,10 +593,13 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 			return rules.Selection{}, OverlaySummary{}, nil, err
 		}
 		pg := rules.ProxyGroup{Nodes: nodes}
-		if mode == "manual" {
+		switch mode {
+		case "manual":
 			pg.Manual = true
-		} else {
+		case "auto":
 			pg.Auto = true
+		case "smart":
+			pg.Smart = true
 		}
 		proxyGroups[id] = pg
 		proxyGroupSummaries = append(proxyGroupSummaries, OverlayProxyGroupSummary{ID: id, Nodes: append([]string(nil), nodes...), Mode: mode, NodeCount: len(nodes)})

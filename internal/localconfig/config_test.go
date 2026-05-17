@@ -112,6 +112,30 @@ func TestResolveExactNodesSupportsExplicitHumanChoice(t *testing.T) {
 	}
 }
 
+func TestResolveProxyGroupSupportsSmartMode(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: SG 01
+    type: ss
+`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"AI": {Mode: "smart", Nodes: []string{"SG 01"}},
+			},
+		},
+		SubscriptionPath: subscriptionPath,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !resolved.Selection.ProxyGroups["AI"].Smart {
+		t.Fatalf("selection proxy group = %+v, want smart", resolved.Selection.ProxyGroups["AI"])
+	}
+}
+
 func TestResolveExactNodesReportsMissingNodes(t *testing.T) {
 	dir := t.TempDir()
 	subscriptionPath := filepath.Join(dir, "subscription.yaml")

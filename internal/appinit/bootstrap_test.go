@@ -75,7 +75,7 @@ packs:
 		MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:         core,
 		PolicyPath:       policy,
-		PresetPath:       filepath.Join(dir, "mihomo-preset.yaml"),
+		RuntimeProfilePath:       filepath.Join(dir, "localclash-runtime.yaml"),
 	})
 
 	if !state.Core.Exists || !strings.Contains(state.Core.Version, "Mihomo test") {
@@ -106,7 +106,7 @@ func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 		MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:         filepath.Join(dir, "bin", "mihomo"),
 		PolicyPath:       filepath.Join(dir, "policy.yaml"),
-		PresetPath:       filepath.Join(dir, "mihomo-preset.yaml"),
+		RuntimeProfilePath:       filepath.Join(dir, "localclash-runtime.yaml"),
 	})
 
 	if state.Core.Exists {

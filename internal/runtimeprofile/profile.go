@@ -1,10 +1,11 @@
-package runtimepreset
+package runtimeprofile
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -12,9 +13,16 @@ import (
 )
 
 const (
-	DefaultPath = "mihomo-preset.yaml"
-	Normal      = "normal"
-	Router      = "router"
+	DefaultPath = "localclash-runtime.yaml"
+	ModeNormal  = "normal"
+	ModeRouter  = "router"
+	CoreMeta    = "meta"
+	CoreSmart   = "smart"
+)
+
+var (
+	MetaCorePath  = filepath.Join("bin", runtime.GOOS+"-"+runtime.GOARCH, "mihomo-meta")
+	SmartCorePath = filepath.Join("bin", "linux-"+runtime.GOARCH, "mihomo-smart")
 )
 
 var dynamicConfigKeys = map[string]bool{
@@ -27,23 +35,42 @@ var dynamicConfigKeys = map[string]bool{
 }
 
 type File struct {
-	Version int               `yaml:"version" json:"version"`
-	Active  string            `yaml:"active" json:"active"`
-	Presets map[string]Preset `yaml:"presets" json:"presets"`
+	Version  int                `yaml:"version" json:"version"`
+	Mode     string             `yaml:"mode" json:"mode"`
+	Core     string             `yaml:"core" json:"core"`
+	Profiles map[string]Profile `yaml:"profiles" json:"profiles"`
+	Cores    map[string]Core    `yaml:"cores" json:"cores"`
+	Smart    SmartOptions       `yaml:"smart,omitempty" json:"smart,omitempty"`
 }
 
-type Preset struct {
+type Profile struct {
 	Description string         `yaml:"description,omitempty" json:"description,omitempty"`
 	Mihomo      map[string]any `yaml:"mihomo" json:"mihomo"`
 	Deploy      map[string]any `yaml:"deploy,omitempty" json:"deploy,omitempty"`
 }
 
+type Core struct {
+	Path string `yaml:"path" json:"path"`
+}
+
+type SmartOptions struct {
+	UseLightGBM    bool    `yaml:"uselightgbm" json:"uselightgbm"`
+	PreferASN      bool    `yaml:"prefer-asn" json:"prefer_asn"`
+	CollectData    bool    `yaml:"collectdata,omitempty" json:"collectdata,omitempty"`
+	SampleRate     float64 `yaml:"sample-rate,omitempty" json:"sample_rate,omitempty"`
+	PolicyPriority string  `yaml:"policy-priority,omitempty" json:"policy_priority,omitempty"`
+}
+
 type Status struct {
-	Path             string         `json:"path"`
-	Exists           bool           `json:"exists"`
-	Active           string         `json:"active"`
-	AvailablePresets []string       `json:"available_presets"`
-	Summary          map[string]any `json:"summary"`
+	Path              string         `json:"path"`
+	Exists            bool           `json:"exists"`
+	Mode              string         `json:"mode"`
+	Core              string         `json:"core"`
+	CorePath          string         `json:"core_path"`
+	AvailableModes    []string       `json:"available_modes"`
+	AvailableCores    []string       `json:"available_cores"`
+	Summary           map[string]any `json:"summary"`
+	SmartGroupDefault SmartOptions   `json:"smart_group_default"`
 }
 
 func Load(path string) (File, bool, error) {
@@ -72,66 +99,108 @@ func StatusFor(path string) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	preset, ok := file.Presets[file.Active]
+	profile, ok := file.Profiles[file.Mode]
 	if !ok {
-		return Status{}, fmt.Errorf("active runtime preset %q is not defined", file.Active)
+		return Status{}, fmt.Errorf("runtime mode %q is not defined", file.Mode)
 	}
-	names := make([]string, 0, len(file.Presets))
-	for name := range file.Presets {
-		names = append(names, name)
+	modes := make([]string, 0, len(file.Profiles))
+	for name := range file.Profiles {
+		modes = append(modes, name)
 	}
-	sort.Strings(names)
+	sort.Strings(modes)
+	cores := make([]string, 0, len(file.Cores))
+	for name := range file.Cores {
+		cores = append(cores, name)
+	}
+	sort.Strings(cores)
 	return Status{
-		Path:             path,
-		Exists:           exists,
-		Active:           file.Active,
-		AvailablePresets: names,
-		Summary:          summarize(preset),
+		Path:              path,
+		Exists:            exists,
+		Mode:              file.Mode,
+		Core:              file.Core,
+		CorePath:          ActiveCorePathFromFile(file),
+		AvailableModes:    modes,
+		AvailableCores:    cores,
+		Summary:           summarize(profile),
+		SmartGroupDefault: file.Smart,
 	}, nil
 }
 
-func Configure(path, active string) (Status, error) {
+func Configure(path, mode, core string) (Status, error) {
 	path = normalizePath(path)
-	active = strings.TrimSpace(active)
-	if active != Normal && active != Router {
-		return Status{}, fmt.Errorf("runtime preset must be %q or %q, got %q", Normal, Router, active)
-	}
+	mode = strings.TrimSpace(mode)
+	core = strings.TrimSpace(core)
 	file, _, err := Load(path)
 	if err != nil {
 		return Status{}, err
 	}
-	if _, ok := file.Presets[active]; !ok {
-		return Status{}, fmt.Errorf("runtime preset %q is not defined in %s", active, path)
+	if mode != "" {
+		if _, ok := file.Profiles[mode]; !ok {
+			return Status{}, fmt.Errorf("runtime mode %q is not defined in %s", mode, path)
+		}
+		file.Mode = mode
 	}
-	file.Active = active
+	if core != "" {
+		if _, ok := file.Cores[core]; !ok {
+			return Status{}, fmt.Errorf("runtime core %q is not defined in %s", core, path)
+		}
+		file.Core = core
+	}
+	if mode == "" && core == "" {
+		return Status{}, errors.New("runtime profile configure requires mode or core")
+	}
 	if err := write(path, file); err != nil {
 		return Status{}, err
 	}
 	return StatusFor(path)
 }
 
-func ActivePreset(path string) (string, Preset, bool, error) {
+func ActiveProfile(path string) (File, Profile, bool, error) {
 	file, exists, err := Load(path)
 	if err != nil {
-		return "", Preset{}, exists, err
+		return File{}, Profile{}, exists, err
 	}
-	preset, ok := file.Presets[file.Active]
+	profile, ok := file.Profiles[file.Mode]
 	if !ok {
-		return "", Preset{}, exists, fmt.Errorf("active runtime preset %q is not defined", file.Active)
+		return File{}, Profile{}, exists, fmt.Errorf("runtime mode %q is not defined", file.Mode)
 	}
-	return file.Active, preset, exists, nil
+	return file, profile, exists, nil
 }
 
-func ApplyToConfig(config map[string]any, preset Preset) {
-	mergeMihomo(config, preset.Mihomo)
+func ActiveCorePath(path string) (string, error) {
+	file, _, err := Load(path)
+	if err != nil {
+		return "", err
+	}
+	return ActiveCorePathFromFile(file), nil
+}
+
+func ActiveCorePathFromFile(file File) string {
+	if core, ok := file.Cores[file.Core]; ok && strings.TrimSpace(core.Path) != "" {
+		return core.Path
+	}
+	if file.Core == CoreSmart {
+		return SmartCorePath
+	}
+	return MetaCorePath
+}
+
+func ApplyToConfig(config map[string]any, profile Profile) {
+	mergeMihomo(config, profile.Mihomo)
 }
 
 func DefaultFile() File {
 	return File{
 		Version: 1,
-		Active:  Normal,
-		Presets: map[string]Preset{
-			Normal: {
+		Mode:    ModeNormal,
+		Core:    CoreMeta,
+		Cores: map[string]Core{
+			CoreMeta:  {Path: MetaCorePath},
+			CoreSmart: {Path: SmartCorePath},
+		},
+		Smart: SmartOptions{UseLightGBM: true, PreferASN: true},
+		Profiles: map[string]Profile{
+			ModeNormal: {
 				Description: "Local standalone Mihomo proxy, matching localClash's original generated config.",
 				Mihomo: map[string]any{
 					"mixed-port":          7890,
@@ -143,7 +212,7 @@ func DefaultFile() File {
 					"unified-delay":       true,
 				},
 			},
-			Router: {
+			ModeRouter: {
 				Description: "Router transparent proxy based on Ronnie's OpenClash redir-host-mix defaults.",
 				Mihomo: map[string]any{
 					"mixed-port":          7893,
@@ -156,7 +225,7 @@ func DefaultFile() File {
 					"mode":                "rule",
 					"log-level":           "warning",
 					"external-controller": "0.0.0.0:9090",
-					"external-ui":         "/usr/share/openclash/ui",
+					"external-ui":         "ui/zashboard",
 					"ipv6":                true,
 					"dns": map[string]any{
 						"enable":                  true,
@@ -208,25 +277,52 @@ func normalizeFile(file File) File {
 	if file.Version == 0 {
 		file.Version = 1
 	}
+	if file.Mode == "" {
+		file.Mode = ModeNormal
+	}
+	if file.Core == "" {
+		file.Core = CoreMeta
+	}
+	if file.Cores == nil {
+		file.Cores = map[string]Core{}
+	}
+	if _, ok := file.Cores[CoreMeta]; !ok {
+		file.Cores[CoreMeta] = Core{Path: MetaCorePath}
+	}
+	if _, ok := file.Cores[CoreSmart]; !ok {
+		file.Cores[CoreSmart] = Core{Path: SmartCorePath}
+	}
+	if !file.Smart.UseLightGBM && !file.Smart.PreferASN && !file.Smart.CollectData && file.Smart.SampleRate == 0 && file.Smart.PolicyPriority == "" {
+		file.Smart = SmartOptions{UseLightGBM: true, PreferASN: true}
+	}
 	return file
 }
 
 func validate(file File) error {
 	if file.Version != 1 {
-		return fmt.Errorf("unsupported runtime preset version %d", file.Version)
+		return fmt.Errorf("unsupported runtime profile version %d", file.Version)
 	}
-	if file.Active == "" {
-		return errors.New("runtime preset active is required")
+	if file.Mode == "" {
+		return errors.New("runtime profile mode is required")
 	}
-	if len(file.Presets) == 0 {
-		return errors.New("runtime preset file has no presets")
+	if file.Core == "" {
+		return errors.New("runtime profile core is required")
 	}
-	for name, preset := range file.Presets {
-		if name != Normal && name != Router {
-			return fmt.Errorf("unsupported runtime preset %q; only %q and %q are supported in v0", name, Normal, Router)
+	if len(file.Profiles) == 0 {
+		return errors.New("runtime profile file has no profiles")
+	}
+	if _, ok := file.Profiles[file.Mode]; !ok {
+		return fmt.Errorf("runtime mode %q is not defined", file.Mode)
+	}
+	if _, ok := file.Cores[file.Core]; !ok {
+		return fmt.Errorf("runtime core %q is not defined", file.Core)
+	}
+	for name, profile := range file.Profiles {
+		if name != ModeNormal && name != ModeRouter {
+			return fmt.Errorf("unsupported runtime mode %q; only %q and %q are supported in v0", name, ModeNormal, ModeRouter)
 		}
-		if len(preset.Mihomo) == 0 {
-			return fmt.Errorf("runtime preset %q has no mihomo config", name)
+		if len(profile.Mihomo) == 0 {
+			return fmt.Errorf("runtime profile %q has no mihomo config", name)
 		}
 	}
 	return nil
@@ -282,8 +378,8 @@ func cloneValue(value any) any {
 	}
 }
 
-func summarize(preset Preset) map[string]any {
-	m := preset.Mihomo
+func summarize(profile Profile) map[string]any {
+	m := profile.Mihomo
 	summary := map[string]any{}
 	for _, key := range []string{"mixed-port", "redir-port", "tproxy-port", "port", "socks-port", "allow-lan", "bind-address", "external-controller", "ipv6"} {
 		if value, ok := m[key]; ok {

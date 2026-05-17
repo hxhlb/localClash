@@ -1,4 +1,4 @@
-package runtimepreset
+package runtimeprofile
 
 import (
 	"os"
@@ -7,33 +7,36 @@ import (
 )
 
 func TestStatusForMissingFileUsesNormalDefault(t *testing.T) {
-	status, err := StatusFor(filepath.Join(t.TempDir(), "mihomo-preset.yaml"))
+	status, err := StatusFor(filepath.Join(t.TempDir(), DefaultPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if status.Exists {
-		t.Fatal("missing preset file should report exists=false")
+		t.Fatal("missing profile file should report exists=false")
 	}
-	if status.Active != Normal {
-		t.Fatalf("active = %q, want %q", status.Active, Normal)
+	if status.Mode != ModeNormal {
+		t.Fatalf("mode = %q, want %q", status.Mode, ModeNormal)
+	}
+	if status.Core != CoreMeta || status.CorePath != MetaCorePath {
+		t.Fatalf("core = %q path = %q, want %q %q", status.Core, status.CorePath, CoreMeta, MetaCorePath)
 	}
 	if status.Summary["mixed-port"] != 7890 {
 		t.Fatalf("summary mixed-port = %v, want 7890", status.Summary["mixed-port"])
 	}
 }
 
-func TestConfigureWritesActivePreset(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "mihomo-preset.yaml")
+func TestConfigureWritesModeAndCore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DefaultPath)
 
-	status, err := Configure(path, Router)
+	status, err := Configure(path, ModeRouter, CoreSmart)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !status.Exists {
-		t.Fatal("configured preset file should exist")
+		t.Fatal("configured profile file should exist")
 	}
-	if status.Active != Router {
-		t.Fatalf("active = %q, want %q", status.Active, Router)
+	if status.Mode != ModeRouter || status.Core != CoreSmart || status.CorePath != SmartCorePath {
+		t.Fatalf("status = %+v, want router smart", status)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
@@ -43,7 +46,7 @@ func TestConfigureWritesActivePreset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !exists || file.Version != 1 || file.Active != Router {
+	if !exists || file.Version != 1 || file.Mode != ModeRouter || file.Core != CoreSmart {
 		t.Fatalf("loaded file = %+v exists=%v", file, exists)
 	}
 }
@@ -54,13 +57,13 @@ func TestApplyToConfigSkipsDynamicKeys(t *testing.T) {
 		"proxies":    []any{"keep"},
 		"dns":        map[string]any{"enable": false, "keep": true},
 	}
-	preset := Preset{Mihomo: map[string]any{
+	profile := Profile{Mihomo: map[string]any{
 		"mixed-port": 7893,
 		"proxies":    []any{"drop"},
 		"dns":        map[string]any{"enable": true, "listen": "0.0.0.0:7874"},
 	}}
 
-	ApplyToConfig(config, preset)
+	ApplyToConfig(config, profile)
 
 	if config["mixed-port"] != 7893 {
 		t.Fatalf("mixed-port = %v, want 7893", config["mixed-port"])

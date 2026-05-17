@@ -1,6 +1,7 @@
 package coredownload
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
 	"context"
@@ -16,13 +17,17 @@ import (
 )
 
 type Options struct {
-	Version    string
-	TargetOS   string
-	TargetArch string
-	OutputPath string
-	Repo       string
-	Force      bool
-	DryRun     bool
+	Version     string
+	Target      string
+	TargetOS    string
+	TargetArch  string
+	OutputPath  string
+	OutputDir   string
+	Repo        string
+	SmartBranch string
+	Flavor      string
+	Force       bool
+	DryRun      bool
 }
 
 type Result struct {
@@ -30,6 +35,8 @@ type Result struct {
 	AssetName   string
 	DownloadURL string
 	OutputPath  string
+	Flavor      string
+	Target      string
 }
 
 type release struct {
@@ -42,12 +49,35 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-func Download(ctx context.Context, opts Options) (Result, error) {
+const (
+	FlavorAll    = "all"
+	FlavorMeta   = "meta"
+	FlavorSmart  = "smart"
+	TargetHost   = "host"
+	TargetRouter = "router"
+)
+
+func Download(ctx context.Context, opts Options) ([]Result, error) {
 	opts = normalizeOptions(opts)
 	if err := opts.validate(); err != nil {
-		return Result{}, err
+		return nil, err
 	}
+	flavors := effectiveFlavors(opts)
+	results := make([]Result, 0, len(flavors))
+	for _, flavor := range flavors {
+		result, err := downloadFlavor(ctx, opts, flavor)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
 
+func downloadFlavor(ctx context.Context, opts Options, flavor string) (Result, error) {
+	if flavor == FlavorSmart {
+		return downloadSmart(ctx, opts)
+	}
 	rel, err := fetchRelease(ctx, opts.Repo, opts.Version)
 	if err != nil {
 		return Result{}, err
@@ -62,20 +92,22 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 		Version:     rel.TagName,
 		AssetName:   selected.Name,
 		DownloadURL: selected.BrowserDownloadURL,
-		OutputPath:  opts.OutputPath,
+		OutputPath:  outputPath(opts, flavor),
+		Flavor:      flavor,
+		Target:      opts.Target,
 	}
 	if opts.DryRun {
 		return result, nil
 	}
 
-	if err := ensureWritableOutput(opts.OutputPath, opts.Force); err != nil {
+	if err := ensureWritableOutput(result.OutputPath, opts.Force); err != nil {
 		return Result{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(result.OutputPath), 0o755); err != nil {
 		return Result{}, err
 	}
 
-	tmpPath := opts.OutputPath + ".download"
+	tmpPath := result.OutputPath + ".download"
 	defer os.Remove(tmpPath)
 
 	if err := downloadAsset(ctx, selected.BrowserDownloadURL, selected.Name, tmpPath); err != nil {
@@ -84,10 +116,51 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
 		return Result{}, err
 	}
-	if err := os.Rename(tmpPath, opts.OutputPath); err != nil {
+	if err := os.Rename(tmpPath, result.OutputPath); err != nil {
 		return Result{}, err
 	}
 
+	return result, nil
+}
+
+func downloadSmart(ctx context.Context, opts Options) (Result, error) {
+	name, err := openClashCoreAssetName(opts.TargetOS, opts.TargetArch)
+	if err != nil {
+		return Result{}, err
+	}
+	version, err := fetchOpenClashSmartVersion(ctx, opts.SmartBranch)
+	if err != nil {
+		return Result{}, err
+	}
+	url := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/smart/%s", opts.SmartBranch, name)
+	result := Result{
+		Version:     version,
+		AssetName:   name,
+		DownloadURL: url,
+		OutputPath:  outputPath(opts, FlavorSmart),
+		Flavor:      FlavorSmart,
+		Target:      opts.Target,
+	}
+	if opts.DryRun {
+		return result, nil
+	}
+	if err := ensureWritableOutput(result.OutputPath, opts.Force); err != nil {
+		return Result{}, err
+	}
+	if err := os.MkdirAll(filepath.Dir(result.OutputPath), 0o755); err != nil {
+		return Result{}, err
+	}
+	tmpPath := result.OutputPath + ".download"
+	defer os.Remove(tmpPath)
+	if err := downloadAsset(ctx, url, name, tmpPath); err != nil {
+		return Result{}, err
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return Result{}, err
+	}
+	if err := os.Rename(tmpPath, result.OutputPath); err != nil {
+		return Result{}, err
+	}
 	return result, nil
 }
 
@@ -95,22 +168,34 @@ func normalizeOptions(opts Options) Options {
 	if opts.Version == "" {
 		opts.Version = "latest"
 	}
+	if opts.Target == "" {
+		opts.Target = TargetHost
+	}
+	opts.Target = strings.ToLower(strings.TrimSpace(opts.Target))
 	if opts.TargetOS == "" {
-		opts.TargetOS = runtime.GOOS
+		if opts.Target == TargetRouter {
+			opts.TargetOS = "linux"
+		} else {
+			opts.TargetOS = runtime.GOOS
+		}
 	}
 	if opts.TargetArch == "" {
 		opts.TargetArch = runtime.GOARCH
 	}
+	if opts.Flavor == "" {
+		opts.Flavor = FlavorAll
+	}
+	opts.Flavor = strings.ToLower(strings.TrimSpace(opts.Flavor))
 	opts.TargetOS = strings.ToLower(opts.TargetOS)
 	opts.TargetArch = normalizeArch(opts.TargetArch)
-	if opts.OutputPath == "" {
-		opts.OutputPath = "bin/mihomo"
-		if opts.TargetOS == "windows" {
-			opts.OutputPath += ".exe"
-		}
+	if opts.OutputDir == "" {
+		opts.OutputDir = "bin"
 	}
 	if opts.Repo == "" {
 		opts.Repo = "MetaCubeX/mihomo"
+	}
+	if opts.SmartBranch == "" {
+		opts.SmartBranch = "master"
 	}
 	return opts
 }
@@ -119,10 +204,53 @@ func (opts Options) validate() error {
 	if !strings.Contains(opts.Repo, "/") {
 		return fmt.Errorf("repo must be owner/name, got %q", opts.Repo)
 	}
-	if opts.OutputPath == "." || strings.TrimSpace(opts.OutputPath) == "" {
+	switch opts.Flavor {
+	case FlavorAll, FlavorMeta, FlavorSmart:
+	default:
+		return fmt.Errorf("flavor must be %q, %q, or %q, got %q", FlavorAll, FlavorMeta, FlavorSmart, opts.Flavor)
+	}
+	switch opts.Target {
+	case TargetHost, TargetRouter:
+	default:
+		return fmt.Errorf("target must be %q or %q, got %q", TargetHost, TargetRouter, opts.Target)
+	}
+	if opts.Target == TargetRouter && opts.TargetOS != "linux" {
+		return fmt.Errorf("router target requires linux OS, got %s/%s", opts.TargetOS, opts.TargetArch)
+	}
+	if opts.Flavor == FlavorSmart && opts.TargetOS != "linux" {
+		return fmt.Errorf("smart core is available only for linux/router targets, got %s/%s; use --target router --arch %s", opts.TargetOS, opts.TargetArch, opts.TargetArch)
+	}
+	if opts.Flavor == FlavorAll && strings.TrimSpace(opts.OutputPath) != "" {
+		return errors.New("output path is only valid with --flavor meta or --flavor smart; use --output-dir with --flavor all")
+	}
+	if opts.Flavor != FlavorAll && opts.OutputPath == "." {
 		return errors.New("output path must be a file path")
 	}
+	if opts.OutputDir == "." || strings.TrimSpace(opts.OutputDir) == "" {
+		return errors.New("output dir must be a directory path")
+	}
 	return nil
+}
+
+func outputPath(opts Options, flavor string) string {
+	if opts.OutputPath != "" && opts.Flavor != FlavorAll {
+		return opts.OutputPath
+	}
+	name := "mihomo-" + flavor
+	if opts.TargetOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(opts.OutputDir, opts.TargetOS+"-"+opts.TargetArch, name)
+}
+
+func effectiveFlavors(opts Options) []string {
+	if opts.Flavor != FlavorAll {
+		return []string{opts.Flavor}
+	}
+	if opts.Target == TargetRouter {
+		return []string{FlavorMeta, FlavorSmart}
+	}
+	return []string{FlavorMeta}
 }
 
 func fetchRelease(ctx context.Context, repo, version string) (release, error) {
@@ -156,6 +284,47 @@ func fetchRelease(ctx context.Context, repo, version string) (release, error) {
 		return release{}, errors.New("github release response did not include tag_name")
 	}
 	return rel, nil
+}
+
+func fetchOpenClashSmartVersion(ctx context.Context, branch string) (string, error) {
+	endpoint := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/core_version", branch)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "localclash-core-downloader")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("openclash core version request failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[1]) == "" {
+		return "", errors.New("openclash core_version did not include smart version")
+	}
+	return strings.TrimSpace(lines[1]), nil
+}
+
+func openClashCoreAssetName(targetOS, targetArch string) (string, error) {
+	if targetOS != "linux" {
+		return "", fmt.Errorf("smart core is available from OpenClash only for linux targets, got %s/%s", targetOS, targetArch)
+	}
+	switch normalizeArch(targetArch) {
+	case "amd64", "386", "arm64", "armv5", "armv6", "armv7", "loong64-abi1", "loong64-abi2", "mips64", "mips64le", "riscv64", "s390x":
+		return fmt.Sprintf("clash-linux-%s.tar.gz", normalizeArch(targetArch)), nil
+	case "mips", "mipsle":
+		return fmt.Sprintf("clash-linux-%s-softfloat.tar.gz", normalizeArch(targetArch)), nil
+	default:
+		return "", fmt.Errorf("unsupported OpenClash smart core arch %q", targetArch)
+	}
 }
 
 func selectAsset(assets []asset, targetOS, targetArch string) (asset, error) {
@@ -242,6 +411,8 @@ func downloadAsset(ctx context.Context, url, name, outputPath string) error {
 	defer out.Close()
 
 	switch {
+	case strings.HasSuffix(name, ".tar.gz"):
+		return extractFirstTarGzFile(resp.Body, out)
 	case strings.HasSuffix(name, ".gz"):
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
@@ -255,6 +426,28 @@ func downloadAsset(ctx context.Context, url, name, outputPath string) error {
 	default:
 		_, err = io.Copy(out, resp.Body)
 		return err
+	}
+}
+
+func extractFirstTarGzFile(in io.Reader, out io.Writer) error {
+	gz, err := gzip.NewReader(in)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		header, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return errors.New("tar.gz archive did not contain a file")
+		}
+		if err != nil {
+			return err
+		}
+		if header.Typeflag == tar.TypeReg {
+			_, err = io.Copy(out, tr)
+			return err
+		}
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 
 	"localclash/internal/configrender"
 	"localclash/internal/rules"
-	"localclash/internal/runtimepreset"
+	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
 )
 
@@ -26,7 +26,7 @@ type Options struct {
 	CorePath            string
 	PolicyPath          string
 	PacksSelectionPath  string
-	PresetPath          string
+	RuntimeProfilePath  string
 }
 
 type RuntimeState struct {
@@ -52,14 +52,15 @@ type RuntimePaths struct {
 	CorePath            string `json:"core_path"`
 	PolicyPath          string `json:"policy_path"`
 	PacksSelectionPath  string `json:"packs_selection_path,omitempty"`
-	PresetPath          string `json:"preset_path"`
+	RuntimeProfilePath  string `json:"runtime_profile_path"`
 }
 
 type CoreState struct {
-	Path    string `json:"path"`
-	Exists  bool   `json:"exists"`
-	Missing bool   `json:"missing"`
-	Version string `json:"version,omitempty"`
+	Path           string `json:"path"`
+	Exists         bool   `json:"exists"`
+	Missing        bool   `json:"missing"`
+	Version        string `json:"version,omitempty"`
+	SmartSupported bool   `json:"smart_supported"`
 }
 
 type SubscriptionState struct {
@@ -109,7 +110,7 @@ func Bootstrap(ctx context.Context, opts Options) RuntimeState {
 			CorePath:            opts.CorePath,
 			PolicyPath:          opts.PolicyPath,
 			PacksSelectionPath:  opts.PacksSelectionPath,
-			PresetPath:          opts.PresetPath,
+			RuntimeProfilePath:  opts.RuntimeProfilePath,
 		},
 		Rules:  RulesState{CacheDir: opts.RulesCacheDir, Details: map[string]rules.PackDetail{}},
 		Config: ConfigState{Path: opts.GeneratedConfig},
@@ -147,17 +148,21 @@ func normalizeOptions(opts Options) Options {
 	if strings.TrimSpace(opts.MihomoRuntimeDir) == "" {
 		opts.MihomoRuntimeDir = filepath.Join(opts.RuntimeRoot, "mihomo")
 	}
-	if strings.TrimSpace(opts.CorePath) == "" {
-		opts.CorePath = "bin/mihomo"
-	}
 	if strings.TrimSpace(opts.PolicyPath) == "" {
 		opts.PolicyPath = "policies/loyalsoldier.yaml"
 	}
 	if strings.TrimSpace(opts.PacksSelectionPath) == "" && fileExists("localclash-packs.yaml") {
 		opts.PacksSelectionPath = "localclash-packs.yaml"
 	}
-	if strings.TrimSpace(opts.PresetPath) == "" {
-		opts.PresetPath = runtimepreset.DefaultPath
+	if strings.TrimSpace(opts.RuntimeProfilePath) == "" {
+		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
+	}
+	if strings.TrimSpace(opts.CorePath) == "" {
+		if corePath, err := runtimeprofile.ActiveCorePath(opts.RuntimeProfilePath); err == nil && strings.TrimSpace(corePath) != "" {
+			opts.CorePath = corePath
+		} else {
+			opts.CorePath = runtimeprofile.MetaCorePath
+		}
 	}
 	return opts
 }
@@ -184,6 +189,7 @@ func inspectCore(ctx context.Context, state *RuntimeState, opts Options) {
 	output, err := exec.CommandContext(runCtx, opts.CorePath, "-v").CombinedOutput()
 	if err == nil {
 		state.Core.Version = strings.TrimSpace(string(output))
+		state.Core.SmartSupported = strings.Contains(strings.ToLower(state.Core.Version), "smart")
 	}
 }
 
@@ -248,12 +254,12 @@ func ensureGeneratedConfig(state *RuntimeState, opts Options) {
 		return
 	}
 	renderOpts := configrender.Options{
-		SourcePath:    opts.SubscriptionPath,
-		PolicyPath:    opts.PolicyPath,
-		OutputPath:    opts.GeneratedConfig,
-		RulesCacheDir: opts.RulesCacheDir,
-		PresetPath:    opts.PresetPath,
-		Force:         true,
+		SourcePath:         opts.SubscriptionPath,
+		PolicyPath:         opts.PolicyPath,
+		OutputPath:         opts.GeneratedConfig,
+		RulesCacheDir:      opts.RulesCacheDir,
+		RuntimeProfilePath: opts.RuntimeProfilePath,
+		Force:              true,
 	}
 	if opts.PacksSelectionPath != "" && fileExists(opts.PacksSelectionPath) {
 		renderOpts.PacksSelectionPath = opts.PacksSelectionPath

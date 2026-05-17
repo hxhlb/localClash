@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"localclash/internal/configmeta"
-	"localclash/internal/runtimepreset"
+	"localclash/internal/runtimeprofile"
 )
 
 func TestBuildRulesWhitelistFallback(t *testing.T) {
@@ -108,11 +108,11 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 	paths := writeRenderFixture(t)
 
 	result, err := Render(Options{
-		SourcePath: paths.subscription,
-		PolicyPath: paths.policy,
-		OutputPath: filepath.Join(paths.dir, "base.yaml"),
-		PresetPath: filepath.Join(paths.dir, "mihomo-preset.yaml"),
-		Force:      true,
+		SourcePath:         paths.subscription,
+		PolicyPath:         paths.policy,
+		OutputPath:         filepath.Join(paths.dir, "base.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		Force:              true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 		OutputPath:         filepath.Join(paths.dir, "with-packs.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
-		PresetPath:         filepath.Join(paths.dir, "mihomo-preset.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
 		Force:              true,
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ enabled_packs:
 		OutputPath:         filepath.Join(paths.dir, "empty-candidates.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
-		PresetPath:         filepath.Join(paths.dir, "mihomo-preset.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
 		Force:              true,
 	})
 	if err == nil {
@@ -228,26 +228,26 @@ enabled_packs:
 	}
 }
 
-func TestRenderAppliesActiveRuntimePreset(t *testing.T) {
+func TestRenderAppliesActiveRuntimeProfile(t *testing.T) {
 	paths := writeRenderFixture(t)
-	presetPath := filepath.Join(paths.dir, "mihomo-preset.yaml")
-	if _, err := runtimepreset.Configure(presetPath, runtimepreset.Router); err != nil {
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.yaml")
+	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
 		t.Fatal(err)
 	}
 
 	result, err := Render(Options{
-		SourcePath:    paths.subscription,
-		PolicyPath:    paths.policy,
-		OutputPath:    filepath.Join(paths.dir, "router.yaml"),
-		PresetPath:    presetPath,
-		RulesCacheDir: paths.cacheDir,
-		Force:         true,
+		SourcePath:         paths.subscription,
+		PolicyPath:         paths.policy,
+		OutputPath:         filepath.Join(paths.dir, "router.yaml"),
+		RuntimeProfilePath: profilePath,
+		RulesCacheDir:      paths.cacheDir,
+		Force:              true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Preset != runtimepreset.Router {
-		t.Fatalf("preset = %q, want %q", result.Preset, runtimepreset.Router)
+	if result.RuntimeMode != runtimeprofile.ModeRouter {
+		t.Fatalf("runtime mode = %q, want %q", result.RuntimeMode, runtimeprofile.ModeRouter)
 	}
 	config := readTestYAML(t, result.OutputPath)
 	if config["mixed-port"] != 7893 {

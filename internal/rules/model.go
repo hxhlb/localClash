@@ -59,6 +59,7 @@ type ProxyGroup struct {
 	Nodes  []string `yaml:"nodes"`
 	Auto   bool     `yaml:"auto"`
 	Manual bool     `yaml:"manual"`
+	Smart  bool     `yaml:"smart"`
 	Direct bool     `yaml:"direct"`
 }
 
@@ -433,14 +434,20 @@ func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, 
 		if len(group.Nodes) == 0 && !group.Direct {
 			return preparedTargets{}, fmt.Errorf("proxy group %q has no nodes", groupName)
 		}
-		if group.Auto && group.Manual {
-			return preparedTargets{}, fmt.Errorf("proxy group %q cannot enable both auto and manual", groupName)
+		enabledModes := 0
+		for _, enabled := range []bool{group.Auto, group.Manual, group.Smart} {
+			if enabled {
+				enabledModes++
+			}
 		}
-		if !group.Auto && !group.Manual && !group.Direct {
+		if enabledModes > 1 {
+			return preparedTargets{}, fmt.Errorf("proxy group %q can enable only one of auto, manual, or smart", groupName)
+		}
+		if enabledModes == 0 && !group.Direct {
 			return preparedTargets{}, fmt.Errorf("proxy group %q has no enabled choices", groupName)
 		}
-		if group.Direct && group.Auto {
-			return preparedTargets{}, fmt.Errorf("proxy group %q cannot combine direct with auto mode", groupName)
+		if group.Direct && (group.Auto || group.Smart) {
+			return preparedTargets{}, fmt.Errorf("proxy group %q cannot combine direct with auto or smart mode", groupName)
 		}
 		seen := map[string]bool{}
 		for _, node := range group.Nodes {
@@ -499,6 +506,16 @@ func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]ma
 				"proxies":  candidates,
 				"url":      "http://www.gstatic.com/generate_204",
 				"interval": 300,
+			})
+			continue
+		}
+		if group.Smart {
+			groups = append(groups, map[string]any{
+				"name":        name,
+				"type":        "smart",
+				"proxies":     candidates,
+				"uselightgbm": true,
+				"prefer-asn":  true,
 			})
 			continue
 		}

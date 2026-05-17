@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"localclash/internal/configrender"
+	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
 )
@@ -80,6 +81,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		report.add(checkLocalBaseline(configData))
 		report.add(checkProxyGroupReferences(configData))
 		report.add(checkRuleTargets(configData))
+		report.add(checkSmartCoreCompatibility(configData, core))
 	}
 
 	report.add(checkDashboard(opts.DashboardDir))
@@ -95,7 +97,7 @@ func normalizeOptions(opts Options) Options {
 	opts.PolicyPath = strings.TrimSpace(opts.PolicyPath)
 	opts.DashboardDir = strings.TrimSpace(opts.DashboardDir)
 	if opts.CorePath == "" {
-		opts.CorePath = "bin/mihomo"
+		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.SubscriptionPath == "" {
 		opts.SubscriptionPath = "subscription.yaml"
@@ -343,6 +345,28 @@ func checkRuleTargets(config map[string]any) Check {
 	return check
 }
 
+func checkSmartCoreCompatibility(config map[string]any, core Check) Check {
+	check := Check{ID: "smart_core", Title: "smart core compatibility"}
+	if !configUsesSmartGroups(config) {
+		check.Status = statusOK
+		check.Summary = "no smart proxy-groups"
+		return check
+	}
+	if core.Status != statusOK {
+		check.Status = statusFail
+		check.Summary = "smart proxy-groups require a working core"
+		return check
+	}
+	if !strings.Contains(strings.ToLower(core.Summary), "smart") {
+		check.Status = statusFail
+		check.Summary = "generated config uses smart proxy-groups but active core does not report smart support"
+		return check
+	}
+	check.Status = statusOK
+	check.Summary = "smart proxy-groups match smart core"
+	return check
+}
+
 func checkDashboard(path string) Check {
 	check := Check{ID: "zashboard", Title: "zashboard", Path: path}
 	info, err := os.Stat(filepath.Join(path, "index.html"))
@@ -580,6 +604,23 @@ func proxyGroups(raw any) (map[string]bool, map[string][]string) {
 	return names, refs
 }
 
+func configUsesSmartGroups(config map[string]any) bool {
+	values, ok := config["proxy-groups"].([]any)
+	if !ok {
+		return false
+	}
+	for _, value := range values {
+		item, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(stringValue(item["type"]), "smart") {
+			return true
+		}
+	}
+	return false
+}
+
 func mapKeys(raw any) map[string]bool {
 	out := map[string]bool{}
 	values, ok := raw.(map[string]any)
@@ -590,6 +631,13 @@ func mapKeys(raw any) map[string]bool {
 		out[key] = true
 	}
 	return out
+}
+
+func stringValue(raw any) string {
+	if text, ok := raw.(string); ok {
+		return text
+	}
+	return ""
 }
 
 func ruleTarget(rule string) (target string, provider string, ok bool) {

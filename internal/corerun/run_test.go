@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"localclash/internal/runtimeprofile"
 )
 
 func TestNormalizeOptionsDefaults(t *testing.T) {
 	got := normalizeOptions(Options{})
-	if got.CorePath != "bin/mihomo" {
+	if got.CorePath != runtimeprofile.MetaCorePath {
 		t.Fatalf("CorePath = %q", got.CorePath)
 	}
 	if got.ConfigPath != "generated/mihomo.yaml" {

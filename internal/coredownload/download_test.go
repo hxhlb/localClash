@@ -1,6 +1,10 @@
 package coredownload
 
-import "testing"
+import (
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func TestSelectAssetPrefersDefaultVariant(t *testing.T) {
 	assets := []asset{
@@ -39,14 +43,84 @@ func TestNormalizeOptionsUsesCurrentPlatformDefaults(t *testing.T) {
 	if got.TargetArch == "" {
 		t.Fatal("TargetArch should default to runtime arch")
 	}
-	if got.OutputPath == "" {
-		t.Fatal("OutputPath should default to a binary path")
+	if got.OutputDir != "bin" {
+		t.Fatalf("OutputDir = %q, want bin", got.OutputDir)
+	}
+	if got.Flavor != FlavorAll {
+		t.Fatalf("Flavor = %q, want all", got.Flavor)
+	}
+	if got.Target != TargetHost {
+		t.Fatalf("Target = %q, want host", got.Target)
 	}
 }
 
 func TestNormalizeOptionsUsesWindowsExeDefault(t *testing.T) {
-	got := normalizeOptions(Options{TargetOS: "Windows", TargetArch: "amd64"})
-	if got.OutputPath != "bin/mihomo.exe" {
-		t.Fatalf("OutputPath = %q, want bin/mihomo.exe", got.OutputPath)
+	got := normalizeOptions(Options{TargetOS: "Windows", TargetArch: "amd64", Flavor: FlavorMeta})
+	want := filepath.Join("bin", "windows-amd64", "mihomo-meta.exe")
+	if path := outputPath(got, FlavorMeta); path != want {
+		t.Fatalf("OutputPath = %q, want %q", path, want)
+	}
+}
+
+func TestOutputPathUsesPlatformFlavorNames(t *testing.T) {
+	opts := normalizeOptions(Options{TargetOS: "linux", TargetArch: "arm64"})
+	if got := outputPath(opts, FlavorMeta); got != filepath.Join("bin", "linux-arm64", "mihomo-meta") {
+		t.Fatalf("meta output path = %q", got)
+	}
+	if got := outputPath(opts, FlavorSmart); got != filepath.Join("bin", "linux-arm64", "mihomo-smart") {
+		t.Fatalf("smart output path = %q", got)
+	}
+}
+
+func TestEffectiveFlavorsDefaultsHostToMetaOnly(t *testing.T) {
+	opts := normalizeOptions(Options{Target: TargetHost, TargetOS: "darwin", TargetArch: "arm64"})
+	got := effectiveFlavors(opts)
+	if len(got) != 1 || got[0] != FlavorMeta {
+		t.Fatalf("flavors = %+v, want host meta only", got)
+	}
+}
+
+func TestEffectiveFlavorsDefaultsRouterToMetaAndSmart(t *testing.T) {
+	opts := normalizeOptions(Options{Target: TargetRouter, TargetArch: "arm64"})
+	got := effectiveFlavors(opts)
+	if opts.TargetOS != "linux" {
+		t.Fatalf("router OS = %q, want linux", opts.TargetOS)
+	}
+	if len(got) != 2 || got[0] != FlavorMeta || got[1] != FlavorSmart {
+		t.Fatalf("flavors = %+v, want router meta and smart", got)
+	}
+}
+
+func TestOpenClashCoreAssetNameRejectsNonLinuxSmart(t *testing.T) {
+	if _, err := openClashCoreAssetName("darwin", "arm64"); err == nil {
+		t.Fatal("expected non-linux smart core error")
+	}
+}
+
+func TestOpenClashCoreAssetNameUsesLinuxArm64(t *testing.T) {
+	got, err := openClashCoreAssetName("linux", "aarch64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "clash-linux-arm64.tar.gz" {
+		t.Fatalf("asset = %q, want clash-linux-arm64.tar.gz", got)
+	}
+}
+
+func TestValidateRejectsHostSmartOnNonLinux(t *testing.T) {
+	opts := normalizeOptions(Options{Flavor: FlavorSmart, TargetOS: "darwin", TargetArch: "arm64"})
+	if err := opts.validate(); err == nil {
+		t.Fatal("expected non-linux smart validation error")
+	}
+}
+
+func TestDefaultHostOutputPathIncludesCurrentPlatform(t *testing.T) {
+	opts := normalizeOptions(Options{})
+	want := filepath.Join("bin", runtime.GOOS+"-"+runtime.GOARCH, "mihomo-meta")
+	if runtime.GOOS == "windows" {
+		want += ".exe"
+	}
+	if got := outputPath(opts, FlavorMeta); got != want {
+		t.Fatalf("host output path = %q, want %q", got, want)
 	}
 }

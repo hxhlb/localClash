@@ -37,10 +37,16 @@ Usage:
 
 Flags for core download:
   --version string   GitHub release tag, or "latest" (default "latest")
-  --os string        target OS (default current OS)
+  --flavor string    core flavor: all, meta, or smart (default "all")
+  --target string    download target: host or router (default "host")
+  --os string        target OS (default current OS for host, linux for router)
   --arch string      target arch (default current arch)
-  --output string    output binary path (default bin/mihomo or bin/mihomo.exe)
-  --repo string      GitHub repo owner/name (default "MetaCubeX/mihomo")
+  --output string    output binary path for a single flavor
+  --output-dir string
+                     output directory for default flavor paths (default "bin")
+  --repo string      Meta core GitHub repo owner/name (default "MetaCubeX/mihomo")
+  --smart-branch string
+                     OpenClash core branch for smart core downloads (default "master")
   --force           overwrite output if it exists
   --dry-run         print selected release asset without downloading
 
@@ -66,7 +72,8 @@ Flags for config render:
                  packs selection YAML; optional
   --rules-cache string
                  runtime pack cache directory (default ".runtime/rules/packs")
-  --preset string  runtime preset YAML (default "mihomo-preset.yaml")
+  --runtime-profile string
+                 runtime profile YAML (default "localclash-runtime.yaml")
   --force          overwrite output if it exists
 
 Flags for rules adapt:
@@ -81,7 +88,7 @@ Flags for rules render:
   --output string     output rules fragment path, or "-" for stdout (default "-")
 
 Flags for run:
-  --core string     Mihomo core binary path (default "bin/mihomo")
+  --core string     Mihomo core binary path (default from active runtime profile)
   --config string   Mihomo runtime config path (default "generated/mihomo.yaml")
   --workdir string  Mihomo runtime data directory (default ".runtime/mihomo")
   --log string      Mihomo log file path (default "<workdir>/logs/mihomo-YYYY-MM-DD.log")
@@ -89,7 +96,7 @@ Flags for run:
                  days of dated Mihomo logs to keep (default 7)
 
 Flags for doctor:
-  --core string          Mihomo core binary path (default "bin/mihomo")
+  --core string          Mihomo core binary path (default from active runtime profile)
   --subscription string  downloaded subscription YAML (default "subscription.yaml")
   --config string        generated Mihomo config path (default "generated/mihomo.yaml")
   --policy string        localClash policy YAML (default "policies/loyalsoldier.yaml")
@@ -178,10 +185,14 @@ func runCoreDownload(args []string) error {
 
 	opts := coredownload.Options{}
 	fs.StringVar(&opts.Version, "version", "latest", "GitHub release tag, or latest")
-	fs.StringVar(&opts.TargetOS, "os", runtime.GOOS, "target OS")
+	fs.StringVar(&opts.Flavor, "flavor", coredownload.FlavorAll, "core flavor: all, meta, or smart")
+	fs.StringVar(&opts.Target, "target", coredownload.TargetHost, "download target: host or router")
+	fs.StringVar(&opts.TargetOS, "os", "", "target OS")
 	fs.StringVar(&opts.TargetArch, "arch", runtime.GOARCH, "target arch")
 	fs.StringVar(&opts.OutputPath, "output", "", "output binary path")
+	fs.StringVar(&opts.OutputDir, "output-dir", "bin", "output directory for default flavor paths")
 	fs.StringVar(&opts.Repo, "repo", "MetaCubeX/mihomo", "GitHub repo owner/name")
+	fs.StringVar(&opts.SmartBranch, "smart-branch", "master", "OpenClash core branch for smart core downloads")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print selected release asset without downloading")
 
@@ -195,17 +206,21 @@ func runCoreDownload(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	result, err := coredownload.Download(ctx, opts)
+	results, err := coredownload.Download(ctx, opts)
 	if err != nil {
 		return err
 	}
 
 	if opts.DryRun {
-		fmt.Printf("release: %s\nasset: %s\nurl: %s\n", result.Version, result.AssetName, result.DownloadURL)
+		for _, result := range results {
+			fmt.Printf("target: %s\nflavor: %s\nrelease: %s\nasset: %s\nurl: %s\noutput: %s\n", result.Target, result.Flavor, result.Version, result.AssetName, result.DownloadURL, result.OutputPath)
+		}
 		return nil
 	}
 
-	fmt.Printf("downloaded %s (%s) to %s\n", result.AssetName, result.Version, result.OutputPath)
+	for _, result := range results {
+		fmt.Printf("downloaded %s core %s (%s) to %s\n", result.Flavor, result.AssetName, result.Version, result.OutputPath)
+	}
 	return nil
 }
 
@@ -279,7 +294,7 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 	fs.StringVar(&opts.OutputPath, "output", state.Paths.GeneratedConfig, "generated Mihomo config path")
 	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection YAML; optional")
 	fs.StringVar(&opts.RulesCacheDir, "rules-cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
-	fs.StringVar(&opts.PresetPath, "preset", state.Paths.PresetPath, "runtime preset YAML")
+	fs.StringVar(&opts.RuntimeProfilePath, "runtime-profile", state.Paths.RuntimeProfilePath, "runtime profile YAML")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 
 	if err := fs.Parse(args); err != nil {
@@ -297,7 +312,7 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 		return err
 	}
 
-	fmt.Printf("rendered %s mode/%s preset config to %s (%d proxies, %d rules)\n", result.Mode, result.Preset, result.OutputPath, result.ProxyCount, result.RuleCount)
+	fmt.Printf("rendered %s mode/%s runtime/%s core config to %s (%d proxies, %d rules)\n", result.Mode, result.RuntimeMode, result.Core, result.OutputPath, result.ProxyCount, result.RuleCount)
 	return nil
 }
 
