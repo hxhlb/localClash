@@ -1454,10 +1454,6 @@ func TestToolsCallDoctorReturnsSerializableResult(t *testing.T) {
 
 func TestToolsCallEnvironmentInspectReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
-	refRoot := filepath.Join(dir, "openclash-reference")
-	if err := os.MkdirAll(filepath.Join(refRoot, "snapshot"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	state := appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
@@ -1474,10 +1470,8 @@ func TestToolsCallEnvironmentInspectReturnsSerializableResult(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "environment_inspect",
-			"arguments": map[string]any{
-				"openclash_reference_root": refRoot,
-			},
+			"name":      "environment_inspect",
+			"arguments": map[string]any{},
 		},
 	})
 	if err != nil {
@@ -1494,6 +1488,12 @@ func TestToolsCallEnvironmentInspectReturnsSerializableResult(t *testing.T) {
 	}
 	if _, ok := content["network_capabilities"]; ok {
 		t.Fatalf("content uses old network_capabilities field: %+v", content)
+	}
+	if _, ok := content["openclash_state"]; ok {
+		t.Fatalf("content includes removed openclash_state field: %+v", content)
+	}
+	if _, ok := content["reference_snapshots"]; ok {
+		t.Fatalf("content includes removed reference_snapshots field: %+v", content)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("environment_inspect structured content is not serializable: %v", err)

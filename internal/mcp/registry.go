@@ -47,7 +47,7 @@ func Registry() []Tool {
 		{Name: "config_intent_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash routing intent. Defaults to durable localclash.yaml; use view=working for subscription/profile context or view=effective_preview for a temporary non-persistent generated preview."},
 		{Name: "config_overlay_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash overlay metadata and summaries."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
-		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, localClash state, and OpenClash state without exposing credentials."},
+		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, and localClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},
 		{Name: "pack_rules_query", SafetyLevel: SafeRead, Description: "Search locally cached pack provider rules for a domain or keyword. Does not download provider rules; call pack_rules_prefetch first when cache coverage is incomplete."},
 		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry."},
@@ -127,9 +127,7 @@ func inputSchemaForTool(name string) map[string]any {
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
-			"properties": map[string]any{
-				"openclash_reference_root": map[string]any{"type": "string", "description": "Optional local directory containing OpenClash reference snapshots outside the localClash runtime."},
-			},
+			"properties":           map[string]any{},
 		}
 	case "config_draft_apply":
 		return map[string]any{

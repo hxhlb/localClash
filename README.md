@@ -141,14 +141,13 @@ Tool safety levels are part of the tool metadata:
 MCP environment tool:
 
 - `environment_inspect`: inspect host, network evidence, localClash state, and
-  OpenClash state without exposing credentials.
+  local runtime readiness without exposing credentials.
 
 This tool reports observed facts and capabilities, not device identity. It does
 not return an `is_router` boolean. Agents should reason from evidence such as
 service manager, interfaces, routes, DNS/DHCP services, firewall backends,
-localClash files, and OpenClash files. Subscription URLs, proxy server
-addresses, passwords, UUIDs, WAN credentials, and private keys are redacted or
-omitted.
+and localClash files. Subscription URLs, proxy server addresses, passwords,
+UUIDs, WAN credentials, and private keys are redacted or omitted.
 
 The server marks `run_runtime` as `confirm_required`, and assumes the Agent SDK
 or MCP client has completed confirmation before calling it. `switch_proxy_group`

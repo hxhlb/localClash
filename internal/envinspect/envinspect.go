@@ -15,28 +15,23 @@ import (
 
 	"localclash/internal/appinit"
 	"localclash/internal/runtimeprofile"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Options struct {
-	RootDir                string
-	WorkDir                string
-	Paths                  appinit.RuntimePaths
-	OpenClashReferenceRoot string
-	CommandTimeout         time.Duration
+	RootDir        string
+	WorkDir        string
+	Paths          appinit.RuntimePaths
+	CommandTimeout time.Duration
 }
 
 type Result struct {
-	Host               HostInfo           `json:"host"`
-	Observed           Observed           `json:"observed"`
-	Capabilities       Capabilities       `json:"capabilities"`
-	LocalClashState    LocalClashState    `json:"localclash_state"`
-	OpenClashState     OpenClashState     `json:"openclash_state"`
-	SetupReadiness     SetupReadiness     `json:"setup_readiness"`
-	SafetyBoundaries   []string           `json:"safety_boundaries"`
-	Redactions         []string           `json:"redactions"`
-	ReferenceSnapshots ReferenceSnapshots `json:"reference_snapshots,omitempty"`
+	Host             HostInfo        `json:"host"`
+	Observed         Observed        `json:"observed"`
+	Capabilities     Capabilities    `json:"capabilities"`
+	LocalClashState  LocalClashState `json:"localclash_state"`
+	SetupReadiness   SetupReadiness  `json:"setup_readiness"`
+	SafetyBoundaries []string        `json:"safety_boundaries"`
+	Redactions       []string        `json:"redactions"`
 }
 
 type HostInfo struct {
@@ -143,7 +138,6 @@ type DHCPServerEvidence struct {
 
 type ProxyRuntimeCapability struct {
 	MihomoCorePresent bool     `json:"mihomo_core_present"`
-	OpenClashPresent  bool     `json:"openclash_present"`
 	CanRunBackground  bool     `json:"can_run_background"`
 	Evidence          []string `json:"evidence,omitempty"`
 	Confidence        string   `json:"confidence,omitempty"`
@@ -161,43 +155,10 @@ type LocalClashState struct {
 	CorePresent                bool   `json:"core_present"`
 }
 
-type OpenClashState struct {
-	Present          bool              `json:"present"`
-	UCIConfigPresent bool              `json:"uci_config_present"`
-	ConfigPath       string            `json:"active_config,omitempty"`
-	Features         map[string]string `json:"features,omitempty"`
-	SectionCounts    map[string]int    `json:"section_counts,omitempty"`
-	ActiveProfile    *ProfileSummary   `json:"active_profile,omitempty"`
-}
-
-type ProfileSummary struct {
-	Path                string              `json:"path"`
-	ProxiesCount        int                 `json:"proxies_count"`
-	ProxyGroupsCount    int                 `json:"proxy_groups_count"`
-	ProxyProvidersCount int                 `json:"proxy_providers_count"`
-	RuleProvidersCount  int                 `json:"rule_providers_count"`
-	RulesCount          int                 `json:"rules_count"`
-	Mode                string              `json:"mode,omitempty"`
-	AllowLAN            *bool               `json:"allow_lan,omitempty"`
-	ProxyGroupsSample   []ProxyGroupSummary `json:"proxy_groups_sample,omitempty"`
-}
-
-type ProxyGroupSummary struct {
-	Name         string `json:"name"`
-	Type         string `json:"type,omitempty"`
-	ProxiesCount int    `json:"proxies_count"`
-	UseCount     int    `json:"use_count"`
-}
-
 type SetupReadiness struct {
 	Level       string   `json:"level"`
 	Missing     []string `json:"missing"`
 	NextActions []string `json:"next_actions"`
-}
-
-type ReferenceSnapshots struct {
-	Root      string   `json:"root"`
-	Snapshots []string `json:"snapshots"`
 }
 
 func Inspect(ctx context.Context, opts Options) (Result, error) {
@@ -212,7 +173,7 @@ func Inspect(ctx context.Context, opts Options) (Result, error) {
 		},
 		SafetyBoundaries: []string{
 			"Do not infer that this host is a router from OS, interface names, or address ranges alone.",
-			"Do not change DNS, DHCP, firewall, or OpenClash state without an explicit apply plan and user confirmation.",
+			"Do not change DNS, DHCP, or firewall state without an explicit apply plan and user confirmation.",
 			"Do not expose subscription URLs, proxy server addresses, passwords, UUIDs, private keys, or WAN credentials.",
 			"Do not verify or claim proxy egress region from node names or environment metadata.",
 		},
@@ -235,11 +196,9 @@ func Inspect(ctx context.Context, opts Options) (Result, error) {
 	result.Observed.DNSResolvers = observeDNSResolvers(ctx, opts)
 	result.Observed.Services = observeServices(ctx, opts)
 	result.LocalClashState = inspectLocalClash(opts)
-	result.OpenClashState = inspectOpenClash(opts)
-	result.Observed.Files = observeFiles(opts, result.OpenClashState.ConfigPath)
+	result.Observed.Files = observeFiles(opts)
 	result.Capabilities = buildCapabilities(result, opts)
 	result.SetupReadiness = buildSetupReadiness(result)
-	result.ReferenceSnapshots = inspectReferenceSnapshots(opts.OpenClashReferenceRoot)
 	return result, nil
 }
 
@@ -454,7 +413,7 @@ func uniqueDNSResolvers(values []DNSResolverObservation) []DNSResolverObservatio
 }
 
 func observeServices(ctx context.Context, opts Options) []ServiceObservation {
-	names := []string{"network", "firewall", "dnsmasq", "odhcpd", "openclash"}
+	names := []string{"network", "firewall", "dnsmasq", "odhcpd"}
 	var out []ServiceObservation
 	for _, name := range names {
 		path := rootPath(opts.RootDir, "/etc/init.d/"+name)
@@ -485,95 +444,7 @@ func inspectLocalClash(opts Options) LocalClashState {
 	return state
 }
 
-func inspectOpenClash(opts Options) OpenClashState {
-	uciPath := rootPath(opts.RootDir, "/etc/config/openclash")
-	state := OpenClashState{
-		Present:          pathExists(rootPath(opts.RootDir, "/etc/openclash")) || fileExists(uciPath),
-		UCIConfigPresent: fileExists(uciPath),
-		Features:         map[string]string{},
-		SectionCounts:    map[string]int{},
-	}
-	if !state.UCIConfigPresent {
-		return state
-	}
-	config, err := parseUCIFile(uciPath)
-	if err != nil {
-		return state
-	}
-	for _, section := range config.Sections {
-		state.SectionCounts[section.Type]++
-	}
-	if openclash := firstSection(config, "openclash"); openclash != nil {
-		for _, key := range safeOpenClashKeys() {
-			if value, ok := openclash.Options[key]; ok {
-				state.Features[key] = value
-			}
-		}
-		state.ConfigPath = openclash.Options["config_path"]
-	}
-	if state.ConfigPath != "" {
-		if summary, err := inspectProfile(rootPath(opts.RootDir, state.ConfigPath)); err == nil {
-			state.ActiveProfile = &summary
-		}
-	}
-	return state
-}
-
-func safeOpenClashKeys() []string {
-	return []string{
-		"enable", "auto_update", "enable_custom_dns", "enable_custom_clash_rules",
-		"operation_mode", "redirect_dns", "dashboard_type", "config_path",
-		"enable_geoip_dat", "enable_meta_sniffer", "enable_tcp_concurrent",
-		"en_mode", "proxy_mode", "enable_redirect_dns", "router_self_proxy",
-		"other_rule_auto_update", "geo_auto_update", "geoip_auto_update",
-		"geosite_auto_update", "chnr_auto_update", "auto_restart",
-		"dashboard_forward_ssl", "ipv6_enable", "ipv6_dns", "ipv6_mode",
-		"enable_respect_rules", "enable_unified_delay",
-		"enable_meta_sniffer_pure_ip", "geoasn_auto_update", "smart_enable",
-		"lan_ac_mode", "smart_strategy", "smart_prefer_asn", "smart_enable_lgbm",
-	}
-}
-
-func inspectProfile(path string) (ProfileSummary, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ProfileSummary{}, err
-	}
-	var doc map[string]any
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return ProfileSummary{}, err
-	}
-	summary := ProfileSummary{
-		Path:                path,
-		ProxiesCount:        len(anySlice(doc["proxies"])),
-		ProxyGroupsCount:    len(anySlice(doc["proxy-groups"])),
-		ProxyProvidersCount: len(anyMap(doc["proxy-providers"])),
-		RuleProvidersCount:  len(anyMap(doc["rule-providers"])),
-		RulesCount:          len(anySlice(doc["rules"])),
-		Mode:                stringValue(doc["mode"]),
-	}
-	if allowLAN, ok := boolValue(doc["allow-lan"]); ok {
-		summary.AllowLAN = &allowLAN
-	}
-	for _, raw := range anySlice(doc["proxy-groups"]) {
-		group, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		summary.ProxyGroupsSample = append(summary.ProxyGroupsSample, ProxyGroupSummary{
-			Name:         stringValue(group["name"]),
-			Type:         stringValue(group["type"]),
-			ProxiesCount: len(anySlice(group["proxies"])),
-			UseCount:     len(anySlice(group["use"])),
-		})
-		if len(summary.ProxyGroupsSample) >= 20 {
-			break
-		}
-	}
-	return summary, nil
-}
-
-func observeFiles(opts Options, openClashConfigPath string) []FileObservation {
+func observeFiles(opts Options) []FileObservation {
 	paths := []string{
 		workPath(opts.WorkDir, opts.Paths.SubscriptionPath),
 		workPath(opts.WorkDir, opts.Paths.SubscriptionConfig),
@@ -582,12 +453,6 @@ func observeFiles(opts Options, openClashConfigPath string) []FileObservation {
 		workPath(opts.WorkDir, opts.Paths.CorePath),
 		workPath(opts.WorkDir, opts.Paths.MihomoRuntimeDir),
 		workPath(opts.WorkDir, opts.Paths.RulesCacheDir),
-		rootPath(opts.RootDir, "/etc/config/openclash"),
-		rootPath(opts.RootDir, "/etc/openclash"),
-		rootPath(opts.RootDir, "/etc/openclash/core/clash_meta"),
-	}
-	if openClashConfigPath != "" {
-		paths = append(paths, rootPath(opts.RootDir, openClashConfigPath))
 	}
 	seen := map[string]bool{}
 	var out []FileObservation
@@ -640,14 +505,12 @@ func buildCapabilities(result Result, opts Options) Capabilities {
 		caps.Firewall.Evidence = []string{"firewall command present"}
 	}
 	for _, service := range result.Observed.Services {
-		if service.Name == "dnsmasq" || service.Name == "odhcpd" || service.Name == "openclash" {
+		if service.Name == "dnsmasq" || service.Name == "odhcpd" {
 			if service.Present {
 				if service.Name == "dnsmasq" {
 					caps.DNS.Services = append(caps.DNS.Services, service)
 				}
-				if service.Name == "dnsmasq" || service.Name == "odhcpd" {
-					caps.DHCP.Services = append(caps.DHCP.Services, service)
-				}
+				caps.DHCP.Services = append(caps.DHCP.Services, service)
 			}
 		}
 	}
@@ -671,16 +534,12 @@ func buildCapabilities(result Result, opts Options) Capabilities {
 		caps.DHCP.Evidence = []string{"DHCP-capable service present"}
 	}
 	caps.ProxyRuntime = ProxyRuntimeCapability{
-		MihomoCorePresent: result.LocalClashState.CorePresent || filePresent(result.Observed.Files, rootPath(opts.RootDir, "/etc/openclash/core/clash_meta")),
-		OpenClashPresent:  result.OpenClashState.Present,
+		MihomoCorePresent: result.LocalClashState.CorePresent,
 		CanRunBackground:  result.Host.ServiceManager != "",
 		Confidence:        "medium",
 	}
 	if caps.ProxyRuntime.MihomoCorePresent {
-		caps.ProxyRuntime.Evidence = append(caps.ProxyRuntime.Evidence, "mihomo/openclash core file present")
-	}
-	if caps.ProxyRuntime.OpenClashPresent {
-		caps.ProxyRuntime.Evidence = append(caps.ProxyRuntime.Evidence, "OpenClash files present")
+		caps.ProxyRuntime.Evidence = append(caps.ProxyRuntime.Evidence, "localClash mihomo core file present")
 	}
 	return caps
 }
@@ -688,13 +547,6 @@ func buildCapabilities(result Result, opts Options) Capabilities {
 func buildSetupReadiness(result Result) SetupReadiness {
 	if result.LocalClashState.GeneratedConfigPresent && result.LocalClashState.SubscriptionPresent && result.LocalClashState.CorePresent {
 		return SetupReadiness{Level: "configured", NextActions: []string{"inspect config", "render plan", "test config", "run runtime with confirmation"}}
-	}
-	if result.OpenClashState.Present && !result.LocalClashState.Present {
-		return SetupReadiness{
-			Level:       "openclash_configured_localclash_absent",
-			Missing:     []string{"localclash_config", "localclash_runtime"},
-			NextActions: []string{"treat OpenClash as existing deployment reference", "design import or migration path before applying changes"},
-		}
 	}
 	var missing []string
 	if !result.LocalClashState.SubscriptionPresent {
@@ -711,24 +563,6 @@ func buildSetupReadiness(result Result) SetupReadiness {
 		level = "partial"
 	}
 	return SetupReadiness{Level: level, Missing: missing, NextActions: []string{"configure subscription sources", "refresh subscriptions", "download or verify mihomo core", "render generated config"}}
-}
-
-func inspectReferenceSnapshots(root string) ReferenceSnapshots {
-	if strings.TrimSpace(root) == "" || !dirExists(root) {
-		return ReferenceSnapshots{}
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return ReferenceSnapshots{}
-	}
-	var snapshots []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			snapshots = append(snapshots, filepath.Join(root, entry.Name()))
-		}
-	}
-	sort.Strings(snapshots)
-	return ReferenceSnapshots{Root: root, Snapshots: snapshots}
 }
 
 type uciConfig struct {
@@ -800,15 +634,6 @@ func shellLikeFields(line string) []string {
 		fields = append(fields, current.String())
 	}
 	return fields
-}
-
-func firstSection(config uciConfig, sectionType string) *uciSection {
-	for i := range config.Sections {
-		if config.Sections[i].Type == sectionType {
-			return &config.Sections[i]
-		}
-	}
-	return nil
 }
 
 func inspectDHCPServers(opts Options) []DHCPServerEvidence {
@@ -913,49 +738,7 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func filePresent(files []FileObservation, path string) bool {
-	for _, file := range files {
-		if file.Path == path && file.Present {
-			return true
-		}
-	}
-	return false
-}
-
-func anySlice(value any) []any {
-	if values, ok := value.([]any); ok {
-		return values
-	}
-	return nil
-}
-
-func anyMap(value any) map[string]any {
-	if values, ok := value.(map[string]any); ok {
-		return values
-	}
-	return nil
-}
-
-func stringValue(value any) string {
-	if text, ok := value.(string); ok {
-		return text
-	}
-	return ""
-}
-
-func boolValue(value any) (bool, bool) {
-	if v, ok := value.(bool); ok {
-		return v, true
-	}
-	return false, false
 }

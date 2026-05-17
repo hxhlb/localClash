@@ -1667,13 +1667,11 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 }
 
 func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		OpenClashReferenceRoot string `json:"openclash_reference_root"`
-	}
+	var in struct{}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
 	}
-	opts := envinspect.Options{OpenClashReferenceRoot: in.OpenClashReferenceRoot}
+	opts := envinspect.Options{}
 	if s.state != nil {
 		opts.Paths = s.state.Paths
 	}

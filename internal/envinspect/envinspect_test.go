@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"localclash/internal/runtimeprofile"
 )
 
 func TestInspectOpenWrtRootReportsCapabilitiesWithoutSecrets(t *testing.T) {
@@ -66,7 +68,7 @@ rules:
 `)
 	writeEnvFile(t, filepath.Join(work, "subscription.yaml"), "proxies: []\n")
 	writeEnvFile(t, filepath.Join(work, "generated", "mihomo.yaml"), "mode: rule\n")
-	writeEnvFile(t, filepath.Join(work, "bin", "mihomo"), "")
+	writeEnvFile(t, filepath.Join(work, runtimeprofile.MetaCorePath), "")
 
 	result, err := Inspect(context.Background(), Options{RootDir: root, WorkDir: work})
 	if err != nil {
@@ -81,23 +83,14 @@ rules:
 	if len(result.Capabilities.DHCP.LANServers) != 1 || result.Capabilities.DHCP.LANServers[0].IPv4Mode != "server" {
 		t.Fatalf("dhcp capability = %+v, want LAN server evidence", result.Capabilities.DHCP)
 	}
-	if !result.OpenClashState.Present || result.OpenClashState.Features["proxy_mode"] != "rule" {
-		t.Fatalf("openclash state = %+v, want safe proxy mode", result.OpenClashState)
-	}
-	if result.OpenClashState.Features["dashboard_password"] != "" || result.OpenClashState.Features["subscription_url"] != "" {
-		t.Fatalf("unsafe openclash features leaked: %+v", result.OpenClashState.Features)
-	}
-	if result.OpenClashState.ActiveProfile == nil || result.OpenClashState.ActiveProfile.ProxiesCount != 1 || result.OpenClashState.ActiveProfile.RulesCount != 1 {
-		t.Fatalf("active profile = %+v, want counts", result.OpenClashState.ActiveProfile)
-	}
 	if !result.Capabilities.ProxyRuntime.MihomoCorePresent {
-		t.Fatalf("proxy runtime capability = %+v, want OpenClash core evidence", result.Capabilities.ProxyRuntime)
+		t.Fatalf("proxy runtime capability = %+v, want localClash core evidence", result.Capabilities.ProxyRuntime)
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"secret.example", "secret-password", "hk.example.com", "password: secret"} {
+	for _, secret := range []string{"openclash_state", "openclash_present", "openclash", "secret.example", "secret-password", "hk.example.com", "password: secret"} {
 		if strings.Contains(string(data), secret) {
 			t.Fatalf("environment inspect leaked %q in %s", secret, data)
 		}
