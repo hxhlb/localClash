@@ -1265,15 +1265,10 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 		if in.Core == "" {
 			in.Core = s.state.Paths.CorePath
 		}
-		if in.Config == s.state.Paths.GeneratedConfig && !s.state.Config.Available {
-			return jsonToolResult(map[string]any{
-				"started": false,
-				"error":   "generated config is unavailable: " + s.state.Config.Diagnostic,
-				"warnings": []string{
-					"Starting or restarting the proxy runtime may temporarily interrupt network connectivity.",
-					"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
-				},
-			})
+		if in.Config == s.state.Paths.GeneratedConfig {
+			if err := s.ensureRunnableConfig(in.Config); err != nil {
+				return jsonToolResult(runtimeErrorResult("generated config is unavailable: " + err.Error()))
+			}
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -1286,16 +1281,60 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 		Foreground: in.Foreground,
 	})
 	if err != nil {
-		return jsonToolResult(map[string]any{
-			"started": false,
-			"error":   err.Error(),
-			"warnings": []string{
-				"Starting or restarting the proxy runtime may temporarily interrupt network connectivity.",
-				"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
-			},
-		})
+		return jsonToolResult(runtimeErrorResult(err.Error()))
 	}
 	return jsonToolResult(result)
+}
+
+func (s *Server) ensureRunnableConfig(configPath string) error {
+	if fileExists(configPath) {
+		return nil
+	}
+	if s.state == nil {
+		return fmt.Errorf("missing %s", configPath)
+	}
+	if !fileExists(s.state.Paths.SubscriptionPath) {
+		if s.state.Config.Diagnostic != "" {
+			return fmt.Errorf("%s; call subscriptions_refresh before run_runtime", s.state.Config.Diagnostic)
+		}
+		return fmt.Errorf("effective subscription is unavailable; call subscriptions_refresh before run_runtime")
+	}
+	opts := configrender.Options{
+		SourcePath:         s.state.Paths.SubscriptionPath,
+		PolicyPath:         s.state.Paths.PolicyPath,
+		OutputPath:         configPath,
+		RulesCacheDir:      s.state.Paths.RulesCacheDir,
+		Force:              true,
+		PacksSelectionPath: "",
+	}
+	if s.state.Paths.PacksSelectionPath != "" && fileExists(s.state.Paths.PacksSelectionPath) {
+		opts.PacksSelectionPath = s.state.Paths.PacksSelectionPath
+	}
+	if _, err := configrender.Render(opts); err != nil {
+		return fmt.Errorf("render %s: %w", configPath, err)
+	}
+	return nil
+}
+
+func runtimeErrorResult(message string) map[string]any {
+	return map[string]any{
+		"started": false,
+		"error":   message,
+		"next_actions": []string{
+			"call subscriptions_status",
+			"call subscriptions_refresh if subscription.yaml is unavailable or stale",
+			"call run_runtime again after generated/mihomo.yaml can be rendered",
+		},
+		"warnings": []string{
+			"Starting or restarting the proxy runtime may temporarily interrupt network connectivity.",
+			"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
+		},
+	}
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {

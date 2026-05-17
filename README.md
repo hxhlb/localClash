@@ -247,6 +247,8 @@ The normal reviewed-change loop is:
 MCP runtime tool:
 
 - `run_runtime`: starts Mihomo from `generated/mihomo.yaml` in the background.
+  If the effective subscription exists but the generated config is missing,
+  localClash renders `generated/mihomo.yaml` before starting runtime.
 
 `run_runtime` is `confirm_required`. localClash does not implement an
 interactive yes/no prompt inside the tool; the Agent SDK or MCP client must ask
@@ -259,11 +261,11 @@ switch proxy groups, and does not modify system proxy settings.
 Minimal MCP closed loop:
 
 1. `subscriptions_refresh`
-2. `doctor`
-3. `run_runtime`
+2. `run_runtime`
+3. `runtime_status`
 
-This is the MCP form of the runtime loop. `doctor` should be the health-check
-entrypoint, including generated config validation. Agents should use
+This is the MCP form of the runtime loop. `doctor` remains the broader
+health-check entrypoint, including generated config validation. Agents should use
 `config_draft_render` and `config_draft_apply` for reviewed routing changes; raw
 `config_render` is a CLI/internal debug capability, not part of the product MCP
 surface.

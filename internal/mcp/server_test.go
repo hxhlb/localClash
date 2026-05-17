@@ -1408,6 +1408,66 @@ func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 	if !strings.Contains(content["error"].(string), "effective subscription is unavailable") {
 		t.Fatalf("content = %+v, want bootstrap diagnostic", content)
 	}
+	nextActions := content["next_actions"].([]any)
+	if len(nextActions) == 0 {
+		t.Fatalf("content = %+v, want next actions", content)
+	}
+}
+
+func TestRunRuntimeToolRendersMissingGeneratedConfigFromSubscription(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	dir := filepath.Dir(paths.subscription)
+	core := filepath.Join(dir, "mihomo")
+	writeTestExecutable(t, core, `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    echo configuration test is successful
+    exit 0
+  fi
+done
+echo runtime started
+sleep 30
+`)
+	generated := filepath.Join(dir, "generated", "mihomo.yaml")
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:     generated,
+			SubscriptionPath:    paths.subscription,
+			PolicyPath:          paths.policy,
+			RulesCacheDir:       paths.cache,
+			MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:            core,
+			PacksSelectionPath:  filepath.Join(dir, "missing-packs.yaml"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.yaml"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+		Config: appinit.ConfigState{
+			Available:  false,
+			Diagnostic: "config render skipped because effective subscription is unavailable",
+		},
+	}
+
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "run_runtime",
+			"arguments": map[string]any{},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("run_runtime returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	defer killMCPProcess(int(content["pid"].(float64)))
+	if content["started"] != true {
+		t.Fatalf("content = %+v, want started after auto render", content)
+	}
+	if _, err := os.Stat(generated); err != nil {
+		t.Fatalf("generated config missing after run_runtime auto render: %v", err)
+	}
 }
 
 func TestRemovedMCPToolsReturnUnknownTool(t *testing.T) {
