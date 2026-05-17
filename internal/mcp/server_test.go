@@ -909,6 +909,24 @@ func TestToolsCallConfigDraftRenderInvalidInputReturnsError(t *testing.T) {
 	}
 }
 
+func TestToolsCallRejectsStringifiedArguments(t *testing.T) {
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "config_draft_render",
+			"arguments": `{"overlay":{"packs":[{"id":"sukkaw_ai","target":"AI_US_JP"}]}}`,
+		},
+	})
+	if resp.Error == nil {
+		t.Fatal("expected stringified arguments to be rejected")
+	}
+	if !strings.Contains(resp.Error.Message, "must be a JSON object") || !strings.Contains(resp.Error.Message, "not \"arguments\":\"{...}\"") {
+		t.Fatalf("error = %+v, want object-construction guidance", resp.Error)
+	}
+}
+
 func TestToolsCallPacksListReturnsSerializableResult(t *testing.T) {
 	setupMCPPackCache(t)
 	resp := callHandle(t, map[string]any{

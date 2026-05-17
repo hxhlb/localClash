@@ -219,12 +219,17 @@ can distinguish immutable base config from future replaceable overlay config.
 MCP draft-building tools:
 
 - `proxy_group_build`: build and validate a reusable proxy group target from a
-  `name_regex` selector or exact `nodes`.
+  `name_regex` selector or exact `nodes`. This tool does not persist state; copy
+  the returned proxy group into `config_draft_render.overlay.proxy_groups` when a
+  draft should use it.
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, or CIDRs that share one target.
 - `config_draft_render`: accepts proxy groups, third-party packs, and custom
   rules, then renders candidate `localclash.yaml`, derived
   `localclash-packs.yaml`, and `mihomo.yaml` into `.runtime/drafts/<draft-id>/`.
+  MCP `arguments` must be a JSON object, not a JSON-encoded string. If a pack or
+  custom rule targets a new proxy group, include that group in
+  `overlay.proxy_groups` in the same call.
 - `config_draft_apply`: applies a reviewed draft by writing durable
   `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
   `generated/mihomo.yaml`. After a successful apply, call

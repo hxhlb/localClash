@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -231,6 +232,9 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	if len(args) == 0 {
 		args = []byte("{}")
 	}
+	if !isJSONObject(args) {
+		return toolResult{}, fmt.Errorf("tool arguments for %q must be a JSON object, not a JSON string or array; send \"arguments\":{\"field\":\"value\"}, not \"arguments\":\"{...}\"", call.Name)
+	}
 	switch call.Name {
 	case "config_base_inspect":
 		return callConfigBaseInspect(args)
@@ -285,6 +289,11 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
+}
+
+func isJSONObject(data json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(data)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func callNLFile(args json.RawMessage) (toolResult, error) {
