@@ -16,13 +16,15 @@ Flags:
   --mcp-addr ADDR      Router MCP bind address (default: 0.0.0.0:8765)
   --mcp-path PATH      Router MCP JSON-RPC path (default: /mcp)
   --skip-tests         Skip go test before building
+  --no-tail            Do not follow the router MCP log after deployment
+  --tail-lines N       Lines to print before following the log (default: 80)
   -h, --help           Show this help
 
 Environment variables with the LOCALCLASH_ prefix can also override defaults:
 LOCALCLASH_ROUTER_SSH, LOCALCLASH_ROUTER_ARCH, LOCALCLASH_REMOTE_BIN,
 LOCALCLASH_ROUTER_WORKDIR, LOCALCLASH_MCP_ADDR, LOCALCLASH_MCP_PATH,
 LOCALCLASH_SKIP_TESTS, LOCALCLASH_SSH_CONNECT_TIMEOUT,
-LOCALCLASH_SSH_LOG_LEVEL.
+LOCALCLASH_SSH_LOG_LEVEL, LOCALCLASH_TAIL_LOGS, LOCALCLASH_TAIL_LINES.
 USAGE
 }
 
@@ -72,6 +74,8 @@ mcp_path="${LOCALCLASH_MCP_PATH:-/mcp}"
 skip_tests="${LOCALCLASH_SKIP_TESTS:-0}"
 ssh_connect_timeout="${LOCALCLASH_SSH_CONNECT_TIMEOUT:-8}"
 ssh_log_level="${LOCALCLASH_SSH_LOG_LEVEL:-ERROR}"
+tail_logs="${LOCALCLASH_TAIL_LOGS:-1}"
+tail_lines="${LOCALCLASH_TAIL_LINES:-80}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -109,6 +113,15 @@ while [[ $# -gt 0 ]]; do
       skip_tests="1"
       shift
       ;;
+    --no-tail)
+      tail_logs="0"
+      shift
+      ;;
+    --tail-lines)
+      [[ $# -ge 2 ]] || die "$1 requires a value"
+      tail_lines="$2"
+      shift 2
+      ;;
     -h | --help)
       usage
       exit 0
@@ -131,6 +144,19 @@ reject_unsafe_value "remote_workdir" "${remote_workdir}"
 reject_unsafe_value "mcp_addr" "${mcp_addr}"
 reject_unsafe_value "mcp_path" "${mcp_path}"
 reject_unsafe_value "mcp_log" "${mcp_log}"
+
+case "${tail_logs}" in
+  0 | 1)
+    ;;
+  *)
+    die "LOCALCLASH_TAIL_LOGS must be 0 or 1"
+    ;;
+esac
+case "${tail_lines}" in
+  '' | *[!0-9]*)
+    die "--tail-lines must be a non-negative integer"
+    ;;
+esac
 
 require_command go
 require_command ssh
@@ -290,3 +316,14 @@ printf 'binary: %s:%s\n' "${router_ssh}" "${remote_bin}"
 printf 'service: %s:%s\n' "${router_ssh}" "${service_path}"
 printf 'mcp: http://%s:%s%s\n' "${router_host}" "${mcp_port}" "${mcp_path}"
 printf 'health: http://%s:%s/health\n' "${router_host}" "${mcp_port}"
+
+if [[ "${tail_logs}" == "1" ]]; then
+  log "following router MCP log ${router_ssh}:${mcp_log} (press Ctrl+C to stop)"
+  ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${mcp_log}" "${tail_lines}" <<'EOS'
+set -eu
+mcp_log="$1"
+tail_lines="$2"
+touch "$mcp_log"
+tail -n "$tail_lines" -f "$mcp_log"
+EOS
+fi
