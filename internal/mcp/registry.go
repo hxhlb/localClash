@@ -44,6 +44,7 @@ type ToolsListResult struct {
 func Registry() []Tool {
 	tools := []Tool{
 		{Name: "config_base_inspect", SafetyLevel: SafeRead, Description: "Inspect generated base config summary without exposing proxy credentials."},
+		{Name: "config_intent_inspect", SafetyLevel: SafeRead, Description: "Inspect durable localClash routing intent from localclash.yaml, including proxy groups, custom rules, and packs."},
 		{Name: "config_overlay_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash overlay metadata and summaries."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, localClash state, and OpenClash state without exposing credentials."},
@@ -323,6 +324,19 @@ func inputSchemaForTool(name string) map[string]any {
 				},
 			},
 			"required": []string{"overlay"},
+		}
+	case "config_intent_inspect":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"config":               map[string]any{"type": "string", "description": "Durable localClash intent config path. Defaults to localclash.yaml."},
+				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path used to resolve proxy group selectors. Defaults to subscription.yaml."},
+				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
+				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory used to validate pack ids. Defaults to .runtime/rules/packs."},
+				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum entries per section. Defaults to 20."},
+			},
 		}
 	case "config_base_inspect", "config_overlay_inspect":
 		return map[string]any{

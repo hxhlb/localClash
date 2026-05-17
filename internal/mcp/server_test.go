@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -104,6 +104,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"doctor":                    SafeRead,
 		"environment_inspect":       SafeRead,
 		"config_base_inspect":       SafeRead,
+		"config_intent_inspect":     SafeRead,
 		"config_overlay_inspect":    SafeRead,
 		"nl_file":                   SafeRead,
 		"packs_get":                 SafeRead,
@@ -454,6 +455,64 @@ packs:
 	}
 	if !strings.Contains(readMCPFile(t, localClashConfig), "SG 02") {
 		t.Fatalf("localclash config was not updated: %s", readMCPFile(t, localClashConfig))
+	}
+}
+
+func TestToolsCallConfigIntentInspectReturnsDurableProxyGroups(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	dir := filepath.Dir(paths.subscription)
+	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	writeMCPFile(t, localClashConfig, `version: 1
+proxy_groups:
+  AI:
+    mode: manual
+    match:
+      type: name_regex
+      pattern: SG
+      min: 1
+    reason: Use Singapore-labelled nodes.
+    boundary: name_based_hint_only
+custom_rules:
+  - id: huggingface_temp
+    target: AI
+    rules:
+      - type: domain_suffix
+        value: huggingface.co
+packs:
+  - id: blackmatrix7_OpenAI
+    target: AI
+`)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_intent_inspect",
+			"arguments": map[string]any{
+				"config":       localClashConfig,
+				"subscription": paths.subscription,
+				"rules_cache":  paths.cache,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_intent_inspect returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["exists"] != true || content["valid"] != true || content["resolved"] != true {
+		t.Fatalf("intent status = %+v, want exists/valid/resolved", content)
+	}
+	proxyGroups := content["proxy_groups"].([]any)
+	if len(proxyGroups) != 1 || proxyGroups[0].(map[string]any)["id"] != "AI" {
+		t.Fatalf("proxy_groups = %+v, want AI", proxyGroups)
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("config_intent_inspect structured content is not serializable: %v", err)
+	}
+	if strings.Contains(string(data), "secret") || strings.Contains(string(data), "sg.example.com") {
+		t.Fatalf("config_intent_inspect leaked subscription details in %s", data)
 	}
 }
 

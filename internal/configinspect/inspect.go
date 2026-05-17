@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"localclash/internal/configmeta"
+	"localclash/internal/localconfig"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,15 @@ import (
 type Options struct {
 	ConfigPath string
 	Limit      int
+}
+
+type IntentOptions struct {
+	ConfigPath          string
+	Subscription        string
+	SubscriptionConfig  string
+	SubscriptionRuntime string
+	RulesCache          string
+	Limit               int
 }
 
 type BaseResult struct {
@@ -58,6 +68,54 @@ type OverlayResult struct {
 	RuleProviders   []configmeta.OverlayRuleProvider `json:"rule_providers"`
 	Rules           []configmeta.OverlayRule         `json:"rules"`
 	Insertion       string                           `json:"insertion,omitempty"`
+}
+
+type IntentResult struct {
+	Config           string             `json:"config"`
+	Layer            string             `json:"layer"`
+	Modifiable       bool               `json:"modifiable"`
+	Exists           bool               `json:"exists"`
+	Valid            bool               `json:"valid"`
+	Resolved         bool               `json:"resolved"`
+	Version          int                `json:"version,omitempty"`
+	LoadError        string             `json:"load_error,omitempty"`
+	ResolveError     string             `json:"resolve_error,omitempty"`
+	ProxyGroupsCount int                `json:"proxy_groups_count"`
+	ProxyGroups      []IntentProxyGroup `json:"proxy_groups"`
+	CustomRulesCount int                `json:"custom_rules_count"`
+	CustomRules      []IntentCustomRule `json:"custom_rules"`
+	PacksCount       int                `json:"packs_count"`
+	Packs            []IntentPack       `json:"packs"`
+	Truncated        bool               `json:"truncated,omitempty"`
+	Note             string             `json:"note"`
+}
+
+type IntentProxyGroup struct {
+	ID            string             `json:"id"`
+	Mode          string             `json:"mode"`
+	Match         *localconfig.Match `json:"match,omitempty"`
+	Nodes         []string           `json:"nodes,omitempty"`
+	SelectedNodes []string           `json:"selected_nodes,omitempty"`
+	NodeCount     int                `json:"node_count"`
+	Reason        string             `json:"reason,omitempty"`
+	Boundary      string             `json:"boundary,omitempty"`
+	Status        string             `json:"status"`
+}
+
+type IntentCustomRule struct {
+	ID        string                       `json:"id"`
+	Target    string                       `json:"target"`
+	RuleCount int                          `json:"rule_count"`
+	Reason    string                       `json:"reason,omitempty"`
+	Rules     []localconfig.CustomRuleLine `json:"rules,omitempty"`
+	Status    string                       `json:"status"`
+}
+
+type IntentPack struct {
+	ID     string `json:"id"`
+	Target string `json:"target"`
+	Reason string `json:"reason,omitempty"`
+	Status string `json:"status"`
 }
 
 func InspectBase(opts Options) (BaseResult, error) {
@@ -140,6 +198,62 @@ func InspectOverlay(opts Options) (OverlayResult, error) {
 	return result, nil
 }
 
+func InspectIntent(opts IntentOptions) (IntentResult, error) {
+	path := defaultIntentConfigPath(opts.ConfigPath)
+	limit := normalizedLimit(opts.Limit)
+	result := IntentResult{
+		Config:      path,
+		Layer:       "intent",
+		Modifiable:  true,
+		ProxyGroups: []IntentProxyGroup{},
+		CustomRules: []IntentCustomRule{},
+		Packs:       []IntentPack{},
+		Note:        "Intent is read from durable localclash.yaml. Use it before rendering a draft to preserve existing proxy groups, packs, and custom rules.",
+	}
+	config, err := localconfig.Load(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return result, nil
+		}
+		result.Exists = fileExists(path)
+		result.LoadError = err.Error()
+		return result, nil
+	}
+	if config.Version == 0 {
+		config.Version = 1
+	}
+	result.Exists = true
+	result.Valid = true
+	result.Version = config.Version
+	result.ProxyGroupsCount = len(config.ProxyGroups)
+	result.CustomRulesCount = len(config.CustomRules)
+	result.PacksCount = len(config.Packs)
+
+	result.ProxyGroups = proxyGroupIntents(config.ProxyGroups, nil, limit)
+	result.CustomRules = customRuleIntents(config.CustomRules, nil, limit)
+	result.Packs = packIntents(config.Packs, nil, limit)
+	result.Truncated = result.ProxyGroupsCount > len(result.ProxyGroups) ||
+		result.CustomRulesCount > len(result.CustomRules) ||
+		result.PacksCount > len(result.Packs)
+
+	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+		Config:              config,
+		SubscriptionPath:    opts.Subscription,
+		SubscriptionConfig:  opts.SubscriptionConfig,
+		SubscriptionRuntime: opts.SubscriptionRuntime,
+		RulesCache:          opts.RulesCache,
+	})
+	if err != nil {
+		result.ResolveError = err.Error()
+		return result, nil
+	}
+	result.Resolved = true
+	result.ProxyGroups = proxyGroupIntents(resolved.Config.ProxyGroups, resolved.ProxyGroups, limit)
+	result.CustomRules = customRuleIntents(resolved.Config.CustomRules, resolved.CustomRules, limit)
+	result.Packs = packIntents(resolved.Config.Packs, resolved.Packs, limit)
+	return result, nil
+}
+
 func readMetadata(config map[string]any) (configmeta.Metadata, bool, error) {
 	raw, ok := config[configmeta.Key]
 	if !ok {
@@ -178,11 +292,112 @@ func defaultConfigPath(path string) string {
 	return path
 }
 
+func defaultIntentConfigPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "localclash.yaml"
+	}
+	return path
+}
+
 func normalizedLimit(limit int) int {
 	if limit <= 0 {
 		return 20
 	}
 	return limit
+}
+
+func proxyGroupIntents(groups map[string]localconfig.ProxyGroup, resolved []localconfig.ProxyGroupResult, limit int) []IntentProxyGroup {
+	resolvedByID := map[string]localconfig.ProxyGroupResult{}
+	for _, group := range resolved {
+		resolvedByID[group.ID] = group
+	}
+	ids := make([]string, 0, len(groups))
+	for id := range groups {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	out := make([]IntentProxyGroup, 0, len(ids))
+	for _, id := range ids {
+		group := groups[id]
+		selected := append([]string{}, group.SelectedNodes...)
+		nodeCount := len(selected)
+		status := "configured"
+		if resolvedGroup, ok := resolvedByID[id]; ok {
+			selected = append([]string{}, resolvedGroup.SelectedNodes...)
+			nodeCount = resolvedGroup.NodeCount
+			status = "resolved"
+		} else if nodeCount == 0 {
+			nodeCount = len(group.Nodes)
+		}
+		out = append(out, IntentProxyGroup{
+			ID:            id,
+			Mode:          strings.ToLower(strings.TrimSpace(group.Mode)),
+			Match:         group.Match,
+			Nodes:         append([]string{}, group.Nodes...),
+			SelectedNodes: selected,
+			NodeCount:     nodeCount,
+			Reason:        group.Reason,
+			Boundary:      group.Boundary,
+			Status:        status,
+		})
+	}
+	return out
+}
+
+func customRuleIntents(rules []localconfig.CustomRule, resolved []localconfig.CustomRuleResult, limit int) []IntentCustomRule {
+	resolvedByID := map[string]localconfig.CustomRuleResult{}
+	for _, rule := range resolved {
+		resolvedByID[rule.ID] = rule
+	}
+	if len(rules) > limit {
+		rules = rules[:limit]
+	}
+	out := make([]IntentCustomRule, 0, len(rules))
+	for _, rule := range rules {
+		status := "configured"
+		if _, ok := resolvedByID[rule.ID]; ok {
+			status = "resolved"
+		}
+		out = append(out, IntentCustomRule{
+			ID:        rule.ID,
+			Target:    rule.Target,
+			RuleCount: len(rule.Rules),
+			Reason:    rule.Reason,
+			Rules:     append([]localconfig.CustomRuleLine{}, rule.Rules...),
+			Status:    status,
+		})
+	}
+	return out
+}
+
+func packIntents(packs []localconfig.Pack, resolved []localconfig.PackResult, limit int) []IntentPack {
+	resolvedByID := map[string]localconfig.PackResult{}
+	for _, pack := range resolved {
+		resolvedByID[pack.ID] = pack
+	}
+	if len(packs) > limit {
+		packs = packs[:limit]
+	}
+	out := make([]IntentPack, 0, len(packs))
+	for _, pack := range packs {
+		status := "configured"
+		if _, ok := resolvedByID[pack.ID]; ok {
+			status = "resolved"
+		}
+		out = append(out, IntentPack{ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Status: status})
+	}
+	return out
+}
+
+func fileExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func summarizeProxyGroups(value any) []ProxyGroupSummary {

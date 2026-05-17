@@ -195,6 +195,10 @@ MCP config inspection tools:
 
 - `config_base_inspect`: inspect the generated base config summary. The base
   layer is not modifiable through MCP plan tools.
+- `config_intent_inspect`: inspect the durable `localclash.yaml` routing intent,
+  including reusable proxy groups, custom rules, and packs. Agents should call
+  this before draft rendering when they need to preserve or reuse existing
+  localClash intent.
 - `config_overlay_inspect`: inspect the localClash-managed overlay from
   `x-localclash.overlay` metadata.
 
@@ -214,14 +218,16 @@ MCP draft-building tools:
   `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
   `generated/mihomo.yaml`.
 
-For pack routing such as "Steam through HK", an agent should call
-`subscription_nodes_search`, build the target with `proxy_group_build`, inspect
-the pack with `packs_list` or `packs_get`, then call `config_draft_render` with
-`proxy_groups` and `packs`. For domain routing such as "huggingface.co through
-temporary line", it should search/build the proxy group, call
-`custom_rules_build`, then render a draft with `proxy_groups` and
-`custom_rules`. For built-in targets such as "xxx direct", skip proxy group
-creation and build custom rules with target `DIRECT`.
+For pack routing such as "Steam through HK", an agent should first call
+`config_intent_inspect` to discover reusable proxy groups and existing intent,
+then call `subscription_nodes_search`, build or reuse the target with
+`proxy_group_build`, inspect the pack with `packs_list` or `packs_get`, and call
+`config_draft_render` with the preserved `proxy_groups` and `packs`. For domain
+routing such as "huggingface.co through temporary line", inspect intent,
+search/build or reuse the proxy group, call `custom_rules_build`, then render a
+draft with preserved `proxy_groups` and `custom_rules`. For built-in targets such
+as "xxx direct", skip proxy group creation and build custom rules with target
+`DIRECT`.
 
 Draft rendering does not overwrite active generated files, start or restart
 Mihomo, or apply router/OpenClash changes. After user review,

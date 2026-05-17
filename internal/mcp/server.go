@@ -234,6 +234,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	switch call.Name {
 	case "config_base_inspect":
 		return callConfigBaseInspect(args)
+	case "config_intent_inspect":
+		return s.callConfigIntentInspect(args)
 	case "config_overlay_inspect":
 		return callConfigOverlayInspect(args)
 	case "doctor":
@@ -351,6 +353,46 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	result, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: in.Config, Limit: in.Limit})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config              string `json:"config"`
+		Subscription        string `json:"subscription"`
+		SubscriptionConfig  string `json:"subscription_config"`
+		SubscriptionRuntime string `json:"subscription_runtime"`
+		RulesCache          string `json:"rules_cache"`
+		Limit               int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Subscription == "" {
+			in.Subscription = s.state.Paths.SubscriptionPath
+		}
+		if in.SubscriptionConfig == "" {
+			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
+		}
+		if in.SubscriptionRuntime == "" {
+			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
+		}
+		if in.RulesCache == "" {
+			in.RulesCache = s.state.Paths.RulesCacheDir
+		}
+	}
+	result, err := configinspect.InspectIntent(configinspect.IntentOptions{
+		ConfigPath:          in.Config,
+		Subscription:        in.Subscription,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+		RulesCache:          in.RulesCache,
+		Limit:               in.Limit,
+	})
 	if err != nil {
 		return toolResult{}, err
 	}

@@ -21,6 +21,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["config_base_inspect"].SafetyLevel != SafeRead {
 		t.Fatalf("config_base_inspect safety = %q, want %q", byName["config_base_inspect"].SafetyLevel, SafeRead)
 	}
+	if byName["config_intent_inspect"].SafetyLevel != SafeRead {
+		t.Fatalf("config_intent_inspect safety = %q, want %q", byName["config_intent_inspect"].SafetyLevel, SafeRead)
+	}
 	if byName["config_overlay_inspect"].SafetyLevel != SafeRead {
 		t.Fatalf("config_overlay_inspect safety = %q, want %q", byName["config_overlay_inspect"].SafetyLevel, SafeRead)
 	}

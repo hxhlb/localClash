@@ -105,6 +105,117 @@ func TestInspectOverlayWithEmptyMetadataReturnsNoOverlay(t *testing.T) {
 	assertInspectNoSensitiveLeak(t, result)
 }
 
+func TestInspectIntentMissingConfigReturnsEmptyIntent(t *testing.T) {
+	result, err := InspectIntent(IntentOptions{ConfigPath: filepath.Join(t.TempDir(), "localclash.yaml")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Exists || result.Valid || result.Resolved {
+		t.Fatalf("intent state = exists %v valid %v resolved %v, want all false", result.Exists, result.Valid, result.Resolved)
+	}
+	if len(result.ProxyGroups) != 0 || len(result.CustomRules) != 0 || len(result.Packs) != 0 {
+		t.Fatalf("intent arrays = %+v, want empty", result)
+	}
+}
+
+func TestInspectIntentReturnsResolvedDurableIntent(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	rulesCache := filepath.Join(dir, ".runtime", "rules", "packs")
+	writeInspectFile(t, configPath, `version: 1
+proxy_groups:
+  AI:
+    mode: manual
+    match:
+      type: name_regex
+      pattern: SG
+      min: 1
+    reason: Use Singapore-labelled nodes for AI.
+    boundary: name_based_hint_only
+custom_rules:
+  - id: huggingface_temp
+    target: AI
+    reason: Route Hugging Face through the AI group.
+    rules:
+      - type: domain_suffix
+        value: huggingface.co
+packs:
+  - id: blackmatrix7_OpenAI
+    target: AI
+    reason: Route OpenAI domains through AI.
+`)
+	writeInspectFile(t, subscriptionPath, `proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+`)
+	writeInspectFile(t, filepath.Join(rulesCache, "blackmatrix7.yaml"), `version: 1
+source: blackmatrix7
+adapter: blackmatrix7
+renderable: true
+packs:
+  - id: OpenAI
+    name: OpenAI
+    target: AI
+    renderable: true
+`)
+
+	result, err := InspectIntent(IntentOptions{ConfigPath: configPath, Subscription: subscriptionPath, RulesCache: rulesCache})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Exists || !result.Valid || !result.Resolved {
+		t.Fatalf("intent state = exists %v valid %v resolved %v, want true", result.Exists, result.Valid, result.Resolved)
+	}
+	if len(result.ProxyGroups) != 1 || result.ProxyGroups[0].ID != "AI" || result.ProxyGroups[0].Status != "resolved" {
+		t.Fatalf("proxy groups = %+v, want resolved AI", result.ProxyGroups)
+	}
+	if len(result.ProxyGroups[0].SelectedNodes) != 1 || result.ProxyGroups[0].SelectedNodes[0] != "SG 01" {
+		t.Fatalf("selected nodes = %+v, want SG 01", result.ProxyGroups[0].SelectedNodes)
+	}
+	if len(result.CustomRules) != 1 || result.CustomRules[0].RuleCount != 1 || result.CustomRules[0].Target != "AI" {
+		t.Fatalf("custom rules = %+v, want one AI rule", result.CustomRules)
+	}
+	if len(result.Packs) != 1 || result.Packs[0].ID != "blackmatrix7_OpenAI" || result.Packs[0].Status != "resolved" {
+		t.Fatalf("packs = %+v, want resolved OpenAI pack", result.Packs)
+	}
+	assertInspectNoSensitiveLeak(t, result)
+}
+
+func TestInspectIntentReportsResolveErrorWithoutLosingRawGroups(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeInspectFile(t, configPath, `version: 1
+proxy_groups:
+  TempLine:
+    mode: manual
+    nodes:
+      - Missing Node
+    reason: User explicitly chose this line.
+`)
+	writeInspectFile(t, subscriptionPath, `proxies:
+  - name: SG 01
+    type: ss
+`)
+
+	result, err := InspectIntent(IntentOptions{ConfigPath: configPath, Subscription: subscriptionPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Exists || !result.Valid || result.Resolved || result.ResolveError == "" {
+		t.Fatalf("intent state = %+v, want valid unresolved with resolve_error", result)
+	}
+	if len(result.ProxyGroups) != 1 || result.ProxyGroups[0].ID != "TempLine" || result.ProxyGroups[0].NodeCount != 1 {
+		t.Fatalf("proxy groups = %+v, want raw TempLine", result.ProxyGroups)
+	}
+	if result.ProxyGroups[0].Nodes[0] != "Missing Node" {
+		t.Fatalf("nodes = %+v, want missing raw node preserved", result.ProxyGroups[0].Nodes)
+	}
+}
+
 func writeInspectConfig(t *testing.T, metadata bool, overlay bool) string {
 	t.Helper()
 	content := `
@@ -182,6 +293,16 @@ x-localclash:
 		t.Fatal(err)
 	}
 	return path
+}
+
+func writeInspectFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertInspectNoSensitiveLeak(t *testing.T, value any) {
