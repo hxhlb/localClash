@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -112,8 +112,6 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"runtime_status":            SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
-		"virtual_nodes_get":         SafeRead,
-		"virtual_nodes_list":        SafeRead,
 		"config_plan_render":        SafeWrite,
 		"config_render":             SafeWrite,
 		"sed_file":                  SafeWrite,
@@ -467,8 +465,8 @@ func TestToolsCallConfigPlanRenderReturnsSerializableResult(t *testing.T) {
 					"packs": []map[string]any{
 						{"id": "blackmatrix7_OpenAI", "target": "AI"},
 					},
-					"virtual_targets": []map[string]any{
-						{"id": "AI", "node_labels": []string{"SG"}, "mode": "manual"},
+					"proxy_groups": []map[string]any{
+						{"id": "AI", "nodes": []string{"SG 01"}, "mode": "manual"},
 					},
 				},
 			},
@@ -728,63 +726,6 @@ func TestToolsCallConfigOverlayInspectReturnsSerializableResult(t *testing.T) {
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("config_overlay_inspect structured content is not serializable: %v", err)
-	}
-}
-
-func TestToolsCallVirtualNodesListReturnsSerializableResult(t *testing.T) {
-	selection, subscription := setupMCPVirtualNodesFiles(t)
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "virtual_nodes_list",
-			"arguments": map[string]any{
-				"selection":     selection,
-				"subscription":  subscription,
-				"include_empty": true,
-			},
-		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("virtual_nodes_list returned JSON-RPC error: %+v", resp.Error)
-	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	if content["total"] != float64(2) {
-		t.Fatalf("virtual_nodes_list total = %v, want 2", content["total"])
-	}
-	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("virtual_nodes_list structured content is not serializable: %v", err)
-	}
-}
-
-func TestToolsCallVirtualNodesGetReturnsSerializableResult(t *testing.T) {
-	selection, subscription := setupMCPVirtualNodesFiles(t)
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "virtual_nodes_get",
-			"arguments": map[string]any{
-				"id":           "SG",
-				"selection":    selection,
-				"subscription": subscription,
-			},
-		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("virtual_nodes_get returned JSON-RPC error: %+v", resp.Error)
-	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	node := content["virtual_node"].(map[string]any)
-	if node["id"] != "SG" {
-		t.Fatalf("virtual node id = %v, want SG", node["id"])
-	}
-	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("virtual_nodes_get structured content is not serializable: %v", err)
 	}
 }
 
@@ -1155,35 +1096,6 @@ packs:
 	}
 }
 
-func setupMCPVirtualNodesFiles(t *testing.T) (string, string) {
-	t.Helper()
-	dir := t.TempDir()
-	selection := filepath.Join(dir, "selection.yaml")
-	subscription := filepath.Join(dir, "subscription.yaml")
-	if err := os.WriteFile(selection, []byte(`
-version: 1
-node_labels:
-  EMPTY:
-    match: ["(?i)empty"]
-  SG:
-    match: ["(?i)sg|singapore"]
-virtual_targets: {}
-enabled_packs: []
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(subscription, []byte(`
-proxies:
-  - name: SG 01
-    type: ss
-    server: sg.example.com
-    password: secret
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return selection, subscription
-}
-
 func setupMCPInspectConfig(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "mihomo.yaml")
@@ -1216,10 +1128,10 @@ x-localclash:
       - id: blackmatrix7_OpenAI
         source: blackmatrix7
         target: AI
-    virtual_targets:
+    proxy_groups:
       - id: AI
         mode: manual
-        node_labels: [SG]
+        nodes: [SG 01]
     rule_providers:
       - name: blackmatrix7_OpenAI
         behavior: classical
@@ -1289,10 +1201,7 @@ modes:
         target: direct
 `)
 	writeMCPFile(t, filepath.Join(dir, "localclash-packs.yaml"), `version: 1
-node_labels:
-  SG:
-    match: ["(?i)sg|singapore"]
-virtual_targets: {}
+proxy_groups: {}
 enabled_packs: []
 `)
 	writeMCPFile(t, filepath.Join(paths.cache, "blackmatrix7.yaml"), `version: 1

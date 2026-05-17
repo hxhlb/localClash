@@ -62,8 +62,8 @@ func TestInspectOverlayWithMetadataReturnsOverlay(t *testing.T) {
 	if len(result.Packs) != 1 || result.Packs[0].ID != "blackmatrix7_OpenAI" {
 		t.Fatalf("packs = %+v, want OpenAI pack", result.Packs)
 	}
-	if len(result.VirtualTargets) != 1 || result.VirtualTargets[0].ID != "AI" {
-		t.Fatalf("virtual targets = %+v, want AI", result.VirtualTargets)
+	if len(result.ProxyGroups) != 1 || result.ProxyGroups[0].ID != "AI" {
+		t.Fatalf("proxy groups = %+v, want AI", result.ProxyGroups)
 	}
 	if len(result.RuleProviders) != 1 || result.RuleProviders[0].Name != "blackmatrix7_OpenAI" {
 		t.Fatalf("providers = %+v, want blackmatrix7_OpenAI", result.RuleProviders)
@@ -99,7 +99,7 @@ func TestInspectOverlayWithEmptyMetadataReturnsNoOverlay(t *testing.T) {
 	if !result.MetadataPresent || result.OverlayPresent {
 		t.Fatalf("metadata/overlay present = %v/%v, want true/false", result.MetadataPresent, result.OverlayPresent)
 	}
-	if len(result.Packs) != 0 || len(result.VirtualTargets) != 0 || len(result.RuleProviders) != 0 || len(result.Rules) != 0 {
+	if len(result.Packs) != 0 || len(result.ProxyGroups) != 0 || len(result.RuleProviders) != 0 || len(result.Rules) != 0 {
 		t.Fatalf("overlay arrays = %+v, want empty", result)
 	}
 	assertInspectNoSensitiveLeak(t, result)
@@ -155,10 +155,10 @@ x-localclash:
 			content += `      - id: blackmatrix7_OpenAI
         source: blackmatrix7
         target: AI
-    virtual_targets:
+    proxy_groups:
       - id: AI
         mode: manual
-        node_labels: [SG, JP, US]
+        nodes: [SG 01, JP Tokyo 01, US 01]
     rule_providers:
       - name: blackmatrix7_OpenAI
         behavior: classical
@@ -169,7 +169,7 @@ x-localclash:
         target: AI
 `
 		} else {
-			content += `    virtual_targets: []
+			content += `    proxy_groups: []
     rule_providers: []
     rules: []
 `

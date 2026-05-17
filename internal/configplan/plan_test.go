@@ -52,8 +52,8 @@ func TestRenderBuiltInTargetPlanWritesArtifacts(t *testing.T) {
 	if len(overlay["packs"].([]any)) != 2 {
 		t.Fatalf("overlay packs = %v, want 2", overlay["packs"])
 	}
-	if len(overlay["virtual_targets"].([]any)) != 0 {
-		t.Fatalf("overlay virtual_targets = %v, want empty", overlay["virtual_targets"])
+	if len(overlay["proxy_groups"].([]any)) != 0 {
+		t.Fatalf("overlay proxy_groups = %v, want empty", overlay["proxy_groups"])
 	}
 	assertMetadataHasNoSensitiveFields(t, metadata)
 	assertSummaryJSON(t, result.SummaryPath)
@@ -89,7 +89,7 @@ func TestRenderPlanIDDoesNotOverwriteExistingPlan(t *testing.T) {
 	}
 }
 
-func TestRenderVirtualTargetPlan(t *testing.T) {
+func TestRenderProxyGroupPlan(t *testing.T) {
 	paths := writePlanFixture(t)
 
 	result, err := Render(context.Background(), Options{
@@ -105,19 +105,19 @@ func TestRenderVirtualTargetPlan(t *testing.T) {
 				{ID: "blackmatrix7_OpenAI", Target: "AI"},
 				{ID: "sukkaw_ai_non_ip", Target: "AI"},
 			},
-			VirtualTargets: []OverlayVirtualTargetIntent{
-				{ID: "AI", NodeLabels: []string{"SG", "JP", "US"}, Mode: "manual"},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"SG 01", "JP Tokyo 01", "US 01"}, Mode: "manual"},
 			},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Overlay.VirtualTargets) != 1 {
-		t.Fatalf("virtual targets = %+v, want one", result.Overlay.VirtualTargets)
+	if len(result.Overlay.ProxyGroups) != 1 {
+		t.Fatalf("proxy groups = %+v, want one", result.Overlay.ProxyGroups)
 	}
-	if result.Overlay.VirtualTargets[0].NodeCount != 3 {
-		t.Fatalf("virtual target node count = %d, want 3", result.Overlay.VirtualTargets[0].NodeCount)
+	if result.Overlay.ProxyGroups[0].NodeCount != 3 {
+		t.Fatalf("proxy group node count = %d, want 3", result.Overlay.ProxyGroups[0].NodeCount)
 	}
 	if result.Changes.RuleProvidersAdded != 2 || result.Changes.ProxyGroupsAdded != 1 || result.Changes.RulesAdded != 2 {
 		t.Fatalf("changes = %+v, want 2 providers, 1 group, 2 rules", result.Changes)
@@ -128,9 +128,9 @@ func TestRenderVirtualTargetPlan(t *testing.T) {
 	}
 	metadata := config["x-localclash"].(map[string]any)
 	overlay := metadata["overlay"].(map[string]any)
-	virtualTargets := overlay["virtual_targets"].([]any)
-	if got := virtualTargets[0].(map[string]any)["mode"]; got != "manual" {
-		t.Fatalf("virtual target mode = %v, want manual", got)
+	proxyGroups := overlay["proxy_groups"].([]any)
+	if got := proxyGroups[0].(map[string]any)["mode"]; got != "manual" {
+		t.Fatalf("proxy group mode = %v, want manual", got)
 	}
 	assertMetadataHasNoSensitiveFields(t, metadata)
 }
@@ -153,7 +153,7 @@ func TestRenderUnknownPackIDReturnsError(t *testing.T) {
 	}
 }
 
-func TestRenderMissingVirtualTargetReturnsError(t *testing.T) {
+func TestRenderMissingProxyGroupReturnsError(t *testing.T) {
 	paths := writePlanFixture(t)
 
 	_, err := Render(context.Background(), Options{
@@ -166,12 +166,12 @@ func TestRenderMissingVirtualTargetReturnsError(t *testing.T) {
 			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "requires a matching virtual target") {
-		t.Fatalf("error = %v, want missing virtual target error", err)
+	if err == nil || !strings.Contains(err.Error(), "requires a matching proxy group") {
+		t.Fatalf("error = %v, want missing proxy group error", err)
 	}
 }
 
-func TestRenderUnknownNodeLabelReturnsError(t *testing.T) {
+func TestRenderUnknownProxyGroupNodeReturnsError(t *testing.T) {
 	paths := writePlanFixture(t)
 
 	_, err := Render(context.Background(), Options{
@@ -182,17 +182,17 @@ func TestRenderUnknownNodeLabelReturnsError(t *testing.T) {
 		Test:         false,
 		Overlay: OverlayIntent{
 			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
-			VirtualTargets: []OverlayVirtualTargetIntent{
-				{ID: "AI", NodeLabels: []string{"MISSING"}, Mode: "manual"},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"MISSING"}, Mode: "manual"},
 			},
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown node label") {
-		t.Fatalf("error = %v, want unknown node label error", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown subscription node") {
+		t.Fatalf("error = %v, want unknown subscription node error", err)
 	}
 }
 
-func TestRenderEmptyNodeLabelCandidatesReturnsWarning(t *testing.T) {
+func TestRenderDuplicateProxyGroupNodesAreDeduplicated(t *testing.T) {
 	paths := writePlanFixture(t)
 
 	result, err := Render(context.Background(), Options{
@@ -203,19 +203,19 @@ func TestRenderEmptyNodeLabelCandidatesReturnsWarning(t *testing.T) {
 		Test:         false,
 		Overlay: OverlayIntent{
 			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
-			VirtualTargets: []OverlayVirtualTargetIntent{
-				{ID: "AI", NodeLabels: []string{"SG", "EMPTY"}, Mode: "manual"},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"SG 01", "SG 01"}, Mode: "manual"},
 			},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], `"EMPTY"`) {
-		t.Fatalf("warnings = %+v, want EMPTY warning", result.Warnings)
+	if len(result.Warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none", result.Warnings)
 	}
-	if result.Overlay.VirtualTargets[0].NodeCount != 1 {
-		t.Fatalf("node count = %d, want SG candidate only", result.Overlay.VirtualTargets[0].NodeCount)
+	if result.Overlay.ProxyGroups[0].NodeCount != 1 {
+		t.Fatalf("node count = %d, want deduplicated SG node only", result.Overlay.ProxyGroups[0].NodeCount)
 	}
 }
 
@@ -288,16 +288,7 @@ modes:
         target: direct
 `)
 	writeFile(t, filepath.Join(dir, "localclash-packs.yaml"), `version: 1
-node_labels:
-  EMPTY:
-    match: ["(?i)empty"]
-  JP:
-    match: ["(?i)jp|japan|日本|東京|东京"]
-  SG:
-    match: ["(?i)sg|singapore|新加坡"]
-  US:
-    match: ["(?i)us|usa|united states|美国"]
-virtual_targets: {}
+proxy_groups: {}
 enabled_packs: []
 `)
 	if err := os.MkdirAll(paths.cacheDir, 0o755); err != nil {

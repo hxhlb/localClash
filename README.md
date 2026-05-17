@@ -21,7 +21,7 @@ localClash should expose:
   health, and start Mihomo.
 - An MCP server as the primary agent management interface.
 - CLI commands for bootstrap, debugging, and fallback operation.
-- Deterministic renderers for rules, packs, virtual targets, and runtime
+- Deterministic renderers for rules, packs, proxy groups, and runtime
   Mihomo configs.
 - Read-only diagnostics and runtime inspection for safe agent observation.
 - Router adapters for OpenClash workflows, with write operations gated by
@@ -168,17 +168,6 @@ Pack cache generation is an internal ensure step of runtime startup and config
 rendering. Agents should not normally need to call a separate rules adapter
 tool.
 
-MCP virtual nodes tools:
-
-- `virtual_nodes_list`: list node-label candidate sets inferred from
-  `subscription.yaml` proxy names using selection YAML regexes.
-- `virtual_nodes_get`: inspect one node-label candidate set and its safe
-  candidate node summaries.
-
-Virtual nodes are localClash compile-time observations only. They are based only
-on provider/node names, are not verified GEO regions, and do not use IP lookup,
-egress probing, capability probing, or runtime proxy-group creation.
-
 MCP config inspection tools:
 
 - `config_base_inspect`: inspect the generated base config summary. The base
@@ -191,15 +180,22 @@ can distinguish immutable base config from future replaceable overlay config.
 
 MCP config plan tool:
 
-- `config_plan_render`: accepts a complete desired overlay and renders a
-  candidate Mihomo config into `.runtime/plans/<plan-id>/`.
+- `config_plan_render`: accepts a complete desired overlay, including
+  `proxy_groups` with exact subscription proxy `nodes`, and renders a candidate
+  Mihomo config into `.runtime/plans/<plan-id>/`.
+
+For regional routing requests such as "Steam through HK", an agent should call
+`subscription_nodes_search`, copy exact returned proxy names into
+`overlay.proxy_groups[].nodes`, and point `overlay.packs[].target` at that proxy
+group id. The planner validates that each node exists in the effective
+subscription.
 
 The plan renderer writes `mihomo.yaml` and `summary.json` under the plan
 directory. It does not overwrite `generated/mihomo.yaml`, does not modify
 `localclash-packs.yaml`, does not start or restart Mihomo, and does not apply
 router/OpenClash changes. If an agent wants to preserve an existing overlay, it
 must first call `config_overlay_inspect` and submit the full desired overlay,
-including the retained packs and virtual targets.
+including the retained packs and proxy groups.
 
 MCP runtime tool:
 

@@ -136,7 +136,7 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 	assertNoSensitiveConfigMetadata(t, metadata)
 }
 
-func TestRenderWithPacksSelectionIncludesVirtualTargetFragment(t *testing.T) {
+func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 	paths := writeRenderFixture(t)
 
 	result, err := Render(Options{
@@ -188,26 +188,22 @@ func TestRenderWithPacksSelectionIncludesVirtualTargetFragment(t *testing.T) {
 	if len(packs) != 2 {
 		t.Fatalf("overlay packs = %d, want 2", len(packs))
 	}
-	virtualTargets := overlay["virtual_targets"].([]any)
-	if len(virtualTargets) != 1 {
-		t.Fatalf("overlay virtual targets = %d, want 1", len(virtualTargets))
+	proxyGroups := overlay["proxy_groups"].([]any)
+	if len(proxyGroups) != 1 {
+		t.Fatalf("overlay proxy groups = %d, want 1", len(proxyGroups))
 	}
-	if got := virtualTargets[0].(map[string]any)["mode"]; got != "manual" {
-		t.Fatalf("virtual target mode = %v, want manual", got)
+	if got := proxyGroups[0].(map[string]any)["mode"]; got != "manual" {
+		t.Fatalf("proxy group mode = %v, want manual", got)
 	}
 	assertNoSensitiveConfigMetadata(t, metadata)
 }
 
-func TestRenderWithPacksSelectionRejectsEmptyVirtualTargetCandidates(t *testing.T) {
+func TestRenderWithPacksSelectionRejectsMissingProxyGroupNode(t *testing.T) {
 	paths := writeRenderFixture(t)
 	writeFile(t, paths.selection, `version: 1
-node_labels:
-  JP:
-    match: ["🇯🇵"]
-virtual_targets:
+proxy_groups:
   AI:
-    candidates:
-      labels: [JP]
+    nodes: ["🇯🇵日本01 | JP"]
     manual: true
 enabled_packs:
   - source: sukkaw
@@ -356,17 +352,9 @@ packs:
         path: ./rule-packs/blackmatrix7/OpenAI.yaml
 `)
 	writeFile(t, paths.selection, `version: 1
-node_labels:
-  JP:
-    match: ["🇯🇵", "日本", "\\bJP\\b"]
-  SG:
-    match: ["🇸🇬", "新加坡", "\\bSG\\b"]
-  US:
-    match: ["🇺🇸", "美国", "\\bUS\\b"]
-virtual_targets:
+proxy_groups:
   AI:
-    candidates:
-      labels: [JP, SG, US]
+    nodes: ["🇯🇵日本01 | JP"]
     manual: true
     direct: false
 enabled_packs:
@@ -430,7 +418,7 @@ func assertNoSensitiveConfigMetadata(t *testing.T, value any) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	for _, banned := range []string{"example.com", "password", "server", "cipher", "test", "🇯🇵日本01"} {
+	for _, banned := range []string{"example.com", "password", "server", "cipher", "test"} {
 		if strings.Contains(text, banned) {
 			t.Fatalf("metadata leaked %q in %s", banned, text)
 		}

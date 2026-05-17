@@ -17,36 +17,26 @@ and writes a runtime cache under `.runtime/rules/packs/`.
 User selection belongs in a separate packs selection YAML:
 
 ```yaml
-node_labels:
-  JP:
-    match:
-      - "🇯🇵"
-      - "日本"
-      - "\\bJP\\b"
-
-virtual_targets:
-  AI:
-    candidates:
-      labels: [JP]
+proxy_groups:
+  SteamHK:
+    nodes:
+      - "🇭🇰香港01 | HK"
+      - "🇭🇰香港02 | HK"
     manual: true
     direct: false
 
 enabled_packs:
-  - source: sukkaw
-    pack: ai
-    target: AI
+  - source: blackmatrix7
+    pack: Steam
+    target: SteamHK
 ```
 
-`node_labels` are localClash compile-time candidate sets. They are based only on
-provider/node names from `subscription.yaml`, not verified egress regions.
-localClash does not use server IP geolocation, hostname geolocation, outbound
-probing, or capability probing for this first version. Labels such as `JP` or
-`US` are not Clash runtime proxy-groups by themselves; they are only used when
-a virtual target such as `AI` asks for candidate nodes.
-
-Virtual targets materialize to one Clash runtime proxy-group in this first
-version. Choose either `auto: true` or `manual: true`; enabling both is rejected
-because it would create competing runtime groups for the same target.
+`proxy_groups` materialize to Clash/Mihomo runtime proxy-groups. `nodes` must
+be exact proxy names from `subscription.yaml`; use `subscription_nodes_search`
+to find candidate names first. localClash does not verify egress regions with
+IP lookup, hostname geolocation, outbound probing, or capability probing.
+Choose either `auto: true` or `manual: true`; enabling both is rejected because
+it would create competing runtime groups for the same target.
 
 The first CLI surface is intentionally small:
 

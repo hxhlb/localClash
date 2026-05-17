@@ -48,16 +48,16 @@ type RuleProviderSummary struct {
 }
 
 type OverlayResult struct {
-	Config          string                            `json:"config"`
-	Layer           string                            `json:"layer"`
-	Modifiable      bool                              `json:"modifiable"`
-	MetadataPresent bool                              `json:"metadata_present"`
-	OverlayPresent  bool                              `json:"overlay_present"`
-	Packs           []configmeta.OverlayPack          `json:"packs"`
-	VirtualTargets  []configmeta.OverlayVirtualTarget `json:"virtual_targets"`
-	RuleProviders   []configmeta.OverlayRuleProvider  `json:"rule_providers"`
-	Rules           []configmeta.OverlayRule          `json:"rules"`
-	Insertion       string                            `json:"insertion,omitempty"`
+	Config          string                           `json:"config"`
+	Layer           string                           `json:"layer"`
+	Modifiable      bool                             `json:"modifiable"`
+	MetadataPresent bool                             `json:"metadata_present"`
+	OverlayPresent  bool                             `json:"overlay_present"`
+	Packs           []configmeta.OverlayPack         `json:"packs"`
+	ProxyGroups     []configmeta.OverlayProxyGroup   `json:"proxy_groups"`
+	RuleProviders   []configmeta.OverlayRuleProvider `json:"rule_providers"`
+	Rules           []configmeta.OverlayRule         `json:"rules"`
+	Insertion       string                           `json:"insertion,omitempty"`
 }
 
 func InspectBase(opts Options) (BaseResult, error) {
@@ -78,8 +78,8 @@ func InspectBase(opts Options) (BaseResult, error) {
 		for _, provider := range metadata.Overlay.RuleProviders {
 			overlayProviderNames[provider.Name] = true
 		}
-		for _, target := range metadata.Overlay.VirtualTargets {
-			overlayProxyGroupNames[target.ID] = true
+		for _, group := range metadata.Overlay.ProxyGroups {
+			overlayProxyGroupNames[group.ID] = true
 		}
 		for _, rule := range metadata.Overlay.Rules {
 			overlayRuleLines[formatOverlayRule(rule)] = true
@@ -112,13 +112,13 @@ func InspectOverlay(opts Options) (OverlayResult, error) {
 		return OverlayResult{}, err
 	}
 	result := OverlayResult{
-		Config:         path,
-		Layer:          "overlay",
-		Modifiable:     true,
-		Packs:          []configmeta.OverlayPack{},
-		VirtualTargets: []configmeta.OverlayVirtualTarget{},
-		RuleProviders:  []configmeta.OverlayRuleProvider{},
-		Rules:          []configmeta.OverlayRule{},
+		Config:        path,
+		Layer:         "overlay",
+		Modifiable:    true,
+		Packs:         []configmeta.OverlayPack{},
+		ProxyGroups:   []configmeta.OverlayProxyGroup{},
+		RuleProviders: []configmeta.OverlayRuleProvider{},
+		Rules:         []configmeta.OverlayRule{},
 	}
 	metadata, ok, err := readMetadata(config)
 	if err != nil {
@@ -129,12 +129,12 @@ func InspectOverlay(opts Options) (OverlayResult, error) {
 	}
 	result.MetadataPresent = true
 	result.Packs = limitOverlayPacks(metadata.Overlay.Packs, limit)
-	result.VirtualTargets = limitOverlayVirtualTargets(metadata.Overlay.VirtualTargets, limit)
+	result.ProxyGroups = limitOverlayProxyGroups(metadata.Overlay.ProxyGroups, limit)
 	result.RuleProviders = limitOverlayRuleProviders(metadata.Overlay.RuleProviders, limit)
 	result.Rules = limitOverlayRules(metadata.Overlay.Rules, limit)
 	result.Insertion = metadata.Overlay.Insertion
 	result.OverlayPresent = len(metadata.Overlay.Packs) > 0 ||
-		len(metadata.Overlay.VirtualTargets) > 0 ||
+		len(metadata.Overlay.ProxyGroups) > 0 ||
 		len(metadata.Overlay.RuleProviders) > 0 ||
 		len(metadata.Overlay.Rules) > 0
 	return result, nil
@@ -324,11 +324,11 @@ func limitOverlayPacks(values []configmeta.OverlayPack, limit int) []configmeta.
 	return append([]configmeta.OverlayPack{}, values...)
 }
 
-func limitOverlayVirtualTargets(values []configmeta.OverlayVirtualTarget, limit int) []configmeta.OverlayVirtualTarget {
+func limitOverlayProxyGroups(values []configmeta.OverlayProxyGroup, limit int) []configmeta.OverlayProxyGroup {
 	if len(values) > limit {
 		values = values[:limit]
 	}
-	return append([]configmeta.OverlayVirtualTarget{}, values...)
+	return append([]configmeta.OverlayProxyGroup{}, values...)
 }
 
 func limitOverlayRuleProviders(values []configmeta.OverlayRuleProvider, limit int) []configmeta.OverlayRuleProvider {

@@ -1,5 +1,4 @@
 version: 1
 
-node_labels: {}
-virtual_targets: {}
+proxy_groups: {}
 enabled_packs: []

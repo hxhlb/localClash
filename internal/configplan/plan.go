@@ -34,8 +34,8 @@ type Options struct {
 }
 
 type OverlayIntent struct {
-	Packs          []OverlayPackIntent          `json:"packs" yaml:"packs"`
-	VirtualTargets []OverlayVirtualTargetIntent `json:"virtual_targets" yaml:"virtual_targets"`
+	Packs       []OverlayPackIntent       `json:"packs" yaml:"packs"`
+	ProxyGroups []OverlayProxyGroupIntent `json:"proxy_groups" yaml:"proxy_groups"`
 }
 
 type OverlayPackIntent struct {
@@ -43,10 +43,10 @@ type OverlayPackIntent struct {
 	Target string `json:"target" yaml:"target"`
 }
 
-type OverlayVirtualTargetIntent struct {
-	ID         string   `json:"id" yaml:"id"`
-	NodeLabels []string `json:"node_labels" yaml:"node_labels"`
-	Mode       string   `json:"mode" yaml:"mode"`
+type OverlayProxyGroupIntent struct {
+	ID    string   `json:"id" yaml:"id"`
+	Nodes []string `json:"nodes" yaml:"nodes"`
+	Mode  string   `json:"mode" yaml:"mode"`
 }
 
 type Result struct {
@@ -67,8 +67,8 @@ type MihomoTestResult struct {
 }
 
 type OverlaySummary struct {
-	Packs          []OverlayPackSummary          `json:"packs"`
-	VirtualTargets []OverlayVirtualTargetSummary `json:"virtual_targets"`
+	Packs       []OverlayPackSummary       `json:"packs"`
+	ProxyGroups []OverlayProxyGroupSummary `json:"proxy_groups"`
 }
 
 type OverlayPackSummary struct {
@@ -76,11 +76,11 @@ type OverlayPackSummary struct {
 	Target string `json:"target"`
 }
 
-type OverlayVirtualTargetSummary struct {
-	ID         string   `json:"id"`
-	NodeLabels []string `json:"node_labels"`
-	Mode       string   `json:"mode"`
-	NodeCount  int      `json:"node_count"`
+type OverlayProxyGroupSummary struct {
+	ID        string   `json:"id"`
+	Nodes     []string `json:"nodes"`
+	Mode      string   `json:"mode"`
+	NodeCount int      `json:"node_count"`
 }
 
 type ChangesSummary struct {
@@ -95,16 +95,12 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("overlay.packs is required")
 	}
 
-	baseSelection, err := loadNodeLabelSelection()
-	if err != nil {
-		return Result{}, err
-	}
 	proxyNames, err := rules.LoadSubscriptionProxyNames(opts.Subscription)
 	if err != nil {
 		return Result{}, err
 	}
 
-	selection, overlaySummary, warnings, err := buildSelection(opts, baseSelection, proxyNames)
+	selection, overlaySummary, warnings, err := buildSelection(opts, proxyNames)
 	if err != nil {
 		return Result{}, err
 	}
@@ -151,7 +147,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		Overlay:     overlaySummary,
 		Changes: ChangesSummary{
 			RuleProvidersAdded: len(overlayInspection.RuleProviders),
-			ProxyGroupsAdded:   len(overlayInspection.VirtualTargets),
+			ProxyGroupsAdded:   len(overlayInspection.ProxyGroups),
 			RulesAdded:         len(overlayInspection.Rules),
 		},
 		Warnings: warnings,
@@ -191,7 +187,7 @@ func normalizeOptions(opts Options) Options {
 	return opts
 }
 
-func buildSelection(opts Options, base rules.Selection, proxyNames []string) (rules.Selection, OverlaySummary, []string, error) {
+func buildSelection(opts Options, proxyNames []string) (rules.Selection, OverlaySummary, []string, error) {
 	selected := make([]rules.SelectedPack, 0, len(opts.Overlay.Packs))
 	overlayPacks := make([]OverlayPackSummary, 0, len(opts.Overlay.Packs))
 	for _, pack := range opts.Overlay.Packs {
@@ -207,108 +203,77 @@ func buildSelection(opts Options, base rules.Selection, proxyNames []string) (ru
 		overlayPacks = append(overlayPacks, OverlayPackSummary{ID: ref.ID, Target: target})
 	}
 
-	virtuals := map[string]rules.VirtualTarget{}
-	virtualSummaries := make([]OverlayVirtualTargetSummary, 0, len(opts.Overlay.VirtualTargets))
-	for _, target := range opts.Overlay.VirtualTargets {
-		id := strings.TrimSpace(target.ID)
+	proxyGroups := map[string]rules.ProxyGroup{}
+	proxyGroupSummaries := make([]OverlayProxyGroupSummary, 0, len(opts.Overlay.ProxyGroups))
+	for _, group := range opts.Overlay.ProxyGroups {
+		id := strings.TrimSpace(group.ID)
 		if id == "" {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("virtual target id is required")
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group id is required")
 		}
-		if _, exists := virtuals[id]; exists {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("virtual target %q is defined more than once", id)
+		if _, exists := proxyGroups[id]; exists {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q is defined more than once", id)
 		}
-		mode := strings.ToLower(strings.TrimSpace(target.Mode))
+		mode := strings.ToLower(strings.TrimSpace(group.Mode))
 		if mode != "manual" && mode != "auto" {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("virtual target %q mode must be manual or auto", id)
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q mode must be manual or auto", id)
 		}
-		if len(target.NodeLabels) == 0 {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("virtual target %q node_labels is required", id)
+		if len(group.Nodes) == 0 {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q nodes is required", id)
 		}
-		labels := make([]string, 0, len(target.NodeLabels))
-		for _, rawLabel := range target.NodeLabels {
-			label := strings.TrimSpace(rawLabel)
-			if label == "" {
-				return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("virtual target %q has an empty node label", id)
-			}
-			if _, ok := base.NodeLabels[label]; !ok {
-				return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("virtual target %q references unknown node label %q", id, label)
-			}
-			labels = append(labels, label)
+		nodes, err := validateProxyGroupNodes(id, group.Nodes, proxyNames)
+		if err != nil {
+			return rules.Selection{}, OverlaySummary{}, nil, err
 		}
-		vt := rules.VirtualTarget{Candidates: rules.VirtualTargetCandidates{Labels: labels}}
+		pg := rules.ProxyGroup{Nodes: nodes}
 		if mode == "manual" {
-			vt.Manual = true
+			pg.Manual = true
 		} else {
-			vt.Auto = true
+			pg.Auto = true
 		}
-		virtuals[id] = vt
-		virtualSummaries = append(virtualSummaries, OverlayVirtualTargetSummary{ID: id, NodeLabels: append([]string(nil), labels...), Mode: mode})
+		proxyGroups[id] = pg
+		proxyGroupSummaries = append(proxyGroupSummaries, OverlayProxyGroupSummary{ID: id, Nodes: append([]string(nil), nodes...), Mode: mode, NodeCount: len(nodes)})
 	}
 
 	for _, pack := range selected {
 		if isBuiltInTarget(pack.Target) {
 			continue
 		}
-		if _, ok := virtuals[pack.Target]; !ok {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("pack target %q requires a matching virtual target", pack.Target)
+		if _, ok := proxyGroups[pack.Target]; !ok {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("pack target %q requires a matching proxy group", pack.Target)
 		}
 	}
 
-	warnings, counts, err := classifyVirtualTargetCandidates(base.NodeLabels, virtuals, proxyNames)
-	if err != nil {
-		return rules.Selection{}, OverlaySummary{}, nil, err
-	}
-	for i := range virtualSummaries {
-		virtualSummaries[i].NodeCount = counts[virtualSummaries[i].ID]
-	}
-	sort.Slice(virtualSummaries, func(i, j int) bool { return virtualSummaries[i].ID < virtualSummaries[j].ID })
+	sort.Slice(proxyGroupSummaries, func(i, j int) bool { return proxyGroupSummaries[i].ID < proxyGroupSummaries[j].ID })
 
 	return rules.Selection{
-		Version:        1,
-		NodeLabels:     base.NodeLabels,
-		VirtualTargets: virtuals,
-		EnabledPack:    selected,
-	}, OverlaySummary{Packs: overlayPacks, VirtualTargets: virtualSummaries}, warnings, nil
+		Version:     1,
+		ProxyGroups: proxyGroups,
+		EnabledPack: selected,
+	}, OverlaySummary{Packs: overlayPacks, ProxyGroups: proxyGroupSummaries}, nil, nil
 }
 
-func classifyVirtualTargetCandidates(labels map[string]rules.NodeLabel, virtuals map[string]rules.VirtualTarget, proxyNames []string) ([]string, map[string]int, error) {
-	classified, err := rules.ClassifyProxyNames(proxyNames, labels)
-	if err != nil {
-		return nil, nil, err
+func validateProxyGroupNodes(groupID string, rawNodes []string, proxyNames []string) ([]string, error) {
+	available := map[string]bool{}
+	for _, name := range proxyNames {
+		available[name] = true
 	}
-	var warnings []string
-	counts := map[string]int{}
-	for targetID, target := range virtuals {
-		seen := map[string]bool{}
-		for _, label := range target.Candidates.Labels {
-			candidates := classified[label]
-			if len(candidates) == 0 {
-				warnings = append(warnings, fmt.Sprintf("node label %q has no candidate proxies", label))
-			}
-			for _, candidate := range candidates {
-				seen[candidate] = true
-			}
+	nodes := make([]string, 0, len(rawNodes))
+	seen := map[string]bool{}
+	for _, rawNode := range rawNodes {
+		node := strings.TrimSpace(rawNode)
+		if node == "" {
+			return nil, fmt.Errorf("proxy group %q has an empty node name", groupID)
 		}
-		counts[targetID] = len(seen)
+		if !available[node] {
+			return nil, fmt.Errorf("proxy group %q references unknown subscription node %q", groupID, node)
+		}
+		if seen[node] {
+			continue
+		}
+		seen[node] = true
+		nodes = append(nodes, node)
 	}
-	sort.Strings(warnings)
-	return warnings, counts, nil
-}
-
-func loadNodeLabelSelection() (rules.Selection, error) {
-	for _, path := range []string{"localclash-packs.yaml", "localclash-packs.yaml.example"} {
-		selection, err := rules.LoadSelection(path)
-		if err == nil {
-			if selection.NodeLabels == nil {
-				selection.NodeLabels = map[string]rules.NodeLabel{}
-			}
-			return selection, nil
-		}
-		if !os.IsNotExist(err) {
-			return rules.Selection{}, err
-		}
-	}
-	return rules.Selection{NodeLabels: map[string]rules.NodeLabel{}}, nil
+	return nodes, nil
 }
 
 func writeTempSelection(selection rules.Selection) (string, func(), error) {

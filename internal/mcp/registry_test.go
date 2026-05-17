@@ -45,12 +45,6 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["subscription_nodes_search"].SafetyLevel != SafeRead {
 		t.Fatalf("subscription_nodes_search safety = %q, want %q", byName["subscription_nodes_search"].SafetyLevel, SafeRead)
 	}
-	if byName["virtual_nodes_list"].SafetyLevel != SafeRead {
-		t.Fatalf("virtual_nodes_list safety = %q, want %q", byName["virtual_nodes_list"].SafetyLevel, SafeRead)
-	}
-	if byName["virtual_nodes_get"].SafetyLevel != SafeRead {
-		t.Fatalf("virtual_nodes_get safety = %q, want %q", byName["virtual_nodes_get"].SafetyLevel, SafeRead)
-	}
 	if byName["config_plan_render"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_plan_render safety = %q, want %q", byName["config_plan_render"].SafetyLevel, SafeWrite)
 	}

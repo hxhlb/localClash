@@ -254,10 +254,6 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":
 		return s.callSubscriptionsRefresh(ctx, args)
-	case "virtual_nodes_list":
-		return s.callVirtualNodesList(args)
-	case "virtual_nodes_get":
-		return s.callVirtualNodesGet(args)
 	case "config_plan_render":
 		return s.callConfigPlanRender(ctx, args)
 	case "config_render":
@@ -622,56 +618,6 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		MergedPath: in.Merged,
 		Force:      in.Force,
 		UserAgent:  in.UserAgent,
-	})
-	if err != nil {
-		return toolResult{}, err
-	}
-	return jsonToolResult(result)
-}
-
-func (s *Server) callVirtualNodesList(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Subscription string `json:"subscription"`
-		Selection    string `json:"selection"`
-		IncludeEmpty bool   `json:"include_empty"`
-		SampleLimit  int    `json:"sample_limit"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return toolResult{}, err
-	}
-	if s.state != nil && in.Subscription == "" {
-		in.Subscription = s.state.Paths.SubscriptionPath
-	}
-	result, err := rules.ListVirtualNodes(rules.VirtualNodesListOptions{
-		Subscription: in.Subscription,
-		Selection:    in.Selection,
-		IncludeEmpty: in.IncludeEmpty,
-		SampleLimit:  in.SampleLimit,
-	})
-	if err != nil {
-		return toolResult{}, err
-	}
-	return jsonToolResult(result)
-}
-
-func (s *Server) callVirtualNodesGet(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID           string `json:"id"`
-		Subscription string `json:"subscription"`
-		Selection    string `json:"selection"`
-		Limit        int    `json:"limit"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return toolResult{}, err
-	}
-	if s.state != nil && in.Subscription == "" {
-		in.Subscription = s.state.Paths.SubscriptionPath
-	}
-	result, err := rules.GetVirtualNode(rules.VirtualNodesGetOptions{
-		ID:           in.ID,
-		Subscription: in.Subscription,
-		Selection:    in.Selection,
-		Limit:        in.Limit,
 	})
 	if err != nil {
 		return toolResult{}, err

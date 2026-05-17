@@ -14,12 +14,12 @@ type BaseMetadata struct {
 }
 
 type OverlayMetadata struct {
-	Modifiable     bool                   `yaml:"modifiable" json:"modifiable"`
-	Packs          []OverlayPack          `yaml:"packs" json:"packs"`
-	VirtualTargets []OverlayVirtualTarget `yaml:"virtual_targets" json:"virtual_targets"`
-	RuleProviders  []OverlayRuleProvider  `yaml:"rule_providers" json:"rule_providers"`
-	Rules          []OverlayRule          `yaml:"rules" json:"rules"`
-	Insertion      string                 `yaml:"insertion" json:"insertion"`
+	Modifiable    bool                  `yaml:"modifiable" json:"modifiable"`
+	Packs         []OverlayPack         `yaml:"packs" json:"packs"`
+	ProxyGroups   []OverlayProxyGroup   `yaml:"proxy_groups" json:"proxy_groups"`
+	RuleProviders []OverlayRuleProvider `yaml:"rule_providers" json:"rule_providers"`
+	Rules         []OverlayRule         `yaml:"rules" json:"rules"`
+	Insertion     string                `yaml:"insertion" json:"insertion"`
 }
 
 type OverlayPack struct {
@@ -28,10 +28,10 @@ type OverlayPack struct {
 	Target string `yaml:"target" json:"target"`
 }
 
-type OverlayVirtualTarget struct {
-	ID         string   `yaml:"id" json:"id"`
-	Mode       string   `yaml:"mode" json:"mode"`
-	NodeLabels []string `yaml:"node_labels" json:"node_labels"`
+type OverlayProxyGroup struct {
+	ID    string   `yaml:"id" json:"id"`
+	Mode  string   `yaml:"mode" json:"mode"`
+	Nodes []string `yaml:"nodes" json:"nodes"`
 }
 
 type OverlayRuleProvider struct {

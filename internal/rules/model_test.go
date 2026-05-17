@@ -1,7 +1,6 @@
 package rules
 
 import (
-	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -64,29 +63,12 @@ func TestRenderFragmentRejectsNonRenderablePack(t *testing.T) {
 	}
 }
 
-func TestSelectionWithVirtualTargetParses(t *testing.T) {
+func TestSelectionWithProxyGroupParses(t *testing.T) {
 	raw := []byte(`
 version: 1
-node_labels:
-  JP:
-    match:
-      - "🇯🇵"
-      - "日本"
-      - "\\bJP\\b"
-  SG:
-    match:
-      - "🇸🇬"
-      - "新加坡"
-      - "\\bSG\\b"
-  US:
-    match:
-      - "🇺🇸"
-      - "美国"
-      - "\\bUS\\b"
-virtual_targets:
+proxy_groups:
   AI:
-    candidates:
-      labels: [JP, SG, US]
+    nodes: [JP Tokyo 01, SG 01, US 01]
     manual: true
     direct: false
 enabled_packs:
@@ -98,64 +80,18 @@ enabled_packs:
 	if err := yaml.Unmarshal(raw, &selection); err != nil {
 		t.Fatal(err)
 	}
-	if len(selection.NodeLabels) != 3 {
-		t.Fatalf("node labels = %d, want 3", len(selection.NodeLabels))
-	}
-	if !selection.VirtualTargets["AI"].Manual || selection.VirtualTargets["AI"].Auto {
-		t.Fatalf("AI virtual target = %+v, want manual only", selection.VirtualTargets["AI"])
+	if !selection.ProxyGroups["AI"].Manual || selection.ProxyGroups["AI"].Auto {
+		t.Fatalf("AI proxy group = %+v, want manual only", selection.ProxyGroups["AI"])
 	}
 }
 
-func TestClassifyProxyNamesByLabelRegex(t *testing.T) {
-	labels := map[string]NodeLabel{
-		"JP": {Match: []string{"🇯🇵", "日本", "\\bJP\\b", "Japan"}},
-		"SG": {Match: []string{"🇸🇬", "新加坡", "\\bSG\\b", "Singapore"}},
-		"US": {Match: []string{"🇺🇸", "美国", "\\bUS\\b", "USA"}},
-	}
-	classified, err := ClassifyProxyNames([]string{
-		"🇯🇵 Tokyo 01",
-		"新加坡 SG 02",
-		"US Los Angeles",
-		"Hong Kong 01",
-	}, labels)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := classified["JP"][0]; got != "🇯🇵 Tokyo 01" {
-		t.Fatalf("JP = %q, want Tokyo", got)
-	}
-	if got := classified["SG"][0]; got != "新加坡 SG 02" {
-		t.Fatalf("SG = %q, want Singapore", got)
-	}
-	if got := classified["US"][0]; got != "US Los Angeles" {
-		t.Fatalf("US = %q, want US Los Angeles", got)
-	}
-}
-
-func TestClassifyProxyNamesReportsRegexCompileError(t *testing.T) {
-	_, err := ClassifyProxyNames([]string{"JP 01"}, map[string]NodeLabel{
-		"JP": {Match: []string{"("}},
-	})
-	if err == nil {
-		t.Fatal("expected regex compile error")
-	}
-	if got := err.Error(); !strings.Contains(got, `node label "JP" pattern "(" is invalid`) {
-		t.Fatalf("error = %q, want clear label and pattern context", got)
-	}
-}
-
-func TestRenderFragmentMaterializesVirtualTarget(t *testing.T) {
+func TestRenderFragmentMaterializesProxyGroup(t *testing.T) {
 	selection := Selection{
-		NodeLabels: map[string]NodeLabel{
-			"JP": {Match: []string{"🇯🇵", "\\bJP\\b"}},
-			"SG": {Match: []string{"🇸🇬", "\\bSG\\b"}},
-			"US": {Match: []string{"🇺🇸", "\\bUS\\b"}},
-		},
-		VirtualTargets: map[string]VirtualTarget{
+		ProxyGroups: map[string]ProxyGroup{
 			"AI": {
-				Candidates: VirtualTargetCandidates{Labels: []string{"JP", "SG", "US"}},
-				Manual:     true,
-				Direct:     false,
+				Nodes:  []string{"🇯🇵 Tokyo", "SG Singapore", "🇺🇸 US"},
+				Manual: true,
+				Direct: false,
 			},
 		},
 		EnabledPack: []SelectedPack{
@@ -184,16 +120,13 @@ func TestRenderFragmentMaterializesVirtualTarget(t *testing.T) {
 	}
 }
 
-func TestRenderFragmentRejectsConflictingVirtualTargetModes(t *testing.T) {
+func TestRenderFragmentRejectsConflictingProxyGroupModes(t *testing.T) {
 	selection := Selection{
-		NodeLabels: map[string]NodeLabel{
-			"JP": {Match: []string{"🇯🇵"}},
-		},
-		VirtualTargets: map[string]VirtualTarget{
+		ProxyGroups: map[string]ProxyGroup{
 			"AI": {
-				Candidates: VirtualTargetCandidates{Labels: []string{"JP"}},
-				Auto:       true,
-				Manual:     true,
+				Nodes:  []string{"🇯🇵 Tokyo"},
+				Auto:   true,
+				Manual: true,
 			},
 		},
 		EnabledPack: []SelectedPack{
@@ -201,7 +134,7 @@ func TestRenderFragmentRejectsConflictingVirtualTargetModes(t *testing.T) {
 		},
 	}
 	if _, err := RenderFragment(selection, testPackCaches(), []string{"🇯🇵 Tokyo"}); err == nil {
-		t.Fatal("expected conflicting virtual target mode error")
+		t.Fatal("expected conflicting proxy group mode error")
 	}
 }
 
@@ -214,15 +147,12 @@ func TestRenderFragmentRejectsUnknownTarget(t *testing.T) {
 	}
 }
 
-func TestRenderFragmentRejectsEmptyVirtualTargetCandidates(t *testing.T) {
+func TestRenderFragmentRejectsMissingProxyGroupNode(t *testing.T) {
 	selection := Selection{
-		NodeLabels: map[string]NodeLabel{
-			"JP": {Match: []string{"🇯🇵"}},
-		},
-		VirtualTargets: map[string]VirtualTarget{
+		ProxyGroups: map[string]ProxyGroup{
 			"AI": {
-				Candidates: VirtualTargetCandidates{Labels: []string{"JP"}},
-				Manual:     true,
+				Nodes:  []string{"🇯🇵 Tokyo"},
+				Manual: true,
 			},
 		},
 		EnabledPack: []SelectedPack{
@@ -230,7 +160,7 @@ func TestRenderFragmentRejectsEmptyVirtualTargetCandidates(t *testing.T) {
 		},
 	}
 	if _, err := RenderFragment(selection, testPackCaches(), []string{"HK 01"}); err == nil {
-		t.Fatal("expected empty virtual target candidate error")
+		t.Fatal("expected missing proxy group node error")
 	}
 }
 

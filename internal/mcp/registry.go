@@ -54,9 +54,7 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
-		{Name: "virtual_nodes_get", SafetyLevel: SafeRead, Description: "Inspect candidates for one node-label virtual node."},
-		{Name: "virtual_nodes_list", SafetyLevel: SafeRead, Description: "List node-label virtual nodes inferred from subscription proxy names."},
-		{Name: "config_plan_render", SafetyLevel: SafeWrite, Description: "Render a candidate Mihomo config from a complete desired overlay into .runtime/plans."},
+		{Name: "config_plan_render", SafetyLevel: SafeWrite, Description: "Render a candidate Mihomo config from a complete desired overlay with exact proxy-group nodes into .runtime/plans."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated Mihomo config from reviewed local inputs."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
@@ -165,15 +163,15 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "target"},
 		}
-		virtualTargetIntent := map[string]any{
+		proxyGroupIntent := map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"id":          map[string]any{"type": "string", "description": "Virtual target id, for example AI."},
-				"node_labels": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Node label ids to collect candidates from."},
-				"mode":        map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized runtime group mode."},
+				"id":    map[string]any{"type": "string", "description": "Proxy group id referenced by packs[].target, for example SteamHK."},
+				"nodes": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names, typically copied from subscription_nodes_search."},
+				"mode":  map[string]any{"type": "string", "enum": []string{"manual", "auto"}, "description": "Materialized Mihomo proxy-group mode: manual becomes select, auto becomes url-test."},
 			},
-			"required": []string{"id", "node_labels", "mode"},
+			"required": []string{"id", "nodes", "mode"},
 		}
 		return map[string]any{
 			"type":                 "object",
@@ -190,8 +188,8 @@ func inputSchemaForTool(name string) map[string]any {
 					"type":                 "object",
 					"additionalProperties": false,
 					"properties": map[string]any{
-						"packs":           map[string]any{"type": "array", "items": packIntent},
-						"virtual_targets": map[string]any{"type": "array", "items": virtualTargetIntent},
+						"packs":        map[string]any{"type": "array", "items": packIntent},
+						"proxy_groups": map[string]any{"type": "array", "items": proxyGroupIntent},
 					},
 					"required": []string{"packs"},
 				},
@@ -322,29 +320,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"id":          map[string]any{"type": "string", "description": "Catalog pack id, for example blackmatrix7_OpenAI."},
 				"cache":       map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
 				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory used to resolve provider paths. Defaults to .runtime/mihomo."},
-			},
-			"required": []string{"id"},
-		}
-	case "virtual_nodes_list":
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"subscription":  map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
-				"selection":     map[string]any{"type": "string", "description": "Packs selection YAML path. Defaults to localclash-packs.yaml with example fallback."},
-				"include_empty": map[string]any{"type": "boolean", "description": "Include labels with no matched proxy names."},
-				"sample_limit":  map[string]any{"type": "integer", "minimum": 0, "description": "Maximum sample nodes per virtual node. Defaults to 5."},
-			},
-		}
-	case "virtual_nodes_get":
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"id":           map[string]any{"type": "string", "description": "Node label id, for example SG, JP, or US."},
-				"subscription": map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
-				"selection":    map[string]any{"type": "string", "description": "Packs selection YAML path. Defaults to localclash-packs.yaml with example fallback."},
-				"limit":        map[string]any{"type": "integer", "minimum": 0, "description": "Maximum returned candidate nodes. Defaults to 50."},
 			},
 			"required": []string{"id"},
 		}

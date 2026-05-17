@@ -176,37 +176,37 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			Description: "localClash generated base config",
 		},
 		Overlay: configmeta.OverlayMetadata{
-			Modifiable:     true,
-			Packs:          []configmeta.OverlayPack{},
-			VirtualTargets: []configmeta.OverlayVirtualTarget{},
-			RuleProviders:  []configmeta.OverlayRuleProvider{},
-			Rules:          []configmeta.OverlayRule{},
-			Insertion:      "after local safety baseline, before base rules",
+			Modifiable:    true,
+			Packs:         []configmeta.OverlayPack{},
+			ProxyGroups:   []configmeta.OverlayProxyGroup{},
+			RuleProviders: []configmeta.OverlayRuleProvider{},
+			Rules:         []configmeta.OverlayRule{},
+			Insertion:     "after local safety baseline, before base rules",
 		},
 	}
 	if selection != nil {
-		usedVirtualTargets := map[string]bool{}
+		usedProxyGroups := map[string]bool{}
 		for _, enabled := range selection.EnabledPack {
 			metadata.Overlay.Packs = append(metadata.Overlay.Packs, configmeta.OverlayPack{
 				ID:     rulespkg.PackCatalogID(enabled.Source, enabled.Pack),
 				Source: enabled.Source,
 				Target: enabled.Target,
 			})
-			if _, ok := selection.VirtualTargets[enabled.Target]; ok {
-				usedVirtualTargets[enabled.Target] = true
+			if _, ok := selection.ProxyGroups[enabled.Target]; ok {
+				usedProxyGroups[enabled.Target] = true
 			}
 		}
-		virtualTargetIDs := make([]string, 0, len(usedVirtualTargets))
-		for id := range usedVirtualTargets {
-			virtualTargetIDs = append(virtualTargetIDs, id)
+		proxyGroupIDs := make([]string, 0, len(usedProxyGroups))
+		for id := range usedProxyGroups {
+			proxyGroupIDs = append(proxyGroupIDs, id)
 		}
-		sort.Strings(virtualTargetIDs)
-		for _, id := range virtualTargetIDs {
-			target := selection.VirtualTargets[id]
-			metadata.Overlay.VirtualTargets = append(metadata.Overlay.VirtualTargets, configmeta.OverlayVirtualTarget{
-				ID:         id,
-				Mode:       virtualTargetMode(target),
-				NodeLabels: append([]string(nil), target.Candidates.Labels...),
+		sort.Strings(proxyGroupIDs)
+		for _, id := range proxyGroupIDs {
+			group := selection.ProxyGroups[id]
+			metadata.Overlay.ProxyGroups = append(metadata.Overlay.ProxyGroups, configmeta.OverlayProxyGroup{
+				ID:    id,
+				Mode:  proxyGroupMode(group),
+				Nodes: append([]string(nil), group.Nodes...),
 			})
 		}
 	}
@@ -234,13 +234,13 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 	return metadata
 }
 
-func virtualTargetMode(target rulespkg.VirtualTarget) string {
+func proxyGroupMode(group rulespkg.ProxyGroup) string {
 	switch {
-	case target.Auto:
+	case group.Auto:
 		return "auto"
-	case target.Manual:
+	case group.Manual:
 		return "manual"
-	case target.Direct:
+	case group.Direct:
 		return "direct"
 	default:
 		return ""
