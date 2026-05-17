@@ -148,21 +148,28 @@ MCP subscription bootstrap tools:
   `localclash-subscriptions.yaml` without refreshing them.
 - `subscriptions_refresh`: refresh configured sources, validate and normalize
   them, write `.runtime/subscriptions/<id>.yaml`, and merge the effective
-  `subscription.yaml`.
+  `subscription.yaml`. It also returns proxy-node diffs and, when
+  `localclash.yaml` exists, reevaluates saved selectors against the refreshed
+  node list.
 
 From a clean setup, an agent should call `subscriptions_status` first. If no
 sources are configured, it should ask the user for one or more subscription
 URLs, call `subscriptions_configure`, then call `subscriptions_refresh`.
-`subscription.yaml` is the merged output used by the existing render pipeline,
-not the only source of truth. `localclash-subscriptions.yaml` contains sensitive
-subscription URLs and must not be committed.
+`subscription.yaml` is the merged output used by the render pipeline, not the
+only source of truth. `localclash-subscriptions.yaml` contains sensitive
+subscription URLs and must not be committed. If a saved selector in
+`localclash.yaml` still matches after refresh, localClash updates the selected
+nodes, derives `localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`.
+If a selector no longer matches its minimum requirements, the tool reports that
+agent replanning is required and leaves the active generated config unchanged.
 
 MCP subscription node inspection tools:
 
 - `subscription_nodes_list`: list safe proxy `name` and `type` summaries from
   the effective subscription.
 - `subscription_nodes_search`: search subscription proxy names by literal query
-  or regular expression and return safe `name` and `type` summaries.
+  or regular expression and return safe `name` and `type` summaries plus a
+  selector suggestion suitable for `config_plan_render`.
 
 These tools do not verify network egress location. If a user asks for a region
 such as Hong Kong, an agent should treat that as a proxy-name search, for
@@ -190,29 +197,33 @@ MCP config inspection tools:
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from future replaceable overlay config.
 
-MCP config plan tool:
+MCP config plan tools:
 
-- `config_plan_render`: accepts a complete desired overlay, including
-  `proxy_groups` with exact subscription proxy `nodes`, and renders a candidate
-  Mihomo config into `.runtime/plans/<plan-id>/`.
-- `config_plan_apply`: applies a reviewed plan by writing
-  `localclash-packs.yaml` and regenerating `generated/mihomo.yaml`.
+- `config_plan_render`: accepts a complete desired localClash config, including
+  proxy groups with `name_regex` selectors or exact fallback `nodes`, and
+  renders candidate `localclash.yaml`, derived `localclash-packs.yaml`, and
+  `mihomo.yaml` into `.runtime/plans/<plan-id>/`.
+- `config_plan_apply`: applies a reviewed plan by writing durable
+  `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
+  `generated/mihomo.yaml`.
 
 For regional routing requests such as "Steam through HK", an agent should call
-`subscription_nodes_search`, copy exact returned proxy names into
-`overlay.proxy_groups[].nodes`, and point `overlay.packs[].target` at that proxy
-group id. The planner validates that each node exists in the effective
-subscription.
+`subscription_nodes_search`, review the returned names, pass a conservative
+`overlay.proxy_groups[].match` such as `type: name_regex` with a short
+`reason`, and point `overlay.packs[].target` at that proxy group id. Regex
+selectors are executable local intent; exact `nodes` remain available only as an
+escape hatch. Name matches are still hints, not proof of network egress region.
 
-The plan renderer writes `mihomo.yaml` and `summary.json` under the plan
-directory. It does not overwrite `generated/mihomo.yaml`, does not modify
-`localclash-packs.yaml`, does not start or restart Mihomo, and does not apply
-router/OpenClash changes. After user review, `config_plan_apply` rebuilds the
-persistent packs selection from the plan summary, backs up replaced local
-artifacts, and regenerates `generated/mihomo.yaml`. It still does not start or
-restart Mihomo; use `run_runtime` for that confirmed step. If an agent wants to
-preserve an existing overlay, it must first call `config_overlay_inspect` and
-submit the full desired overlay, including the retained packs and proxy groups.
+The plan renderer writes candidate artifacts and `summary.json` under the plan
+directory. It does not overwrite active generated files, start or restart
+Mihomo, or apply router/OpenClash changes. After user review,
+`config_plan_apply` resolves selectors against the current subscription, backs
+up replaced local artifacts, writes `localclash.yaml`, derives
+`localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`. It still does
+not start or restart Mihomo; use `run_runtime` for that confirmed step. If an
+agent wants to preserve an existing overlay, it must first inspect current local
+state and submit the full desired config, including retained packs and proxy
+groups.
 
 MCP runtime tool:
 
@@ -229,13 +240,14 @@ switch proxy groups, and does not modify system proxy settings.
 Minimal MCP closed loop:
 
 1. `subscriptions_refresh`
-2. `config_render`
-3. `doctor`
-4. `run_runtime`
+2. `doctor`
+3. `run_runtime`
 
 This is the MCP form of the runtime loop. `doctor` should be the health-check
-entrypoint, including generated config validation, so agents do not need to call
-a separate Mihomo config-test tool in the normal flow.
+entrypoint, including generated config validation. Agents should use
+`config_plan_render` and `config_plan_apply` for reviewed routing changes; raw
+`config_render` is a CLI/internal debug capability, not part of the product MCP
+surface.
 
 For a local HTTP MCP smoke test, run:
 
@@ -282,7 +294,9 @@ local-only diagnosis.
 
 ## Local Data
 
-Do not commit downloaded subscriptions, active router profiles, generated configs, or files containing node credentials.
+Do not commit downloaded subscriptions, active router profiles, generated
+configs, `localclash.yaml`, `localclash-packs.yaml`, or files containing node
+credentials.
 
 ## Core Download
 
@@ -342,7 +356,11 @@ Render a runtime Mihomo config from a downloaded subscription source and a local
 go run . config render --force
 ```
 
-The default render path is `generated/mihomo.yaml`. The renderer treats the subscription as a proxy source and owns the runtime rules, rule providers, and proxy groups locally.
+The default render path is `generated/mihomo.yaml`. The renderer treats the
+subscription as a proxy source and owns the runtime rules, rule providers, and
+proxy groups locally. For MCP-managed routing changes, prefer
+`config_plan_render` followed by `config_plan_apply`; direct `config render` is
+primarily a CLI/debug helper.
 
 The rule model is documented in `docs/rule-model.md`. In short, localClash
 renders a fixed local safety baseline first, then user overrides, optional rule

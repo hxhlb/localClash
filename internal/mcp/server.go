@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ import (
 	"localclash/internal/doctor"
 	"localclash/internal/envinspect"
 	"localclash/internal/fileops"
+	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 	"localclash/internal/subscriptions"
 )
@@ -354,14 +357,17 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 
 func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PlanName     string                   `json:"plan_name"`
-		Subscription string                   `json:"subscription"`
-		Policy       string                   `json:"policy"`
-		Mode         string                   `json:"mode"`
-		RulesCache   string                   `json:"rules_cache"`
-		OutputDir    string                   `json:"output_dir"`
-		Test         *bool                    `json:"test"`
-		Overlay      configplan.OverlayIntent `json:"overlay"`
+		PlanName            string                   `json:"plan_name"`
+		Subscription        string                   `json:"subscription"`
+		Policy              string                   `json:"policy"`
+		Mode                string                   `json:"mode"`
+		RulesCache          string                   `json:"rules_cache"`
+		OutputDir           string                   `json:"output_dir"`
+		ConfigPath          string                   `json:"config"`
+		SubscriptionConfig  string                   `json:"subscription_config"`
+		SubscriptionRuntime string                   `json:"subscription_runtime"`
+		Test                *bool                    `json:"test"`
+		Overlay             configplan.OverlayIntent `json:"overlay"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
@@ -380,18 +386,27 @@ func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage)
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
 		}
+		if in.SubscriptionConfig == "" {
+			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
+		}
+		if in.SubscriptionRuntime == "" {
+			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := configplan.Render(ctx, configplan.Options{
-		PlanName:     in.PlanName,
-		Subscription: in.Subscription,
-		Policy:       in.Policy,
-		Mode:         in.Mode,
-		RulesCache:   in.RulesCache,
-		OutputDir:    in.OutputDir,
-		Test:         test,
-		Overlay:      in.Overlay,
+		PlanName:            in.PlanName,
+		Subscription:        in.Subscription,
+		Policy:              in.Policy,
+		Mode:                in.Mode,
+		RulesCache:          in.RulesCache,
+		OutputDir:           in.OutputDir,
+		ConfigPath:          in.ConfigPath,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+		Test:                test,
+		Overlay:             in.Overlay,
 	})
 	if err != nil {
 		return toolResult{}, err
@@ -401,19 +416,22 @@ func (s *Server) callConfigPlanRender(ctx context.Context, args json.RawMessage)
 
 func (s *Server) callConfigPlanApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PlanID       string `json:"plan_id"`
-		PlansDir     string `json:"plans_dir"`
-		SummaryPath  string `json:"summary_path"`
-		Subscription string `json:"subscription"`
-		Policy       string `json:"policy"`
-		Mode         string `json:"mode"`
-		RulesCache   string `json:"rules_cache"`
-		Selection    string `json:"selection"`
-		Output       string `json:"output"`
-		BackupDir    string `json:"backup_dir"`
-		Test         *bool  `json:"test"`
-		Core         string `json:"core"`
-		RuntimeDir   string `json:"runtime_dir"`
+		PlanID              string `json:"plan_id"`
+		PlansDir            string `json:"plans_dir"`
+		SummaryPath         string `json:"summary_path"`
+		Subscription        string `json:"subscription"`
+		Policy              string `json:"policy"`
+		Mode                string `json:"mode"`
+		RulesCache          string `json:"rules_cache"`
+		ConfigPath          string `json:"config"`
+		SubscriptionConfig  string `json:"subscription_config"`
+		SubscriptionRuntime string `json:"subscription_runtime"`
+		Selection           string `json:"selection"`
+		Output              string `json:"output"`
+		BackupDir           string `json:"backup_dir"`
+		Test                *bool  `json:"test"`
+		Core                string `json:"core"`
+		RuntimeDir          string `json:"runtime_dir"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
@@ -423,6 +441,15 @@ func (s *Server) callConfigPlanApply(ctx context.Context, args json.RawMessage) 
 		test = *in.Test
 	}
 	if s.state != nil {
+		if in.RulesCache == "" {
+			in.RulesCache = s.state.Paths.RulesCacheDir
+		}
+		if in.SubscriptionConfig == "" {
+			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
+		}
+		if in.SubscriptionRuntime == "" {
+			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
+		}
 		if in.Selection == "" && s.state.Paths.PacksSelectionPath != "" {
 			in.Selection = s.state.Paths.PacksSelectionPath
 		}
@@ -439,19 +466,22 @@ func (s *Server) callConfigPlanApply(ctx context.Context, args json.RawMessage) 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := configplan.Apply(ctx, configplan.ApplyOptions{
-		PlanID:        in.PlanID,
-		PlansDir:      in.PlansDir,
-		SummaryPath:   in.SummaryPath,
-		Subscription:  in.Subscription,
-		Policy:        in.Policy,
-		Mode:          in.Mode,
-		RulesCache:    in.RulesCache,
-		SelectionPath: in.Selection,
-		OutputPath:    in.Output,
-		CorePath:      in.Core,
-		WorkDir:       in.RuntimeDir,
-		BackupDir:     in.BackupDir,
-		Test:          test,
+		PlanID:              in.PlanID,
+		PlansDir:            in.PlansDir,
+		SummaryPath:         in.SummaryPath,
+		Subscription:        in.Subscription,
+		Policy:              in.Policy,
+		Mode:                in.Mode,
+		RulesCache:          in.RulesCache,
+		ConfigPath:          in.ConfigPath,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+		SelectionPath:       in.Selection,
+		OutputPath:          in.Output,
+		CorePath:            in.Core,
+		WorkDir:             in.RuntimeDir,
+		BackupDir:           in.BackupDir,
+		Test:                test,
 	})
 	if err != nil {
 		return toolResult{}, err
@@ -653,12 +683,17 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 
 func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		Config     string   `json:"config"`
-		IDs        []string `json:"ids"`
-		RuntimeDir string   `json:"runtime_dir"`
-		Merged     string   `json:"merged"`
-		Force      bool     `json:"force"`
-		UserAgent  string   `json:"user_agent"`
+		Config           string   `json:"config"`
+		IDs              []string `json:"ids"`
+		RuntimeDir       string   `json:"runtime_dir"`
+		Merged           string   `json:"merged"`
+		Force            bool     `json:"force"`
+		UserAgent        string   `json:"user_agent"`
+		LocalClashConfig string   `json:"localclash_config"`
+		Selection        string   `json:"selection"`
+		Policy           string   `json:"policy"`
+		RulesCache       string   `json:"rules_cache"`
+		Output           string   `json:"output"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
@@ -673,7 +708,30 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		if in.Merged == "" {
 			in.Merged = s.state.Paths.SubscriptionPath
 		}
+		if in.Selection == "" && s.state.Paths.PacksSelectionPath != "" {
+			in.Selection = s.state.Paths.PacksSelectionPath
+		}
+		if in.Policy == "" {
+			in.Policy = s.state.Paths.PolicyPath
+		}
+		if in.RulesCache == "" {
+			in.RulesCache = s.state.Paths.RulesCacheDir
+		}
+		if in.Output == "" {
+			in.Output = s.state.Paths.GeneratedConfig
+		}
 	}
+	if in.Selection == "" {
+		in.Selection = "localclash-packs.yaml"
+	}
+	if in.LocalClashConfig == "" {
+		in.LocalClashConfig = "localclash.yaml"
+	}
+	beforeNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
+		SubscriptionPath:    in.Merged,
+		SubscriptionConfig:  in.Config,
+		SubscriptionRuntime: in.RuntimeDir,
+	})
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := subscriptions.Refresh(ctx, subscriptions.RefreshOptions{
@@ -687,7 +745,221 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 	if err != nil {
 		return toolResult{}, err
 	}
-	return jsonToolResult(result)
+	afterNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
+		SubscriptionPath:    in.Merged,
+		SubscriptionConfig:  in.Config,
+		SubscriptionRuntime: in.RuntimeDir,
+	})
+	toolResultValue := subscriptionsRefreshToolResult{
+		RefreshResult: result,
+		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
+	}
+	impact := s.evaluateLocalClashAfterRefresh(in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.Output)
+	if impact.Exists {
+		toolResultValue.LocalClash = &impact
+	}
+	return jsonToolResult(toolResultValue)
+}
+
+type subscriptionsRefreshToolResult struct {
+	subscriptions.RefreshResult
+	NodeDiff   nodeDiff                 `json:"node_diff"`
+	LocalClash *localClashRefreshImpact `json:"localclash_config,omitempty"`
+}
+
+type nodeDiff struct {
+	BeforeCount  int      `json:"before_count"`
+	AfterCount   int      `json:"after_count"`
+	AddedCount   int      `json:"added_count"`
+	RemovedCount int      `json:"removed_count"`
+	KeptCount    int      `json:"kept_count"`
+	Added        []string `json:"added,omitempty"`
+	Removed      []string `json:"removed,omitempty"`
+	Truncated    bool     `json:"truncated,omitempty"`
+}
+
+type localClashRefreshImpact struct {
+	Exists              bool                         `json:"exists"`
+	ConfigPath          string                       `json:"config_path"`
+	Valid               bool                         `json:"valid"`
+	AppliedAuto         bool                         `json:"applied_auto"`
+	RequiresAgentReplan bool                         `json:"requires_agent_replan"`
+	Error               string                       `json:"error,omitempty"`
+	GeneratedConfig     string                       `json:"generated_config,omitempty"`
+	SelectionPath       string                       `json:"selection_path,omitempty"`
+	ProxyGroups         []localClashProxyGroupImpact `json:"proxy_groups,omitempty"`
+	NextActions         []string                     `json:"next_actions,omitempty"`
+}
+
+type localClashProxyGroupImpact struct {
+	ID            string   `json:"id"`
+	PreviousNodes []string `json:"previous_nodes,omitempty"`
+	SelectedNodes []string `json:"selected_nodes,omitempty"`
+	AddedNodes    []string `json:"added_nodes,omitempty"`
+	RemovedNodes  []string `json:"removed_nodes,omitempty"`
+}
+
+func buildNodeDiff(before, after []localconfig.SubscriptionNode) nodeDiff {
+	beforeSet := map[string]bool{}
+	afterSet := map[string]bool{}
+	for _, node := range before {
+		beforeSet[node.Name] = true
+	}
+	for _, node := range after {
+		afterSet[node.Name] = true
+	}
+	var added, removed []string
+	kept := 0
+	for name := range afterSet {
+		if beforeSet[name] {
+			kept++
+		} else {
+			added = append(added, name)
+		}
+	}
+	for name := range beforeSet {
+		if !afterSet[name] {
+			removed = append(removed, name)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	diff := nodeDiff{
+		BeforeCount:  len(beforeSet),
+		AfterCount:   len(afterSet),
+		AddedCount:   len(added),
+		RemovedCount: len(removed),
+		KeptCount:    kept,
+	}
+	const maxReturned = 100
+	if len(added) > maxReturned || len(removed) > maxReturned {
+		diff.Truncated = true
+	}
+	diff.Added = limitStrings(added, maxReturned)
+	diff.Removed = limitStrings(removed, maxReturned)
+	return diff
+}
+
+func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, outputPath string) localClashRefreshImpact {
+	impact := localClashRefreshImpact{ConfigPath: configPath, GeneratedConfig: outputPath, SelectionPath: selectionPath}
+	config, err := localconfig.Load(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return impact
+		}
+		impact.Exists = true
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		return impact
+	}
+	impact.Exists = true
+	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+		Config:              config,
+		SubscriptionPath:    subscriptionPath,
+		SubscriptionConfig:  subscriptionConfig,
+		SubscriptionRuntime: subscriptionRuntime,
+		RulesCache:          rulesCache,
+	})
+	if err != nil {
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call config_plan_render", "call config_plan_apply after review"}
+		return impact
+	}
+	impact.Valid = true
+	impact.ProxyGroups = proxyGroupImpacts(config, resolved.Config)
+	tempDir, err := os.MkdirTemp("", "localclash-refresh-render-*")
+	if err != nil {
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		return impact
+	}
+	defer os.RemoveAll(tempDir)
+	tempSelection := filepath.Join(tempDir, "localclash-packs.yaml")
+	if err := localconfig.WriteSelection(tempSelection, resolved.Selection); err != nil {
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		return impact
+	}
+	_, err = configrender.Render(configrender.Options{
+		SourcePath:         subscriptionPath,
+		PolicyPath:         policyPath,
+		OutputPath:         outputPath,
+		PacksSelectionPath: tempSelection,
+		RulesCacheDir:      rulesCache,
+		Force:              true,
+	})
+	if err != nil {
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		return impact
+	}
+	if err := localconfig.Write(configPath, resolved.Config); err != nil {
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		return impact
+	}
+	if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
+		impact.RequiresAgentReplan = true
+		impact.Error = err.Error()
+		return impact
+	}
+	impact.AppliedAuto = true
+	return impact
+}
+
+func proxyGroupImpacts(before, after localconfig.Config) []localClashProxyGroupImpact {
+	var ids []string
+	for id := range after.ProxyGroups {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	impacts := make([]localClashProxyGroupImpact, 0, len(ids))
+	for _, id := range ids {
+		previous := before.ProxyGroups[id].SelectedNodes
+		selected := after.ProxyGroups[id].SelectedNodes
+		added, removed := stringSetDiff(previous, selected)
+		impacts = append(impacts, localClashProxyGroupImpact{
+			ID:            id,
+			PreviousNodes: append([]string{}, previous...),
+			SelectedNodes: append([]string{}, selected...),
+			AddedNodes:    added,
+			RemovedNodes:  removed,
+		})
+	}
+	return impacts
+}
+
+func stringSetDiff(before, after []string) ([]string, []string) {
+	beforeSet := map[string]bool{}
+	afterSet := map[string]bool{}
+	for _, value := range before {
+		beforeSet[value] = true
+	}
+	for _, value := range after {
+		afterSet[value] = true
+	}
+	var added, removed []string
+	for value := range afterSet {
+		if !beforeSet[value] {
+			added = append(added, value)
+		}
+	}
+	for value := range beforeSet {
+		if !afterSet[value] {
+			removed = append(removed, value)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	return added, removed
+}
+
+func limitStrings(values []string, limit int) []string {
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return append([]string{}, values...)
 }
 
 func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResult, error) {

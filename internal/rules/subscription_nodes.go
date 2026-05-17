@@ -27,13 +27,21 @@ type SubscriptionNodeSample struct {
 	Type string `json:"type,omitempty"`
 }
 
+type SelectorSuggestion struct {
+	Type     string `json:"type"`
+	Pattern  string `json:"pattern"`
+	Boundary string `json:"boundary"`
+	Note     string `json:"note"`
+}
+
 type SubscriptionNodesResult struct {
-	Subscription string                   `json:"subscription"`
-	MatchBasis   string                   `json:"match_basis"`
-	Total        int                      `json:"total"`
-	Returned     int                      `json:"returned"`
-	Nodes        []SubscriptionNodeSample `json:"nodes"`
-	Note         string                   `json:"note"`
+	Subscription       string                   `json:"subscription"`
+	MatchBasis         string                   `json:"match_basis"`
+	Total              int                      `json:"total"`
+	Returned           int                      `json:"returned"`
+	Nodes              []SubscriptionNodeSample `json:"nodes"`
+	SelectorSuggestion *SelectorSuggestion      `json:"selector_suggestion,omitempty"`
+	Note               string                   `json:"note"`
 }
 
 type safeSubscriptionNode struct {
@@ -95,12 +103,13 @@ func SearchSubscriptionNodes(opts SubscriptionNodesSearchOptions) (SubscriptionN
 	}
 	limited := limitSubscriptionNodeSamples(matched, limit)
 	return SubscriptionNodesResult{
-		Subscription: subscription,
-		MatchBasis:   "subscription_proxy_name",
-		Total:        len(matched),
-		Returned:     len(limited),
-		Nodes:        limited,
-		Note:         subscriptionNodesNote(),
+		Subscription:       subscription,
+		MatchBasis:         "subscription_proxy_name",
+		Total:              len(matched),
+		Returned:           len(limited),
+		Nodes:              limited,
+		SelectorSuggestion: selectorSuggestion(opts),
+		Note:               subscriptionNodesNote(),
 	}, nil
 }
 
@@ -177,6 +186,36 @@ func buildSubscriptionNodeMatchers(opts SubscriptionNodesSearchOptions) ([]func(
 
 func subscriptionNodesNote() string {
 	return "Matches are based only on subscription proxy names and do not verify network egress location."
+}
+
+func selectorSuggestion(opts SubscriptionNodesSearchOptions) *SelectorSuggestion {
+	patterns := cleanPatterns(opts.Patterns)
+	pattern := ""
+	if len(patterns) > 0 {
+		pattern = strings.Join(patterns, "|")
+	} else if strings.TrimSpace(opts.Query) != "" {
+		pattern = regexp.QuoteMeta(strings.TrimSpace(opts.Query))
+	}
+	if pattern == "" {
+		return nil
+	}
+	return &SelectorSuggestion{
+		Type:     "name_regex",
+		Pattern:  pattern,
+		Boundary: "name_based_hint_only",
+		Note:     subscriptionNodesNote(),
+	}
+}
+
+func cleanPatterns(patterns []string) []string {
+	var out []string
+	for _, pattern := range patterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern != "" {
+			out = append(out, pattern)
+		}
+	}
+	return out
 }
 
 func limitSubscriptionNodeSamples(samples []SubscriptionNodeSample, limit int) []SubscriptionNodeSample {

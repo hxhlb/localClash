@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 
 	"gopkg.in/yaml.v3"
@@ -135,6 +136,52 @@ func TestRenderProxyGroupPlan(t *testing.T) {
 		t.Fatalf("proxy group mode = %v, want manual", got)
 	}
 	assertMetadataHasNoSensitiveFields(t, metadata)
+}
+
+func TestRenderProxyGroupMatchPlanWritesCandidateLocalClashConfig(t *testing.T) {
+	paths := writePlanFixture(t)
+
+	result, err := Render(context.Background(), Options{
+		PlanName:     "ai-by-regex",
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI", Reason: "Route AI rules to selected Singapore-labelled nodes."}},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{
+					ID:       "AI",
+					Mode:     "manual",
+					Match:    &localconfig.Match{Type: "name_regex", Pattern: "SG", Min: 1, Max: 1},
+					Reason:   "Use nodes whose names indicate Singapore.",
+					Boundary: "name_based_hint_only",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ConfigPath == "" {
+		t.Fatal("result missing candidate localclash config path")
+	}
+	config, err := localconfig.Load(result.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := config.ProxyGroups["AI"]
+	if group.Match == nil || group.Match.Pattern != "SG" {
+		t.Fatalf("AI match = %+v, want SG selector", group.Match)
+	}
+	if len(group.SelectedNodes) != 1 || group.SelectedNodes[0] != "SG 01" {
+		t.Fatalf("selected nodes = %+v, want SG 01", group.SelectedNodes)
+	}
+	if result.Overlay.ProxyGroups[0].Match == nil || result.Overlay.ProxyGroups[0].Boundary != "name_based_hint_only" {
+		t.Fatalf("overlay summary = %+v, want match and boundary", result.Overlay.ProxyGroups[0])
+	}
 }
 
 func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {

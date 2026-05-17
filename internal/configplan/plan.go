@@ -14,40 +14,47 @@ import (
 
 	"localclash/internal/configinspect"
 	"localclash/internal/configrender"
+	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Options struct {
-	PlanName     string
-	Subscription string
-	Policy       string
-	Mode         string
-	RulesCache   string
-	OutputDir    string
-	Test         bool
-	Overlay      OverlayIntent
-	CorePath     string
-	WorkDir      string
-	Now          time.Time
+	PlanName            string
+	Subscription        string
+	Policy              string
+	Mode                string
+	RulesCache          string
+	OutputDir           string
+	ConfigPath          string
+	SubscriptionConfig  string
+	SubscriptionRuntime string
+	Test                bool
+	Overlay             OverlayIntent
+	CorePath            string
+	WorkDir             string
+	Now                 time.Time
 }
 
 type ApplyOptions struct {
-	PlanID        string
-	PlansDir      string
-	SummaryPath   string
-	Subscription  string
-	Policy        string
-	Mode          string
-	RulesCache    string
-	SelectionPath string
-	OutputPath    string
-	CorePath      string
-	WorkDir       string
-	BackupDir     string
-	Test          bool
-	Now           time.Time
+	PlanID              string
+	PlansDir            string
+	SummaryPath         string
+	Subscription        string
+	Policy              string
+	Mode                string
+	RulesCache          string
+	ConfigPath          string
+	SubscriptionConfig  string
+	SubscriptionRuntime string
+	SelectionPath       string
+	OutputPath          string
+	CorePath            string
+	WorkDir             string
+	BackupDir           string
+	Test                bool
+	Now                 time.Time
 }
 
 type OverlayIntent struct {
@@ -58,18 +65,23 @@ type OverlayIntent struct {
 type OverlayPackIntent struct {
 	ID     string `json:"id" yaml:"id"`
 	Target string `json:"target" yaml:"target"`
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 type OverlayProxyGroupIntent struct {
-	ID    string   `json:"id" yaml:"id"`
-	Nodes []string `json:"nodes" yaml:"nodes"`
-	Mode  string   `json:"mode" yaml:"mode"`
+	ID       string             `json:"id" yaml:"id"`
+	Nodes    []string           `json:"nodes,omitempty" yaml:"nodes,omitempty"`
+	Match    *localconfig.Match `json:"match,omitempty" yaml:"match,omitempty"`
+	Mode     string             `json:"mode" yaml:"mode"`
+	Reason   string             `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Boundary string             `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 }
 
 type Result struct {
 	PlanID      string           `json:"plan_id"`
 	Output      string           `json:"output"`
 	SummaryPath string           `json:"summary_path"`
+	ConfigPath  string           `json:"config_path"`
 	Inputs      PlanInputs       `json:"inputs"`
 	Valid       bool             `json:"valid"`
 	MihomoTest  MihomoTestResult `json:"mihomo_test"`
@@ -79,16 +91,19 @@ type Result struct {
 }
 
 type PlanInputs struct {
-	Subscription string `json:"subscription"`
-	Policy       string `json:"policy"`
-	Mode         string `json:"mode,omitempty"`
-	RulesCache   string `json:"rules_cache"`
+	Subscription        string `json:"subscription"`
+	Policy              string `json:"policy"`
+	Mode                string `json:"mode,omitempty"`
+	RulesCache          string `json:"rules_cache"`
+	SubscriptionConfig  string `json:"subscription_config,omitempty"`
+	SubscriptionRuntime string `json:"subscription_runtime,omitempty"`
 }
 
 type ApplyResult struct {
 	Applied       bool                `json:"applied"`
 	PlanID        string              `json:"plan_id"`
 	SummaryPath   string              `json:"summary_path"`
+	ConfigPath    string              `json:"config_path"`
 	SelectionPath string              `json:"selection_path"`
 	OutputPath    string              `json:"output_path"`
 	Valid         bool                `json:"valid"`
@@ -118,13 +133,18 @@ type OverlaySummary struct {
 type OverlayPackSummary struct {
 	ID     string `json:"id"`
 	Target string `json:"target"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type OverlayProxyGroupSummary struct {
-	ID        string   `json:"id"`
-	Nodes     []string `json:"nodes"`
-	Mode      string   `json:"mode"`
-	NodeCount int      `json:"node_count"`
+	ID            string             `json:"id"`
+	Nodes         []string           `json:"nodes"`
+	SelectedNodes []string           `json:"selected_nodes,omitempty"`
+	Match         *localconfig.Match `json:"match,omitempty"`
+	Mode          string             `json:"mode"`
+	NodeCount     int                `json:"node_count"`
+	Reason        string             `json:"reason,omitempty"`
+	Boundary      string             `json:"boundary,omitempty"`
 }
 
 type ChangesSummary struct {
@@ -139,15 +159,19 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("overlay.packs is required")
 	}
 
-	proxyNames, err := rules.LoadSubscriptionProxyNames(opts.Subscription)
+	config := configFromOverlay(opts.Overlay)
+	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+		Config:              config,
+		SubscriptionPath:    opts.Subscription,
+		SubscriptionConfig:  opts.SubscriptionConfig,
+		SubscriptionRuntime: opts.SubscriptionRuntime,
+		RulesCache:          opts.RulesCache,
+	})
 	if err != nil {
 		return Result{}, err
 	}
-
-	selection, overlaySummary, warnings, err := buildSelection(opts, proxyNames)
-	if err != nil {
-		return Result{}, err
-	}
+	overlaySummary := overlaySummaryFromResolved(resolved)
+	warnings := resolved.Warnings
 
 	planID, err := allocatePlanID(opts.OutputDir, opts.PlanName, opts.Now)
 	if err != nil {
@@ -156,11 +180,15 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	planDir := filepath.Join(opts.OutputDir, planID)
 	outputPath := filepath.Join(planDir, "mihomo.yaml")
 	summaryPath := filepath.Join(planDir, "summary.json")
+	configPath := filepath.Join(planDir, "localclash.yaml")
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
 		return Result{}, err
 	}
+	if err := localconfig.Write(configPath, resolved.Config); err != nil {
+		return Result{}, err
+	}
 
-	selectionPath, cleanup, err := writeTempSelection(selection)
+	selectionPath, cleanup, err := writeTempSelection(resolved.Selection)
 	if err != nil {
 		return Result{}, err
 	}
@@ -186,11 +214,14 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		PlanID:      planID,
 		Output:      outputPath,
 		SummaryPath: summaryPath,
+		ConfigPath:  configPath,
 		Inputs: PlanInputs{
-			Subscription: opts.Subscription,
-			Policy:       opts.Policy,
-			Mode:         opts.Mode,
-			RulesCache:   opts.RulesCache,
+			Subscription:        opts.Subscription,
+			Policy:              opts.Policy,
+			Mode:                opts.Mode,
+			RulesCache:          opts.RulesCache,
+			SubscriptionConfig:  opts.SubscriptionConfig,
+			SubscriptionRuntime: opts.SubscriptionRuntime,
 		},
 		Valid:      true,
 		MihomoTest: MihomoTestResult{Enabled: opts.Test},
@@ -230,19 +261,22 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	}
 	opts = normalizeApplyOptions(applyPlanInputDefaults(opts, plan.Inputs))
 
-	intent := intentFromSummary(plan.Overlay)
-	proxyNames, err := rules.LoadSubscriptionProxyNames(opts.Subscription)
+	config, err := loadApplyConfig(opts, plan)
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	selection, overlaySummary, warnings, err := buildSelection(Options{
-		Subscription: opts.Subscription,
-		RulesCache:   opts.RulesCache,
-		Overlay:      intent,
-	}, proxyNames)
+	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+		Config:              config,
+		SubscriptionPath:    opts.Subscription,
+		SubscriptionConfig:  opts.SubscriptionConfig,
+		SubscriptionRuntime: opts.SubscriptionRuntime,
+		RulesCache:          opts.RulesCache,
+	})
 	if err != nil {
 		return ApplyResult{}, err
 	}
+	overlaySummary := overlaySummaryFromResolved(resolved)
+	warnings := resolved.Warnings
 
 	tempDir, err := os.MkdirTemp("", "localclash-plan-apply-*")
 	if err != nil {
@@ -251,7 +285,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	defer os.RemoveAll(tempDir)
 	tempSelection := filepath.Join(tempDir, "localclash-packs.yaml")
 	tempOutput := filepath.Join(tempDir, "mihomo.yaml")
-	if err := writeSelection(tempSelection, selection); err != nil {
+	if err := localconfig.WriteSelection(tempSelection, resolved.Selection); err != nil {
 		return ApplyResult{}, err
 	}
 	renderResult, err := configrender.Render(configrender.Options{
@@ -270,6 +304,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	result := ApplyResult{
 		PlanID:        plan.PlanID,
 		SummaryPath:   summaryPath,
+		ConfigPath:    opts.ConfigPath,
 		SelectionPath: opts.SelectionPath,
 		OutputPath:    opts.OutputPath,
 		Valid:         true,
@@ -296,7 +331,10 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		return ApplyResult{}, err
 	}
 	result.Backups = backups
-	if err := writeSelection(opts.SelectionPath, selection); err != nil {
+	if err := localconfig.Write(opts.ConfigPath, resolved.Config); err != nil {
+		return ApplyResult{}, err
+	}
+	if err := localconfig.WriteSelection(opts.SelectionPath, resolved.Selection); err != nil {
 		return ApplyResult{}, err
 	}
 	if err := copyFile(tempOutput, opts.OutputPath); err != nil {
@@ -318,6 +356,15 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.OutputDir == "" {
 		opts.OutputDir = ".runtime/plans"
+	}
+	if opts.ConfigPath == "" {
+		opts.ConfigPath = "localclash.yaml"
+	}
+	if opts.SubscriptionConfig == "" {
+		opts.SubscriptionConfig = "localclash-subscriptions.yaml"
+	}
+	if opts.SubscriptionRuntime == "" {
+		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	if opts.CorePath == "" {
 		opts.CorePath = "bin/mihomo"
@@ -343,6 +390,15 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
+	}
+	if opts.ConfigPath == "" {
+		opts.ConfigPath = "localclash.yaml"
+	}
+	if opts.SubscriptionConfig == "" {
+		opts.SubscriptionConfig = "localclash-subscriptions.yaml"
+	}
+	if opts.SubscriptionRuntime == "" {
+		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	if opts.SelectionPath == "" {
 		opts.SelectionPath = "localclash-packs.yaml"
@@ -388,7 +444,73 @@ func applyPlanInputDefaults(opts ApplyOptions, inputs PlanInputs) ApplyOptions {
 	if opts.RulesCache == "" {
 		opts.RulesCache = inputs.RulesCache
 	}
+	if opts.SubscriptionConfig == "" {
+		opts.SubscriptionConfig = inputs.SubscriptionConfig
+	}
+	if opts.SubscriptionRuntime == "" {
+		opts.SubscriptionRuntime = inputs.SubscriptionRuntime
+	}
 	return opts
+}
+
+func configFromOverlay(overlay OverlayIntent) localconfig.Config {
+	config := localconfig.Config{
+		Version:     1,
+		ProxyGroups: map[string]localconfig.ProxyGroup{},
+		Packs:       make([]localconfig.Pack, 0, len(overlay.Packs)),
+	}
+	for _, group := range overlay.ProxyGroups {
+		config.ProxyGroups[group.ID] = localconfig.ProxyGroup{
+			Mode:     group.Mode,
+			Match:    group.Match,
+			Nodes:    append([]string{}, group.Nodes...),
+			Reason:   group.Reason,
+			Boundary: group.Boundary,
+		}
+	}
+	for _, pack := range overlay.Packs {
+		config.Packs = append(config.Packs, localconfig.Pack{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+	}
+	return config
+}
+
+func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
+	summary := OverlaySummary{
+		Packs:       make([]OverlayPackSummary, 0, len(resolved.Packs)),
+		ProxyGroups: make([]OverlayProxyGroupSummary, 0, len(resolved.ProxyGroups)),
+	}
+	for _, pack := range resolved.Packs {
+		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+	}
+	for _, group := range resolved.ProxyGroups {
+		nodes := append([]string{}, group.SelectedNodes...)
+		summary.ProxyGroups = append(summary.ProxyGroups, OverlayProxyGroupSummary{
+			ID:            group.ID,
+			Nodes:         nodes,
+			SelectedNodes: nodes,
+			Match:         group.Match,
+			Mode:          group.Mode,
+			NodeCount:     group.NodeCount,
+			Reason:        group.Reason,
+			Boundary:      group.Boundary,
+		})
+	}
+	return summary
+}
+
+func loadApplyConfig(opts ApplyOptions, plan Result) (localconfig.Config, error) {
+	path := plan.ConfigPath
+	if strings.TrimSpace(path) == "" && strings.TrimSpace(plan.SummaryPath) != "" {
+		path = filepath.Join(filepath.Dir(plan.SummaryPath), "localclash.yaml")
+	}
+	if strings.TrimSpace(path) != "" {
+		if config, err := localconfig.Load(path); err == nil {
+			return config, nil
+		} else if !os.IsNotExist(err) {
+			return localconfig.Config{}, err
+		}
+	}
+	return configFromOverlay(intentFromSummary(plan.Overlay)), nil
 }
 
 func buildSelection(opts Options, proxyNames []string) (rules.Selection, OverlaySummary, []string, error) {
@@ -555,13 +677,16 @@ func intentFromSummary(summary OverlaySummary) OverlayIntent {
 		ProxyGroups: make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
 	}
 	for _, pack := range summary.Packs {
-		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Target: pack.Target})
+		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
 	}
 	for _, group := range summary.ProxyGroups {
 		intent.ProxyGroups = append(intent.ProxyGroups, OverlayProxyGroupIntent{
-			ID:    group.ID,
-			Nodes: append([]string{}, group.Nodes...),
-			Mode:  group.Mode,
+			ID:       group.ID,
+			Nodes:    append([]string{}, group.Nodes...),
+			Match:    group.Match,
+			Mode:     group.Mode,
+			Reason:   group.Reason,
+			Boundary: group.Boundary,
 		})
 	}
 	return intent
@@ -573,6 +698,7 @@ func backupApplyTargets(opts ApplyOptions) ([]BackupResult, error) {
 		source string
 		name   string
 	}{
+		{source: opts.ConfigPath, name: "localclash.yaml"},
 		{source: opts.SelectionPath, name: "localclash-packs.yaml"},
 		{source: opts.OutputPath, name: "mihomo.yaml"},
 	}

@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_overlay_inspect", "config_plan_apply", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_overlay_inspect", "config_plan_apply", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -115,7 +115,6 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"tools_list":                SafeRead,
 		"config_plan_apply":         SafeWrite,
 		"config_plan_render":        SafeWrite,
-		"config_render":             SafeWrite,
 		"sed_file":                  SafeWrite,
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
@@ -368,6 +367,10 @@ func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
 	if content["refreshed"] != true {
 		t.Fatalf("refreshed = %v, want true", content["refreshed"])
 	}
+	nodeDiff := content["node_diff"].(map[string]any)
+	if nodeDiff["after_count"] != float64(1) || nodeDiff["added_count"] != float64(1) {
+		t.Fatalf("node_diff = %+v, want one added node", nodeDiff)
+	}
 	if _, err := os.Stat(paths.merged); err != nil {
 		t.Fatalf("merged subscription missing: %v", err)
 	}
@@ -377,6 +380,78 @@ func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
 	}
 	if strings.Contains(string(data), "secret-token") || strings.Contains(string(data), "token=") {
 		t.Fatalf("subscriptions_refresh leaked token in %s", data)
+	}
+}
+
+func TestToolsCallSubscriptionsRefreshAutoAppliesValidLocalClashSelector(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	dir := filepath.Dir(paths.subscription)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`proxies:
+  - name: SG 02
+    type: ss
+    server: sg2.example.com
+    password: secret
+`))
+	}))
+	t.Cleanup(server.Close)
+	subConfig := filepath.Join(dir, "localclash-subscriptions.yaml")
+	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
+	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	generated := filepath.Join(dir, "generated", "mihomo.yaml")
+	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
+sources:
+  - id: primary
+    url: %s/sub?token=secret-token
+`, server.URL))
+	writeMCPFile(t, localClashConfig, `version: 1
+proxy_groups:
+  AI:
+    mode: manual
+    match:
+      type: name_regex
+      pattern: SG
+      min: 1
+    selected_nodes:
+      - SG 01
+    reason: Use Singapore-labelled nodes.
+    boundary: name_based_hint_only
+packs:
+  - id: blackmatrix7_OpenAI
+    target: AI
+`)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscriptions_refresh",
+			"arguments": map[string]any{
+				"config":            subConfig,
+				"runtime_dir":       runtimeDir,
+				"merged":            paths.subscription,
+				"localclash_config": localClashConfig,
+				"selection":         filepath.Join(dir, "localclash-packs.yaml"),
+				"policy":            paths.policy,
+				"rules_cache":       paths.cache,
+				"output":            generated,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("subscriptions_refresh returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	impact := content["localclash_config"].(map[string]any)
+	if impact["applied_auto"] != true || impact["requires_agent_replan"] == true {
+		t.Fatalf("localclash impact = %+v, want auto apply", impact)
+	}
+	if _, err := os.Stat(generated); err != nil {
+		t.Fatalf("generated config missing after refresh: %v", err)
+	}
+	if !strings.Contains(readMCPFile(t, localClashConfig), "SG 02") {
+		t.Fatalf("localclash config was not updated: %s", readMCPFile(t, localClashConfig))
 	}
 }
 
@@ -435,6 +510,10 @@ func TestToolsCallSubscriptionNodesSearchReturnsNameMatches(t *testing.T) {
 	content := result.StructuredContent.(map[string]any)
 	if content["total"] != float64(1) {
 		t.Fatalf("content = %+v, want one name match", content)
+	}
+	suggestion := content["selector_suggestion"].(map[string]any)
+	if suggestion["type"] != "name_regex" || suggestion["boundary"] != "name_based_hint_only" {
+		t.Fatalf("selector suggestion = %+v, want name_regex boundary", suggestion)
 	}
 	if !strings.Contains(fmt.Sprint(content["note"]), "do not verify network egress location") {
 		t.Fatalf("note = %v, want egress boundary", content["note"])
@@ -544,6 +623,9 @@ func TestToolsCallConfigPlanApplyPersistsSelectionAndGeneratedConfig(t *testing.
 	}
 	if _, err := os.Stat("generated/mihomo.yaml"); err != nil {
 		t.Fatalf("generated config missing after apply: %v", err)
+	}
+	if _, err := os.Stat("localclash.yaml"); err != nil {
+		t.Fatalf("localclash config missing after apply: %v", err)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("config_plan_apply structured content is not serializable: %v", err)
