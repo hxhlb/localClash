@@ -142,7 +142,7 @@ class LogSink:
         self.redact_logs = redact_logs
         self._lock = threading.Lock()
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = path.open("a", encoding="utf-8")
+        self._file = path.open("w", encoding="utf-8")
 
     def close(self) -> None:
         with self._lock:
