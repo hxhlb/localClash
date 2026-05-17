@@ -233,6 +233,26 @@ scripts/test-mcp-http.sh
 The script starts `go run . mcp`, posts a JSON-RPC `doctor` tool call to the
 HTTP endpoint, and expects a response containing `"status":"ok"`.
 
+For a third-party MCP client compatibility smoke test, run:
+
+```bash
+scripts/test-mcp-cli.sh
+```
+
+This starts a test MCP HTTP listener on `127.0.0.1:18765`, generates a temporary
+`mcp-cli` `server_config.json`, verifies `mcp-cli ping`, checks that tool
+discovery includes the core localClash tools, and executes `doctor` through
+`mcp-cli interactive` with `execute doctor {}`.
+
+To point `mcp-cli` at an already running server, use the checked-in fixture:
+
+```bash
+uvx mcp-cli tools \
+  --config-file scripts/fixtures/mcp-cli/server_config.json \
+  --server localclash \
+  --raw
+```
+
 For Open WebUI debugging, the helper script can run a logging proxy in front of
 the localClash MCP HTTP server:
 
