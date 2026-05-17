@@ -21,7 +21,8 @@ Flags:
 Environment variables with the LOCALCLASH_ prefix can also override defaults:
 LOCALCLASH_ROUTER_SSH, LOCALCLASH_ROUTER_ARCH, LOCALCLASH_REMOTE_BIN,
 LOCALCLASH_ROUTER_WORKDIR, LOCALCLASH_MCP_ADDR, LOCALCLASH_MCP_PATH,
-LOCALCLASH_SKIP_TESTS.
+LOCALCLASH_SKIP_TESTS, LOCALCLASH_SSH_CONNECT_TIMEOUT,
+LOCALCLASH_SSH_LOG_LEVEL.
 USAGE
 }
 
@@ -69,6 +70,8 @@ remote_workdir="${LOCALCLASH_ROUTER_WORKDIR:-/root}"
 mcp_addr="${LOCALCLASH_MCP_ADDR:-0.0.0.0:8765}"
 mcp_path="${LOCALCLASH_MCP_PATH:-/mcp}"
 skip_tests="${LOCALCLASH_SKIP_TESTS:-0}"
+ssh_connect_timeout="${LOCALCLASH_SSH_CONNECT_TIMEOUT:-8}"
+ssh_log_level="${LOCALCLASH_SSH_LOG_LEVEL:-ERROR}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -133,6 +136,12 @@ require_command go
 require_command ssh
 require_command scp
 
+ssh_opts=(
+  -o BatchMode=yes
+  -o ConnectTimeout="${ssh_connect_timeout}"
+  -o LogLevel="${ssh_log_level}"
+)
+
 if [[ "${mcp_addr}" != *:* ]]; then
   die "--mcp-addr must include a port, for example 0.0.0.0:8765"
 fi
@@ -142,7 +151,7 @@ router_host="${router_host%%:*}"
 
 log "checking router ${router_ssh}"
 router_arch="$(
-  ssh -o BatchMode=yes -o ConnectTimeout=8 "${router_ssh}" 'uname -m' 2>/dev/null \
+  ssh "${ssh_opts[@]}" "${router_ssh}" 'uname -m' 2>/dev/null \
     || die "cannot connect to ${router_ssh}"
 )"
 case "${router_arch}:${target_arch}" in
@@ -165,10 +174,10 @@ GOOS="${target_os}" GOARCH="${target_arch}" CGO_ENABLED=0 \
 
 local_sha="$(sha256_file "${local_bin}")"
 log "uploading binary to ${router_ssh}:${remote_tmp}"
-scp "${local_bin}" "${router_ssh}:${remote_tmp}"
+scp "${ssh_opts[@]}" "${local_bin}" "${router_ssh}:${remote_tmp}"
 
 log "installing binary at ${remote_bin}"
-ssh "${router_ssh}" 'sh -s' -- "${remote_tmp}" "${remote_bin}" "${remote_link}" <<'EOS'
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_tmp}" "${remote_bin}" "${remote_link}" <<'EOS'
 set -eu
 remote_tmp="$1"
 remote_bin="$2"
@@ -216,8 +225,8 @@ start_service() {
 EOF
 
 log "installing procd service ${service_path}"
-scp "${init_file}" "${router_ssh}:${remote_init_tmp}"
-ssh "${router_ssh}" 'sh -s' -- "${remote_init_tmp}" "${service_path}" "${remote_workdir}" "${mcp_log}" <<'EOS'
+scp "${ssh_opts[@]}" "${init_file}" "${router_ssh}:${remote_init_tmp}"
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_init_tmp}" "${service_path}" "${remote_workdir}" "${mcp_log}" <<'EOS'
 set -eu
 remote_init_tmp="$1"
 service_path="$2"
@@ -237,7 +246,7 @@ chmod 0755 "$service_path"
 EOS
 
 log "waiting for router MCP health on port ${mcp_port}"
-ssh "${router_ssh}" 'sh -s' -- "${mcp_port}" "${mcp_log}" <<'EOS'
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${mcp_port}" "${mcp_log}" <<'EOS'
 set -eu
 port="$1"
 mcp_log="$2"
@@ -267,7 +276,7 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 remote_sha="$(
-  ssh "${router_ssh}" 'sh -s' -- "${remote_bin}" <<'EOS' | awk '{print $1}'
+  ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_bin}" <<'EOS' | awk '{print $1}'
 set -eu
 sha256sum "$1"
 EOS

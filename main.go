@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -31,6 +33,8 @@ Usage:
   localclash rules adapt [flags]
   localclash rules render [flags]
   localclash run [flags]
+  localclash status [flags]
+  localclash stop [flags]
   localclash doctor [flags]
   localclash mcp [flags]
   localclash reset [flags]
@@ -95,6 +99,18 @@ Flags for run:
   --log-retention int
                  days of dated Mihomo logs to keep (default 7)
 
+Flags for status:
+  --config string   Mihomo runtime config path (default "generated/mihomo.yaml")
+  --workdir string  Mihomo runtime data directory (default ".runtime/mihomo")
+  --log string      Mihomo log file path (default "<workdir>/mihomo.log")
+  --json            print machine-readable JSON status
+
+Flags for stop:
+  --workdir string       Mihomo runtime data directory (default ".runtime/mihomo")
+  --timeout duration     stop timeout before reporting failure (default 5s)
+  --force                send SIGKILL if SIGTERM does not stop before timeout
+  --json                 print machine-readable JSON result
+
 Flags for doctor:
   --core string          Mihomo core binary path (default from active runtime profile)
   --subscription string  downloaded subscription YAML (default "subscription.yaml")
@@ -152,6 +168,12 @@ func run(args []string) error {
 	}
 	if len(args) >= 1 && args[0] == "run" {
 		return runCore(args[1:], state)
+	}
+	if len(args) >= 1 && args[0] == "status" {
+		return runStatus(args[1:], state)
+	}
+	if len(args) >= 1 && args[0] == "stop" {
+		return runStop(args[1:], state)
 	}
 	if len(args) >= 1 && args[0] == "doctor" {
 		return runDoctor(args[1:], state)
@@ -418,6 +440,67 @@ func runCore(args []string, state appinit.RuntimeState) error {
 	return corerun.Run(opts)
 }
 
+func runStatus(args []string, state appinit.RuntimeState) error {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	var opts corerun.StatusOptions
+	var asJSON bool
+	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "Mihomo runtime config path")
+	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
+	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
+	fs.BoolVar(&asJSON, "json", false, "print machine-readable JSON status")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	result := corerun.Status(opts)
+	if asJSON {
+		return printJSON(result)
+	}
+	printRuntimeStatus(result)
+	return nil
+}
+
+func runStop(args []string, state appinit.RuntimeState) error {
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := corerun.StopOptions{}
+	var asJSON bool
+	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
+	fs.DurationVar(&opts.Timeout, "timeout", 5*time.Second, "stop timeout before reporting failure")
+	fs.BoolVar(&opts.ForceKill, "force", false, "send SIGKILL if SIGTERM does not stop before timeout")
+	fs.BoolVar(&asJSON, "json", false, "print machine-readable JSON result")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	result, err := corerun.Stop(opts)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		if err := printJSON(result); err != nil {
+			return err
+		}
+	} else {
+		printRuntimeStop(result)
+	}
+	if result.Error != "" {
+		return errors.New(result.Error)
+	}
+	return nil
+}
+
 func runDoctor(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -474,4 +557,55 @@ func runMCP(args []string, state appinit.RuntimeState) error {
 
 func doctorReportOK(report doctor.Report) bool {
 	return report.Status != "fail"
+}
+
+func printJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
+
+func printRuntimeStatus(result corerun.StatusResult) {
+	if result.Running {
+		fmt.Printf("mihomo runtime running (pid %d)\n", result.PID)
+	} else {
+		fmt.Println("mihomo runtime not running")
+	}
+	fmt.Printf("runtime dir: %s\n", result.RuntimeDir)
+	fmt.Printf("pid file: %s\n", result.PIDFile)
+	fmt.Printf("config: %s\n", result.Config)
+	fmt.Printf("log: %s\n", result.LogFile)
+	if result.ExternalController != "" {
+		fmt.Printf("external controller: %s\n", result.ExternalController)
+	}
+	if result.ExternalUIURL != "" {
+		fmt.Printf("external ui: %s\n", result.ExternalUIURL)
+	}
+	if result.StalePIDFile {
+		fmt.Printf("stale pid file: %s\n", result.StalePIDFileReason)
+	}
+}
+
+func printRuntimeStop(result corerun.StopResult) {
+	switch {
+	case result.Stopped:
+		fmt.Printf("stopped mihomo runtime pid %d with %s\n", result.PID, result.Signal)
+	case result.WasRunning:
+		fmt.Printf("mihomo runtime pid %d did not stop\n", result.PID)
+	case result.StalePIDFile:
+		fmt.Printf("removed stale mihomo pid file: %s\n", result.StalePIDFileReason)
+	default:
+		fmt.Println("mihomo runtime was not running")
+	}
+	fmt.Printf("runtime dir: %s\n", result.RuntimeDir)
+	fmt.Printf("pid file: %s\n", result.PIDFile)
+	if result.RemovedPIDFile {
+		fmt.Println("pid file removed")
+	}
+	if result.Forced {
+		fmt.Println("forced: true")
+	}
+	if result.Error != "" {
+		fmt.Printf("error: %s\n", result.Error)
+	}
 }

@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -15,4 +19,95 @@ func TestRunResetDoesNotBootstrapRuntimeFirst(t *testing.T) {
 	if _, err := os.Stat(".runtime"); !os.IsNotExist(err) {
 		t.Fatalf("reset should run before bootstrap creates .runtime, err=%v", err)
 	}
+}
+
+func TestRunStatusPrintsJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() error {
+		return run([]string{"status", "--workdir", workDir, "--config", config, "--json"})
+	})
+	var result struct {
+		Running       bool   `json:"running"`
+		PID           int    `json:"pid"`
+		ExternalUIURL string `json:"external_ui_url"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("status JSON = %q, error = %v", output, err)
+	}
+	if !result.Running || result.PID != os.Getpid() || result.ExternalUIURL != "http://127.0.0.1:9090/ui" {
+		t.Fatalf("status result = %+v, want current pid and external UI", result)
+	}
+}
+
+func TestRunStopRemovesStalePIDFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(workDir, "mihomo.pid")
+	if err := os.WriteFile(pidFile, []byte("not-a-pid\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() error {
+		return run([]string{"stop", "--workdir", workDir, "--json"})
+	})
+	var result struct {
+		Stopped        bool `json:"stopped"`
+		StalePIDFile   bool `json:"stale_pid_file"`
+		RemovedPIDFile bool `json:"removed_pid_file"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("stop JSON = %q, error = %v", output, err)
+	}
+	if result.Stopped || !result.StalePIDFile || !result.RemovedPIDFile {
+		t.Fatalf("stop result = %+v, want stale pid file removed", result)
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Fatalf("pid file should be removed, err=%v", err)
+	}
+}
+
+func captureStdout(t *testing.T, fn func() error) string {
+	t.Helper()
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = writer
+	err = fn()
+	if closeErr := writer.Close(); closeErr != nil && err == nil {
+		err = closeErr
+	}
+	os.Stdout = original
+	t.Cleanup(func() {
+		os.Stdout = original
+		_ = reader.Close()
+	})
+	data, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }

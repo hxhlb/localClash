@@ -471,6 +471,19 @@ By default this is equivalent to:
 
 Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
 
+Check or stop the background runtime started through MCP:
+
+```bash
+go run . status
+go run . stop
+```
+
+`status` reads `.runtime/mihomo/mihomo.pid` and reports the generated config,
+log file, external controller, and dashboard URL when available. Use
+`go run . status --json` for scripts. `stop` sends SIGTERM to the recorded
+process and removes stale PID files; use `--force` to send SIGKILL if the
+runtime does not stop before `--timeout`.
+
 ## Factory Reset
 
 Reset removes local runtime state and user configuration, returning localClash to
