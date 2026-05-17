@@ -406,6 +406,23 @@ By default this is equivalent to:
 
 Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
 
+## Factory Reset
+
+Reset removes local runtime state and user configuration, returning localClash to
+an installed-but-unconfigured state:
+
+```bash
+go run . reset
+```
+
+The command deletes `.runtime/`, `generated/`, `subscription*.yaml`,
+`localclash.yaml`, `localclash-packs.yaml`, and
+`localclash-subscriptions.yaml`. It keeps downloaded binaries in `bin/`, built-in
+policies, rule sources, source code, docs, and scripts. By default it prints the
+delete plan and requires typing `reset localclash`; use `--dry-run` to inspect
+the plan only or `--yes` for non-interactive SSH/script usage. If Mihomo is
+running, stop it before resetting.
+
 ## Doctor
 
 Run a read-only diagnostic report for the local core, subscription, generated config, policy, dashboard, rule references, and Mihomo config test:

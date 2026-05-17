@@ -16,6 +16,7 @@ import (
 	"localclash/internal/dashboard"
 	"localclash/internal/doctor"
 	"localclash/internal/mcp"
+	"localclash/internal/reset"
 	"localclash/internal/rules"
 	"localclash/internal/subdownload"
 )
@@ -32,6 +33,7 @@ Usage:
   localclash run [flags]
   localclash doctor [flags]
   localclash mcp [flags]
+  localclash reset [flags]
 
 Flags for core download:
   --version string   GitHub release tag, or "latest" (default "latest")
@@ -97,6 +99,10 @@ Flags for doctor:
 Flags for mcp:
   --addr string   HTTP listen address (default "127.0.0.1:8765")
   --path string   MCP HTTP JSON-RPC path (default "/mcp")
+
+Flags for reset:
+  --dry-run   print the factory reset plan without deleting files
+  --yes       skip interactive confirmation
 `
 
 func main() {
@@ -114,6 +120,9 @@ func run(args []string) error {
 	if len(args) == 1 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help") {
 		fmt.Print(usage)
 		return nil
+	}
+	if len(args) >= 1 && args[0] == "reset" {
+		return runReset(args[1:])
 	}
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer bootstrapCancel()
@@ -143,6 +152,23 @@ func run(args []string) error {
 		return runMCP(args[1:], state)
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
+}
+
+func runReset(args []string) error {
+	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := reset.Options{}
+	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the factory reset plan without deleting files")
+	fs.BoolVar(&opts.Yes, "yes", false, "skip interactive confirmation")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+	_, err := reset.Run(opts)
+	return err
 }
 
 func runCoreDownload(args []string) error {
