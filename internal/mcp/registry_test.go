@@ -21,6 +21,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["config_overlay_inspect"].SafetyLevel != SafeRead {
 		t.Fatalf("config_overlay_inspect safety = %q, want %q", byName["config_overlay_inspect"].SafetyLevel, SafeRead)
 	}
+	if byName["nl_file"].SafetyLevel != SafeRead {
+		t.Fatalf("nl_file safety = %q, want %q", byName["nl_file"].SafetyLevel, SafeRead)
+	}
 	if byName["packs_list"].SafetyLevel != SafeRead {
 		t.Fatalf("packs_list safety = %q, want %q", byName["packs_list"].SafetyLevel, SafeRead)
 	}
@@ -53,6 +56,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if byName["config_render"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_render safety = %q, want %q", byName["config_render"].SafetyLevel, SafeWrite)
+	}
+	if byName["sed_file"].SafetyLevel != SafeWrite {
+		t.Fatalf("sed_file safety = %q, want %q", byName["sed_file"].SafetyLevel, SafeWrite)
 	}
 	if byName["subscriptions_configure"].SafetyLevel != SafeWrite {
 		t.Fatalf("subscriptions_configure safety = %q, want %q", byName["subscriptions_configure"].SafetyLevel, SafeWrite)

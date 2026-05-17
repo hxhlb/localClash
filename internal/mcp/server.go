@@ -16,6 +16,7 @@ import (
 	"localclash/internal/configrender"
 	"localclash/internal/corerun"
 	"localclash/internal/doctor"
+	"localclash/internal/fileops"
 	"localclash/internal/rules"
 	"localclash/internal/subscriptions"
 )
@@ -233,6 +234,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callConfigOverlayInspect(args)
 	case "doctor":
 		return s.callDoctor(ctx, args)
+	case "nl_file":
+		return callNLFile(args)
 	case "packs_list":
 		return s.callPacksList(args)
 	case "packs_get":
@@ -261,11 +264,61 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callConfigRender(args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
+	case "sed_file":
+		return callSedFile(args)
 	case "stop_runtime":
 		return s.callStopRuntime(args)
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
+}
+
+func callNLFile(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Path       string `json:"path"`
+		StartLine  int    `json:"start_line"`
+		LimitLines int    `json:"limit_lines"`
+		MaxBytes   int    `json:"max_bytes"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	result, err := fileops.NLFile(fileops.NLFileOptions{
+		Path:       in.Path,
+		StartLine:  in.StartLine,
+		LimitLines: in.LimitLines,
+		MaxBytes:   in.MaxBytes,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func callSedFile(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Path           string         `json:"path"`
+		DryRun         *bool          `json:"dry_run"`
+		ExpectedSHA256 string         `json:"expected_sha256"`
+		Edits          []fileops.Edit `json:"edits"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	dryRun := true
+	if in.DryRun != nil {
+		dryRun = *in.DryRun
+	}
+	result, err := fileops.SedFile(fileops.SedFileOptions{
+		Path:           in.Path,
+		DryRun:         dryRun,
+		ExpectedSHA256: in.ExpectedSHA256,
+		Edits:          in.Edits,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
 }
 
 func callConfigBaseInspect(args json.RawMessage) (toolResult, error) {

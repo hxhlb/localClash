@@ -84,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime", "stop_runtime"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "nl_file", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -104,6 +104,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"doctor":                    SafeRead,
 		"config_base_inspect":       SafeRead,
 		"config_overlay_inspect":    SafeRead,
+		"nl_file":                   SafeRead,
 		"packs_get":                 SafeRead,
 		"packs_list":                SafeRead,
 		"subscription_nodes_list":   SafeRead,
@@ -115,6 +116,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"virtual_nodes_list":        SafeRead,
 		"config_plan_render":        SafeWrite,
 		"config_render":             SafeWrite,
+		"sed_file":                  SafeWrite,
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
 		"run_runtime":               ConfirmRequired,
@@ -172,6 +174,113 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 	}
 	if !strings.Contains(structured.ClientNamingNote, "localclash_doctor") {
 		t.Fatalf("client naming note = %q, want OpenWebUI-style prefix example", structured.ClientNamingNote)
+	}
+}
+
+func TestToolsCallNLFileReturnsNumberedText(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("config.yaml", []byte("alpha\nbeta\ngamma\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "nl_file",
+			"arguments": map[string]any{
+				"path":        "config.yaml",
+				"start_line":  2,
+				"limit_lines": 2,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("nl_file returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["text"] != "2: beta\n3: gamma" {
+		t.Fatalf("nl_file text = %q", content["text"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("nl_file structured content is not serializable: %v", err)
+	}
+}
+
+func TestToolsCallSedFileDefaultsToDryRun(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("config.yaml", []byte("target: PROXY\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "sed_file",
+			"arguments": map[string]any{
+				"path": "config.yaml",
+				"edits": []map[string]any{
+					{"op": "replace", "old": "target: PROXY", "new": "target: DIRECT"},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("sed_file returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["dry_run"] != true || content["changed"] != true || !strings.Contains(content["diff"].(string), "+target: DIRECT") {
+		t.Fatalf("sed_file content = %+v, want dry-run diff", content)
+	}
+	data, err := os.ReadFile("config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "target: PROXY\n" {
+		t.Fatalf("file changed during dry-run: %q", data)
+	}
+}
+
+func TestToolsCallSedFileCanWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("config.yaml", []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "sed_file",
+			"arguments": map[string]any{
+				"path":    "config.yaml",
+				"dry_run": false,
+				"edits": []map[string]any{
+					{"op": "insert_after", "line": 1, "text": "x"},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("sed_file returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["dry_run"] != false || content["changed"] != true {
+		t.Fatalf("sed_file content = %+v, want applied change", content)
+	}
+	data, err := os.ReadFile("config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "a\nx\nb\n" {
+		t.Fatalf("file = %q", data)
 	}
 }
 
