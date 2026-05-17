@@ -83,7 +83,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "subscriptions_status", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -108,6 +108,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscription_nodes_list":   SafeRead,
 		"subscription_nodes_search": SafeRead,
 		"subscriptions_status":      SafeRead,
+		"tools_list":                SafeRead,
 		"virtual_nodes_get":         SafeRead,
 		"virtual_nodes_list":        SafeRead,
 		"config_plan_render":        SafeWrite,
@@ -136,6 +137,38 @@ func TestRegistrySafetyLevels(t *testing.T) {
 				t.Fatalf("run_runtime description missing risk warning: %q", tool.Description)
 			}
 		}
+	}
+}
+
+func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
+	resp := NewServer().Handle(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tools_list","arguments":{}}}`))
+	if resp == nil || resp.Error != nil {
+		t.Fatalf("response error = %+v", resp)
+	}
+	result := marshalToolResult(t, resp.Result)
+	var structured ToolsListResult
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &structured); err != nil {
+		t.Fatal(err)
+	}
+	if structured.Count != len(structured.Tools) {
+		t.Fatalf("count = %d, tools = %d", structured.Count, len(structured.Tools))
+	}
+	byName := map[string]ToolSummary{}
+	for _, tool := range structured.Tools {
+		byName[tool.Name] = tool
+	}
+	if byName["tools_list"].SafetyLevel != SafeRead {
+		t.Fatalf("tools_list safety = %q, want %q", byName["tools_list"].SafetyLevel, SafeRead)
+	}
+	if byName["doctor"].Name == "" || byName["subscriptions_status"].Name == "" {
+		t.Fatalf("tools_list missing expected tools: %+v", byName)
+	}
+	if !strings.Contains(structured.ClientNamingNote, "localclash_doctor") {
+		t.Fatalf("client naming note = %q, want OpenWebUI-style prefix example", structured.ClientNamingNote)
 	}
 }
 

@@ -29,6 +29,18 @@ type ListedTool struct {
 	Annotations map[string]any `json:"annotations,omitempty"`
 }
 
+type ToolSummary struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	SafetyLevel SafetyLevel `json:"safety_level"`
+}
+
+type ToolsListResult struct {
+	Tools            []ToolSummary `json:"tools"`
+	Count            int           `json:"count"`
+	ClientNamingNote string        `json:"client_naming_note,omitempty"`
+}
+
 func Registry() []Tool {
 	tools := []Tool{
 		{Name: "config_base_inspect", SafetyLevel: SafeRead, Description: "Inspect generated base config summary without exposing proxy credentials."},
@@ -39,6 +51,7 @@ func Registry() []Tool {
 		{Name: "subscription_nodes_list", SafetyLevel: SafeRead, Description: "List safe subscription proxy name/type summaries without exposing connection credentials."},
 		{Name: "subscription_nodes_search", SafetyLevel: SafeRead, Description: "Search subscription proxy names and return safe name/type summaries; does not verify network egress location."},
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
+		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
 		{Name: "virtual_nodes_get", SafetyLevel: SafeRead, Description: "Inspect candidates for one node-label virtual node."},
 		{Name: "virtual_nodes_list", SafetyLevel: SafeRead, Description: "List node-label virtual nodes inferred from subscription proxy names."},
 		{Name: "config_plan_render", SafetyLevel: SafeWrite, Description: "Render a candidate Mihomo config from a complete desired overlay into .runtime/plans."},
@@ -74,8 +87,31 @@ func ListedTools() []ListedTool {
 	return out
 }
 
+func ToolSummaries() ToolsListResult {
+	tools := Registry()
+	summaries := make([]ToolSummary, 0, len(tools))
+	for _, tool := range tools {
+		summaries = append(summaries, ToolSummary{
+			Name:        tool.Name,
+			Description: tool.Description,
+			SafetyLevel: tool.SafetyLevel,
+		})
+	}
+	return ToolsListResult{
+		Tools:            summaries,
+		Count:            len(summaries),
+		ClientNamingNote: "Some clients prefix MCP tool names with the server id, for example localclash_doctor.",
+	}
+}
+
 func inputSchemaForTool(name string) map[string]any {
 	switch name {
+	case "tools_list":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties":           map[string]any{},
+		}
 	case "config_plan_render":
 		packIntent := map[string]any{
 			"type":                 "object",

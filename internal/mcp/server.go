@@ -243,6 +243,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionNodesSearch(args)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
+	case "tools_list":
+		return jsonToolResult(ToolSummaries())
 	case "subscriptions_configure":
 		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":

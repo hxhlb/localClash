@@ -30,6 +30,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["subscriptions_status"].SafetyLevel != SafeRead {
 		t.Fatalf("subscriptions_status safety = %q, want %q", byName["subscriptions_status"].SafetyLevel, SafeRead)
 	}
+	if byName["tools_list"].SafetyLevel != SafeRead {
+		t.Fatalf("tools_list safety = %q, want %q", byName["tools_list"].SafetyLevel, SafeRead)
+	}
 	if byName["subscription_nodes_list"].SafetyLevel != SafeRead {
 		t.Fatalf("subscription_nodes_list safety = %q, want %q", byName["subscription_nodes_list"].SafetyLevel, SafeRead)
 	}
