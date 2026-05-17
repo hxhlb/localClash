@@ -519,3 +519,7 @@ Machine-readable output for MCP tools and agent workflows:
 ```bash
 go run . doctor --json
 ```
+
+## License
+
+localClash is released under the MIT License. See [LICENSE](LICENSE).
