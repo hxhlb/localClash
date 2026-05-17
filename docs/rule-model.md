@@ -230,7 +230,8 @@ Current code now has:
 - a localClash user config file model
 - renderer support for selected third-party packs
 - renderer support for inline `custom_rules`
-- MCP draft tools for proxy groups, custom rules, and reviewed config apply
+- MCP patch tools for proxy groups, custom rules, reviewed config apply, and
+  atomic generated config rendering
 
 Current code does not yet have:
 
@@ -242,7 +243,7 @@ Current code does not yet have:
 
 Build this in small steps:
 
-1. Extend MCP draft tools until agents can express common routing intent without
+1. Extend MCP patch tools until agents can express common routing intent without
    editing YAML directly.
 2. Add declarative `rule-packs/*.yaml` for localClash-owned reusable packs.
 3. Add doctor checks for pack parsing, custom rule validity, target validity,

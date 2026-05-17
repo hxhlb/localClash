@@ -43,9 +43,7 @@ type ToolsListResult struct {
 
 func Registry() []Tool {
 	tools := []Tool{
-		{Name: "config_base_inspect", SafetyLevel: SafeRead, Description: "Inspect generated base config summary without exposing proxy credentials."},
-		{Name: "config_intent_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash routing intent. Defaults to durable localclash.yaml; use view=working for subscription/profile context or view=effective_preview for a temporary non-persistent generated preview."},
-		{Name: "config_overlay_inspect", SafetyLevel: SafeRead, Description: "Inspect localClash overlay metadata and summaries."},
+		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash.yaml, generated/mihomo.yaml build artifact, render readiness, and pending patches."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, and localClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},
@@ -58,12 +56,13 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
-		{Name: "config_draft_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config draft by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime. After a successful apply, call config_intent_inspect to verify the durable proxy groups, custom rules, and packs that remain active."},
-		{Name: "config_draft_render", SafetyLevel: SafeWrite, Description: "Render a candidate localClash config draft and Mihomo config from proxy groups, packs, and custom rules. Tool arguments must be a JSON object, not a JSON-encoded string. If packs or custom rules target a new proxy group, include that group in overlay.proxy_groups in the same call; proxy_group_build only validates and returns reusable intent, it does not persist state."},
-		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config draft."},
+		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config patch by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime."},
+		{Name: "config_patch_create", SafetyLevel: SafeWrite, Description: "Create a reviewable config patch and candidate Mihomo config from proxy groups, packs, and custom rules. It does not modify active localclash.yaml or generated/mihomo.yaml."},
+		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated/mihomo.yaml from the current durable localclash.yaml source of truth, subscription, policy, and runtime profile. Does not read patches and does not start runtime."},
+		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config patch."},
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read provider rules for one pack by id, downloading missing provider-cache entries for that pack only."},
-		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_draft_render.overlay.proxy_groups when a draft should use it."},
+		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_create.overlay.proxy_groups when a patch should use it."},
 		{Name: "runtime_profile_configure", SafetyLevel: SafeWrite, Description: "Switch the active Mihomo runtime mode and/or core by writing localclash-runtime.yaml, then rerender generated/mihomo.yaml when the effective subscription is available. This does not edit DNS/TUN details directly and does not start or restart Mihomo."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
@@ -129,14 +128,51 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"properties":           map[string]any{},
 		}
-	case "config_draft_apply":
+	case "config_status":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"draft_id":             map[string]any{"type": "string", "description": "Draft directory id returned by config_draft_render."},
-				"drafts_dir":           map[string]any{"type": "string", "description": "Draft artifact root. Defaults to .runtime/drafts."},
-				"summary_path":         map[string]any{"type": "string", "description": "Optional explicit summary.json path. Use draft_id for normal flows."},
+				"config":               map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash.yaml."},
+				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
+				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"policy":               map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
+				"mode":                 map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
+				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
+				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
+				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.yaml."},
+				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
+				"patches_dir":          map[string]any{"type": "string", "description": "Review patch artifact root. Defaults to .runtime/patches."},
+				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum summary entries per section. Defaults to 20."},
+			},
+		}
+	case "config_render":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"config":               map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash.yaml."},
+				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
+				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
+				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"policy":               map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
+				"mode":                 map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
+				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
+				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
+				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.yaml."},
+				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
+				"force":                map[string]any{"type": "boolean", "description": "Overwrite generated output. Defaults to true because generated/mihomo.yaml is a build artifact."},
+			},
+		}
+	case "config_patch_apply":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"patch_id":             map[string]any{"type": "string", "description": "Patch directory id returned by config_patch_create."},
+				"patches_dir":          map[string]any{"type": "string", "description": "Patch artifact root. Defaults to .runtime/patches."},
+				"summary_path":         map[string]any{"type": "string", "description": "Optional explicit summary.json path. Use patch_id for normal flows."},
 				"config":               map[string]any{"type": "string", "description": "Persistent localClash config path. Defaults to localclash.yaml."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
@@ -147,12 +183,11 @@ func inputSchemaForTool(name string) map[string]any {
 				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
 				"selection":            map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.yaml."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
-				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-draft-apply."},
+				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-patch-apply."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
 			},
-			"required": []string{"draft_id"},
 		}
 	case "nl_file":
 		return map[string]any{
@@ -245,7 +280,7 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "target", "rules"},
 		}
-	case "config_draft_render":
+	case "config_patch_create":
 		matchIntent := map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -307,14 +342,14 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"draft_name":           map[string]any{"type": "string", "description": "Human-readable draft slug prefix."},
+				"patch_name":           map[string]any{"type": "string", "description": "Human-readable patch slug prefix."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
 				"policy":               map[string]any{"type": "string", "description": "Policy YAML path. Defaults to policies/loyalsoldier.yaml."},
 				"mode":                 map[string]any{"type": "string", "description": "Policy render mode. Defaults to the policy default."},
 				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
 				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
-				"drafts_dir":           map[string]any{"type": "string", "description": "Draft artifact root. Defaults to .runtime/drafts."},
-				"config":               map[string]any{"type": "string", "description": "Candidate localClash config filename in the draft. Defaults to localclash.yaml."},
+				"patches_dir":          map[string]any{"type": "string", "description": "Patch artifact root. Defaults to .runtime/patches."},
+				"config":               map[string]any{"type": "string", "description": "Candidate localClash config filename in the patch. Defaults to localclash.yaml."},
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
 				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test. Defaults to true."},
@@ -330,32 +365,6 @@ func inputSchemaForTool(name string) map[string]any {
 				},
 			},
 			"required": []string{"overlay"},
-		}
-	case "config_intent_inspect":
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"view":                 map[string]any{"type": "string", "enum": []string{"durable", "working", "effective_preview"}, "description": "durable reads localclash.yaml only. working adds current subscription/profile/base-policy context. effective_preview renders a temporary non-persistent Mihomo preview without requiring Mihomo to have started."},
-				"config":               map[string]any{"type": "string", "description": "Durable localClash intent config path. Defaults to localclash.yaml."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path used to resolve proxy group selectors. Defaults to subscription.yaml."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
-				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory used to validate pack ids. Defaults to .runtime/rules/packs."},
-				"policy":               map[string]any{"type": "string", "description": "Policy YAML path for working/effective_preview views. Defaults to policies/loyalsoldier.yaml."},
-				"mode":                 map[string]any{"type": "string", "description": "Policy render mode for effective_preview. Defaults to the policy default."},
-				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path for working/effective_preview. Defaults to localclash-runtime.yaml."},
-				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum entries per section. Defaults to 20."},
-			},
-		}
-	case "config_base_inspect", "config_overlay_inspect":
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"config": map[string]any{"type": "string", "description": "Mihomo config YAML path. Defaults to generated/mihomo.yaml."},
-				"limit":  map[string]any{"type": "integer", "minimum": 1, "description": "Maximum summary entries per section."},
-			},
 		}
 	case "run_runtime":
 		return map[string]any{

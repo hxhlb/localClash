@@ -108,7 +108,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -127,9 +127,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 	want := map[string]SafetyLevel{
 		"doctor":                    SafeRead,
 		"environment_inspect":       SafeRead,
-		"config_base_inspect":       SafeRead,
-		"config_intent_inspect":     SafeRead,
-		"config_overlay_inspect":    SafeRead,
+		"config_status":             SafeRead,
 		"nl_file":                   SafeRead,
 		"pack_rules_query":          SafeRead,
 		"packs_get":                 SafeRead,
@@ -140,8 +138,9 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"runtime_profile_status":    SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
-		"config_draft_apply":        SafeWrite,
-		"config_draft_render":       SafeWrite,
+		"config_patch_apply":        SafeWrite,
+		"config_patch_create":       SafeWrite,
+		"config_render":             SafeWrite,
 		"proxy_group_build":         SafeWrite,
 		"custom_rules_build":        SafeWrite,
 		"pack_rules_prefetch":       SafeWrite,
@@ -295,7 +294,7 @@ func TestToolsCallRuntimeProfileConfigureRerendersGeneratedConfig(t *testing.T) 
 	}
 }
 
-func TestToolsCallConfigIntentInspectEffectivePreviewRendersWithoutGeneratedConfig(t *testing.T) {
+func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	generated := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
 	server := NewServerWithState(appinit.RuntimeState{
@@ -315,39 +314,24 @@ func TestToolsCallConfigIntentInspectEffectivePreviewRendersWithoutGeneratedConf
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "config_intent_inspect",
-			"arguments": map[string]any{"view": "effective_preview", "limit": 5},
+			"name":      "config_render",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_intent_inspect returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_render returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["view"] != "effective_preview" {
-		t.Fatalf("view = %v, want effective_preview", content["view"])
+	if content["rendered"] != true || content["source"] != "base" {
+		t.Fatalf("content = %+v, want rendered base config", content)
 	}
-	if content["subscription_available"] != true || content["preview_rendered"] != true {
-		t.Fatalf("preview content = %+v, want available rendered preview", content)
-	}
-	intent := content["intent"].(map[string]any)
-	if intent["exists"] != false {
-		t.Fatalf("intent = %+v, want no durable localclash intent", intent)
-	}
-	effective := content["effective_summary"].(map[string]any)
-	if int(effective["rules_count"].(float64)) <= 0 || int(effective["proxies_count"].(float64)) != 1 {
-		t.Fatalf("effective summary = %+v, want rules and one proxy", effective)
-	}
-	baseline := content["local_safety_baseline"].(map[string]any)
-	if int(baseline["rule_count"].(float64)) == 0 {
-		t.Fatalf("baseline = %+v, want local safety rules", baseline)
-	}
-	if _, err := os.Stat(generated); !os.IsNotExist(err) {
-		t.Fatalf("generated config should not be written, stat err=%v", err)
+	if _, err := os.Stat(generated); err != nil {
+		t.Fatalf("generated config should be written, stat err=%v", err)
 	}
 }
 
-func TestToolsCallConfigIntentInspectEffectivePreviewReportsMissingSubscription(t *testing.T) {
+func TestToolsCallConfigRenderReportsMissingSubscription(t *testing.T) {
 	dir := t.TempDir()
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
@@ -365,17 +349,21 @@ func TestToolsCallConfigIntentInspectEffectivePreviewReportsMissingSubscription(
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "config_intent_inspect",
-			"arguments": map[string]any{"view": "effective_preview"},
+			"name":      "config_render",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_intent_inspect returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_render returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["subscription_available"] != false || content["preview_rendered"] == true {
-		t.Fatalf("preview content = %+v, want missing subscription without render", content)
+	if content["rendered"] != false {
+		t.Fatalf("content = %+v, want not rendered", content)
+	}
+	missing := content["missing_inputs"].([]any)
+	if len(missing) == 0 || missing[0] != "subscription" {
+		t.Fatalf("missing = %+v, want subscription", missing)
 	}
 	actions := content["next_actions"].([]any)
 	if len(actions) == 0 {
@@ -662,7 +650,7 @@ packs:
 	}
 }
 
-func TestToolsCallConfigIntentInspectReturnsDurableProxyGroups(t *testing.T) {
+func TestToolsCallConfigStatusReturnsDurableProxyGroups(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
 	localClashConfig := filepath.Join(dir, "localclash.yaml")
@@ -691,32 +679,87 @@ packs:
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_intent_inspect",
+			"name": "config_status",
 			"arguments": map[string]any{
 				"config":       localClashConfig,
 				"subscription": paths.subscription,
+				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 			},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_intent_inspect returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_status returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["exists"] != true || content["valid"] != true || content["resolved"] != true {
-		t.Fatalf("intent status = %+v, want exists/valid/resolved", content)
+	intent := content["intent"].(map[string]any)
+	if intent["exists"] != true || intent["valid"] != true || intent["resolved"] != true {
+		t.Fatalf("intent status = %+v, want exists/valid/resolved", intent)
 	}
-	proxyGroups := content["proxy_groups"].([]any)
+	proxyGroups := intent["proxy_groups"].([]any)
 	if len(proxyGroups) != 1 || proxyGroups[0].(map[string]any)["id"] != "AI" {
 		t.Fatalf("proxy_groups = %+v, want AI", proxyGroups)
 	}
+	render := content["render"].(map[string]any)
+	if render["recommended_tool"] != "config_render" {
+		t.Fatalf("render = %+v, want config_render recommendation", render)
+	}
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		t.Fatalf("config_intent_inspect structured content is not serializable: %v", err)
+		t.Fatalf("config_status structured content is not serializable: %v", err)
 	}
 	if strings.Contains(string(data), "secret") || strings.Contains(string(data), "sg.example.com") {
-		t.Fatalf("config_intent_inspect leaked subscription details in %s", data)
+		t.Fatalf("config_status leaked subscription details in %s", data)
+	}
+}
+
+func TestToolsCallConfigRenderUsesDurableSourceOfTruth(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	dir := filepath.Dir(paths.subscription)
+	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	selection := filepath.Join(dir, "localclash-packs.yaml")
+	generated := filepath.Join(dir, "generated", "mihomo.yaml")
+	writeMCPFile(t, localClashConfig, `version: 1
+proxy_groups:
+  AI:
+    mode: manual
+    nodes: [SG 01]
+packs:
+  - id: blackmatrix7_OpenAI
+    target: AI
+`)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_render",
+			"arguments": map[string]any{
+				"config":       localClashConfig,
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+				"selection":    selection,
+				"output":       generated,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_render returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["source"] != "durable_state" || content["selection"] != selection {
+		t.Fatalf("content = %+v, want durable source and selection", content)
+	}
+	rendered := readMCPFile(t, generated)
+	if !strings.Contains(rendered, "RULE-SET,blackmatrix7_OpenAI,AI") || !strings.Contains(rendered, "name: AI") {
+		t.Fatalf("generated config missing durable pack/group:\n%s", rendered)
+	}
+	selectionText := readMCPFile(t, selection)
+	if !strings.Contains(selectionText, "pack: OpenAI") || !strings.Contains(selectionText, "target: AI") {
+		t.Fatalf("selection not derived from durable config:\n%s", selectionText)
 	}
 }
 
@@ -863,20 +906,20 @@ func TestToolsCallSubscriptionNodesSearchReturnsNameMatches(t *testing.T) {
 	}
 }
 
-func TestToolsCallConfigDraftRenderReturnsSerializableResult(t *testing.T) {
+func TestToolsCallConfigPatchCreateReturnsSerializableResult(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_draft_render",
+			"name": "config_patch_create",
 			"arguments": map[string]any{
-				"draft_name":   "ai-test",
+				"patch_name":   "ai-test",
 				"subscription": paths.subscription,
 				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
-				"drafts_dir":   paths.outputDir,
+				"patches_dir":  paths.outputDir,
 				"test":         false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
@@ -890,18 +933,18 @@ func TestToolsCallConfigDraftRenderReturnsSerializableResult(t *testing.T) {
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_draft_render returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
 	if content["valid"] != true {
-		t.Fatalf("config_draft_render valid = %v, want true", content["valid"])
+		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
 	}
 	if _, err := os.Stat(content["output"].(string)); err != nil {
 		t.Fatalf("plan output missing: %v", err)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("config_draft_render structured content is not serializable: %v", err)
+		t.Fatalf("config_patch_create structured content is not serializable: %v", err)
 	}
 }
 
@@ -967,20 +1010,20 @@ func TestToolsCallCustomRulesBuildReturnsReusableIntent(t *testing.T) {
 	}
 }
 
-func TestToolsCallConfigDraftRenderSupportsCustomRulesWithoutPacks(t *testing.T) {
+func TestToolsCallConfigPatchCreateSupportsCustomRulesWithoutPacks(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_draft_render",
+			"name": "config_patch_create",
 			"arguments": map[string]any{
-				"draft_name":   "huggingface-temp",
+				"patch_name":   "huggingface-temp",
 				"subscription": paths.subscription,
 				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
-				"drafts_dir":   paths.outputDir,
+				"patches_dir":  paths.outputDir,
 				"test":         false,
 				"overlay": map[string]any{
 					"custom_rules": []map[string]any{
@@ -1000,12 +1043,12 @@ func TestToolsCallConfigDraftRenderSupportsCustomRulesWithoutPacks(t *testing.T)
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_draft_render returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
 	if content["valid"] != true {
-		t.Fatalf("config_draft_render valid = %v, want true", content["valid"])
+		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
 	}
 	config := readMCPFile(t, content["output"].(string))
 	if !strings.Contains(config, "DOMAIN-SUFFIX,huggingface.co,TempLine") || !strings.Contains(config, "name: TempLine") {
@@ -1013,20 +1056,20 @@ func TestToolsCallConfigDraftRenderSupportsCustomRulesWithoutPacks(t *testing.T)
 	}
 }
 
-func TestToolsCallConfigDraftApplyPersistsSelectionAndGeneratedConfig(t *testing.T) {
+func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	renderResp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_draft_render",
+			"name": "config_patch_create",
 			"arguments": map[string]any{
-				"draft_name":   "ai-test",
+				"patch_name":   "ai-test",
 				"subscription": paths.subscription,
 				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
-				"drafts_dir":   paths.outputDir,
+				"patches_dir":  paths.outputDir,
 				"test":         false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
@@ -1040,7 +1083,7 @@ func TestToolsCallConfigDraftApplyPersistsSelectionAndGeneratedConfig(t *testing
 		},
 	})
 	if renderResp.Error != nil {
-		t.Fatalf("config_draft_render returned JSON-RPC error: %+v", renderResp.Error)
+		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", renderResp.Error)
 	}
 	renderResult := marshalToolResult(t, renderResp.Result)
 	plan := renderResult.StructuredContent.(map[string]any)
@@ -1049,21 +1092,21 @@ func TestToolsCallConfigDraftApplyPersistsSelectionAndGeneratedConfig(t *testing
 		"id":      2,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_draft_apply",
+			"name": "config_patch_apply",
 			"arguments": map[string]any{
-				"draft_id":   plan["draft_id"],
-				"drafts_dir": paths.outputDir,
-				"test":       false,
+				"patch_id":    plan["patch_id"],
+				"patches_dir": paths.outputDir,
+				"test":        false,
 			},
 		},
 	})
 	if applyResp.Error != nil {
-		t.Fatalf("config_draft_apply returned JSON-RPC error: %+v", applyResp.Error)
+		t.Fatalf("config_patch_apply returned JSON-RPC error: %+v", applyResp.Error)
 	}
 	result := marshalToolResult(t, applyResp.Result)
 	content := result.StructuredContent.(map[string]any)
 	if content["applied"] != true || content["valid"] != true {
-		t.Fatalf("config_draft_apply content = %+v, want applied valid", content)
+		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
 	if _, err := os.Stat("generated/mihomo.yaml"); err != nil {
 		t.Fatalf("generated config missing after apply: %v", err)
@@ -1072,7 +1115,7 @@ func TestToolsCallConfigDraftApplyPersistsSelectionAndGeneratedConfig(t *testing
 		t.Fatalf("localclash config missing after apply: %v", err)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("config_draft_apply structured content is not serializable: %v", err)
+		t.Fatalf("config_patch_apply structured content is not serializable: %v", err)
 	}
 	selection := readMCPFile(t, "localclash-packs.yaml")
 	if !strings.Contains(selection, "pack: OpenAI") || !strings.Contains(selection, "target: AI") {
@@ -1080,19 +1123,19 @@ func TestToolsCallConfigDraftApplyPersistsSelectionAndGeneratedConfig(t *testing
 	}
 }
 
-func TestToolsCallConfigDraftRenderInvalidInputReturnsError(t *testing.T) {
+func TestToolsCallConfigPatchCreateInvalidInputReturnsError(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_draft_render",
+			"name": "config_patch_create",
 			"arguments": map[string]any{
 				"subscription": paths.subscription,
 				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
-				"drafts_dir":   paths.outputDir,
+				"patches_dir":  paths.outputDir,
 				"test":         false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
@@ -1103,7 +1146,7 @@ func TestToolsCallConfigDraftRenderInvalidInputReturnsError(t *testing.T) {
 		},
 	})
 	if resp.Error == nil {
-		t.Fatal("expected config_draft_render JSON-RPC error")
+		t.Fatal("expected config_patch_create JSON-RPC error")
 	}
 	if !strings.Contains(resp.Error.Message, "missing_pack") {
 		t.Fatalf("error = %+v, want missing pack", resp.Error)
@@ -1116,7 +1159,7 @@ func TestToolsCallRejectsStringifiedArguments(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "config_draft_render",
+			"name":      "config_patch_create",
 			"arguments": `{"overlay":{"packs":[{"id":"sukkaw_ai","target":"AI_US_JP"}]}}`,
 		},
 	})
@@ -1369,55 +1412,61 @@ func TestToolsCallPackRulesPrefetchThenQuery(t *testing.T) {
 	}
 }
 
-func TestToolsCallConfigBaseInspectReturnsSerializableResult(t *testing.T) {
+func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 	config := setupMCPInspectConfig(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_base_inspect",
+			"name": "config_status",
 			"arguments": map[string]any{
-				"config": config,
+				"output": config,
 			},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_base_inspect returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_status returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["layer"] != "base" || content["modifiable"] != false {
-		t.Fatalf("content = %+v, want base non-modifiable", content)
+	generated := content["generated"].(map[string]any)
+	if generated["present"] != true {
+		t.Fatalf("generated = %+v, want present", generated)
+	}
+	summary := content["generated_summary"].(map[string]any)
+	if int(summary["proxies_count"].(float64)) != 1 {
+		t.Fatalf("summary = %+v, want one proxy", summary)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("config_base_inspect structured content is not serializable: %v", err)
+		t.Fatalf("config_status structured content is not serializable: %v", err)
 	}
 }
 
-func TestToolsCallConfigOverlayInspectReturnsSerializableResult(t *testing.T) {
+func TestToolsCallConfigStatusReturnsOverlaySummary(t *testing.T) {
 	config := setupMCPInspectConfig(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_overlay_inspect",
+			"name": "config_status",
 			"arguments": map[string]any{
-				"config": config,
+				"output": config,
 			},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("config_overlay_inspect returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_status returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["layer"] != "overlay" || content["modifiable"] != true {
-		t.Fatalf("content = %+v, want overlay modifiable", content)
+	overlay := content["overlay"].(map[string]any)
+	if overlay["layer"] != "overlay" || overlay["modifiable"] != true {
+		t.Fatalf("overlay = %+v, want overlay modifiable", overlay)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("config_overlay_inspect structured content is not serializable: %v", err)
+		t.Fatalf("config_status structured content is not serializable: %v", err)
 	}
 }
 
@@ -1828,8 +1877,12 @@ func callHandleWithServer(t *testing.T, server *Server, value any) *rpcResponse 
 
 func removedMCPTools() []string {
 	return []string{
+		"config_base_inspect",
+		"config_intent_inspect",
+		"config_overlay_inspect",
+		"config_draft_apply",
+		"config_draft_render",
 		"config_test",
-		"config_render",
 		"config_plan_apply",
 		"config_plan_render",
 		"inspect_generated_config",

@@ -357,12 +357,14 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return toolResult{}, fmt.Errorf("tool arguments for %q must be a JSON object, not a JSON string or array; send \"arguments\":{\"field\":\"value\"}, not \"arguments\":\"{...}\"", call.Name)
 	}
 	switch call.Name {
-	case "config_base_inspect":
-		return callConfigBaseInspect(args)
-	case "config_intent_inspect":
-		return s.callConfigIntentInspect(args)
-	case "config_overlay_inspect":
-		return callConfigOverlayInspect(args)
+	case "config_status":
+		return s.callConfigStatus(args)
+	case "config_render":
+		return s.callConfigRender(args)
+	case "config_patch_apply":
+		return s.callConfigPatchApply(ctx, args)
+	case "config_patch_create":
+		return s.callConfigPatchCreate(ctx, args)
 	case "doctor":
 		return s.callDoctor(ctx, args)
 	case "environment_inspect":
@@ -401,10 +403,6 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callCustomRulesBuild(args)
 	case "runtime_profile_configure":
 		return s.callRuntimeProfileConfigure(args)
-	case "config_draft_apply":
-		return s.callConfigDraftApply(ctx, args)
-	case "config_draft_render":
-		return s.callConfigDraftRender(ctx, args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
 	case "sed_file":
@@ -520,7 +518,7 @@ func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, erro
 		view = "durable"
 	}
 	if view != "durable" && view != "working" && view != "effective_preview" {
-		return toolResult{}, fmt.Errorf("unsupported config_intent_inspect view %q", in.View)
+		return toolResult{}, fmt.Errorf("unsupported config intent view %q", in.View)
 	}
 	s.applyConfigIntentInspectDefaults(&in.Subscription, &in.Policy, &in.RulesCache, &in.RuntimeProfile, &in.SubscriptionConfig, &in.SubscriptionRuntime)
 	result, err := configinspect.InspectIntent(configinspect.IntentOptions{
@@ -718,7 +716,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	result.Overlay = &overlay
 	switch {
 	case !in.Intent.Exists:
-		result.NextActions = append(result.NextActions, "no durable localClash overlay exists; effective rules are local safety baseline plus base policy only", "use proxy_group_build, packs_list or pack_rules_query, then config_draft_render and config_draft_apply to add custom routing")
+		result.NextActions = append(result.NextActions, "no durable localClash overlay exists; effective rules are local safety baseline plus base policy only", "use proxy_group_build, packs_list or pack_rules_query, then config_patch_create and config_patch_apply to add custom routing")
 	case in.Intent.Resolved:
 		result.NextActions = append(result.NextActions, "review effective_summary and overlay before starting or applying runtime changes")
 	default:
@@ -858,15 +856,228 @@ func customRuleLinesForBuild(lines []localconfig.CustomRuleLine) []rules.CustomR
 	return out
 }
 
-func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
+type configToolInput struct {
+	Config              string `json:"config"`
+	Subscription        string `json:"subscription"`
+	SubscriptionConfig  string `json:"subscription_config"`
+	SubscriptionRuntime string `json:"subscription_runtime"`
+	Policy              string `json:"policy"`
+	Mode                string `json:"mode"`
+	RulesCache          string `json:"rules_cache"`
+	RuntimeProfile      string `json:"runtime_profile"`
+	Selection           string `json:"selection"`
+	Output              string `json:"output"`
+	PatchesDir          string `json:"patches_dir"`
+	Limit               int    `json:"limit"`
+	Force               *bool  `json:"force"`
+}
+
+type configFileStatus struct {
+	Path    string `json:"path"`
+	Present bool   `json:"present"`
+	Size    int64  `json:"size,omitempty"`
+	ModTime string `json:"mod_time,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type configRenderState struct {
+	Needed          bool     `json:"needed"`
+	Stale           bool     `json:"stale"`
+	CanRender       bool     `json:"can_render"`
+	MissingInputs   []string `json:"missing_inputs,omitempty"`
+	RecommendedTool string   `json:"recommended_tool,omitempty"`
+}
+
+type configPatchSummary struct {
+	PatchID     string `json:"patch_id"`
+	SummaryPath string `json:"summary_path"`
+	Valid       *bool  `json:"valid,omitempty"`
+}
+
+func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
+	var in configToolInput
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	s.applyConfigToolDefaults(&in)
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	intent, err := configinspect.InspectIntent(configinspect.IntentOptions{
+		ConfigPath:          in.Config,
+		Subscription:        in.Subscription,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+		RulesCache:          in.RulesCache,
+		Limit:               limit,
+	})
+	if err != nil {
+		return toolResult{}, err
+	}
+	generated := inspectConfigFile(in.Output)
+	status := map[string]any{
+		"model":           "localclash.yaml is source_of_truth; generated/mihomo.yaml is build_artifact; .runtime/patches contains review_artifacts",
+		"source_of_truth": inspectConfigFile(in.Config),
+		"generated":       generated,
+		"subscription":    inspectConfigFile(in.Subscription),
+		"policy":          inspectConfigFile(in.Policy),
+		"runtime_profile": inspectConfigFile(in.RuntimeProfile),
+		"selection":       inspectConfigFile(in.Selection),
+		"inputs": map[string]any{
+			"config":               in.Config,
+			"subscription":         in.Subscription,
+			"subscription_config":  in.SubscriptionConfig,
+			"subscription_runtime": in.SubscriptionRuntime,
+			"policy":               in.Policy,
+			"mode":                 in.Mode,
+			"rules_cache":          in.RulesCache,
+			"runtime_profile":      in.RuntimeProfile,
+			"selection":            in.Selection,
+			"output":               in.Output,
+			"patches_dir":          in.PatchesDir,
+		},
+		"intent":  intent,
+		"render":  s.configRenderState(in, intent, generated.Present),
+		"patches": listConfigPatches(in.PatchesDir, limit),
+	}
+	if generated.Present {
+		if base, err := configinspect.InspectBase(configinspect.Options{ConfigPath: in.Output, Limit: limit}); err == nil {
+			status["generated_summary"] = base.Summary
+		} else {
+			status["generated_error"] = err.Error()
+		}
+		if overlay, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: in.Output, Limit: limit}); err == nil {
+			status["overlay"] = overlay
+		}
+	}
+	status["next_actions"] = configStatusNextActions(status["render"].(configRenderState))
+	return jsonToolResult(status)
+}
+
+func (s *Server) configRenderState(in configToolInput, intent configinspect.IntentResult, generatedPresent bool) configRenderState {
+	missing := missingRenderInputs(in)
+	canRender := len(missing) == 0 && (!intent.Exists || intent.Resolved)
+	stale := !generatedPresent || isGeneratedStale(in.Output, []string{in.Config, in.Subscription, in.Policy, in.RuntimeProfile, in.Selection})
+	state := configRenderState{
+		Needed:        !generatedPresent || stale,
+		Stale:         generatedPresent && stale,
+		CanRender:     canRender,
+		MissingInputs: missing,
+	}
+	if state.Needed && state.CanRender {
+		state.RecommendedTool = "config_render"
+	}
+	return state
+}
+
+func configStatusNextActions(render configRenderState) []string {
+	if len(render.MissingInputs) > 0 {
+		actions := []string{}
+		for _, missing := range render.MissingInputs {
+			switch missing {
+			case "subscription":
+				actions = append(actions, "call subscriptions_status", "call subscriptions_refresh to create subscription.yaml")
+			case "policy":
+				actions = append(actions, "restore or provide the localClash policy file")
+			}
+		}
+		return actions
+	}
+	if !render.CanRender {
+		return []string{"inspect intent.resolve_error in config_status and repair localclash.yaml or subscription node references before rendering"}
+	}
+	if render.RecommendedTool != "" {
+		return []string{"call " + render.RecommendedTool + " to rebuild generated/mihomo.yaml from durable localClash state"}
+	}
+	return []string{"generated/mihomo.yaml is present; use config_patch_create for reviewed routing changes"}
+}
+
+func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
+	var in configToolInput
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	s.applyConfigToolDefaults(&in)
+	missing := missingRenderInputs(in)
+	if len(missing) > 0 {
+		return jsonToolResult(map[string]any{
+			"rendered":       false,
+			"missing_inputs": missing,
+			"next_actions":   configStatusNextActions(configRenderState{MissingInputs: missing}),
+		})
+	}
+	force := true
+	if in.Force != nil {
+		force = *in.Force
+	}
+	result, err := renderCurrentConfig(in, force)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func renderCurrentConfig(in configToolInput, force bool) (map[string]any, error) {
+	selectionPath := ""
+	source := "base"
+	warnings := []string{}
+	if fileExists(in.Config) {
+		config, err := localconfig.Load(in.Config)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+			Config:              config,
+			SubscriptionPath:    in.Subscription,
+			SubscriptionConfig:  in.SubscriptionConfig,
+			SubscriptionRuntime: in.SubscriptionRuntime,
+			RulesCache:          in.RulesCache,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := localconfig.WriteSelection(in.Selection, resolved.Selection); err != nil {
+			return nil, err
+		}
+		selectionPath = in.Selection
+		source = "durable_state"
+		warnings = append(warnings, resolved.Warnings...)
+	}
+	result, err := configrender.Render(configrender.Options{
+		SourcePath:         in.Subscription,
+		PolicyPath:         in.Policy,
+		Mode:               in.Mode,
+		OutputPath:         in.Output,
+		Force:              force,
+		PacksSelectionPath: selectionPath,
+		RulesCacheDir:      in.RulesCache,
+		RuntimeProfilePath: in.RuntimeProfile,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"rendered":        true,
+		"source":          source,
+		"source_of_truth": in.Config,
+		"selection":       selectionPath,
+		"output":          in.Output,
+		"render":          result,
+		"patches_ignored": true,
+		"warnings":        warnings,
+	}, nil
+}
+
+func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		DraftName            string                   `json:"draft_name"`
+		PatchName            string                   `json:"patch_name"`
 		Subscription         string                   `json:"subscription"`
 		Policy               string                   `json:"policy"`
 		Mode                 string                   `json:"mode"`
 		RulesCache           string                   `json:"rules_cache"`
 		RuntimeProfileConfig string                   `json:"runtime_profile"`
-		OutputDir            string                   `json:"drafts_dir"`
+		OutputDir            string                   `json:"patches_dir"`
 		ConfigPath           string                   `json:"config"`
 		SubscriptionConfig   string                   `json:"subscription_config"`
 		SubscriptionRuntime  string                   `json:"subscription_runtime"`
@@ -903,7 +1114,7 @@ func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := configplan.Render(ctx, configplan.Options{
-		PlanName:            in.DraftName,
+		PlanName:            in.PatchName,
 		Subscription:        in.Subscription,
 		Policy:              in.Policy,
 		Mode:                in.Mode,
@@ -922,10 +1133,10 @@ func (s *Server) callConfigDraftRender(ctx context.Context, args json.RawMessage
 	return jsonToolResult(result)
 }
 
-func (s *Server) callConfigDraftApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		DraftID              string `json:"draft_id"`
-		DraftsDir            string `json:"drafts_dir"`
+		PatchID              string `json:"patch_id"`
+		PatchesDir           string `json:"patches_dir"`
 		SummaryPath          string `json:"summary_path"`
 		Subscription         string `json:"subscription"`
 		Policy               string `json:"policy"`
@@ -978,8 +1189,8 @@ func (s *Server) callConfigDraftApply(ctx context.Context, args json.RawMessage)
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := configplan.Apply(ctx, configplan.ApplyOptions{
-		PlanID:              in.DraftID,
-		PlansDir:            in.DraftsDir,
+		PlanID:              in.PatchID,
+		PlansDir:            in.PatchesDir,
 		SummaryPath:         in.SummaryPath,
 		Subscription:        in.Subscription,
 		Policy:              in.Policy,
@@ -1506,13 +1717,13 @@ func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subsc
 			impact.State = "stale_exact_nodes"
 			impact.Error = err.Error()
 			impact.MissingNodes = append([]string{}, missingNodes.Nodes...)
-			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector", "call proxy_group_build", "call config_draft_render", "call config_draft_apply after review"}
+			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
 			return impact
 		}
 		impact.State = "requires_agent_replan"
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
-		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call proxy_group_build", "call config_draft_render", "call config_draft_apply after review"}
+		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
 		return impact
 	}
 	impact.State = "auto_applied"
@@ -1682,57 +1893,6 @@ func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessag
 	return jsonToolResult(result)
 }
 
-func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Source               string `json:"source"`
-		Policy               string `json:"policy"`
-		Mode                 string `json:"mode"`
-		Output               string `json:"output"`
-		Force                bool   `json:"force"`
-		PacksSelection       string `json:"packs_selection"`
-		RulesCache           string `json:"rules_cache"`
-		RuntimeProfileConfig string `json:"runtime_profile"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return toolResult{}, err
-	}
-	opts := configrender.Options{
-		SourcePath:         in.Source,
-		PolicyPath:         in.Policy,
-		Mode:               in.Mode,
-		OutputPath:         in.Output,
-		Force:              in.Force,
-		PacksSelectionPath: in.PacksSelection,
-		RulesCacheDir:      in.RulesCache,
-		RuntimeProfilePath: in.RuntimeProfileConfig,
-	}
-	if s.state != nil {
-		if opts.SourcePath == "" {
-			opts.SourcePath = s.state.Paths.SubscriptionPath
-		}
-		if opts.PolicyPath == "" {
-			opts.PolicyPath = s.state.Paths.PolicyPath
-		}
-		if opts.OutputPath == "" {
-			opts.OutputPath = s.state.Paths.GeneratedConfig
-		}
-		if opts.RulesCacheDir == "" {
-			opts.RulesCacheDir = s.state.Paths.RulesCacheDir
-		}
-		if opts.RuntimeProfilePath == "" {
-			opts.RuntimeProfilePath = s.state.Paths.RuntimeProfilePath
-		}
-		if opts.OutputPath == s.state.Paths.GeneratedConfig && s.state.Config.Rendered {
-			opts.Force = true
-		}
-	}
-	result, err := configrender.Render(opts)
-	if err != nil {
-		return toolResult{}, err
-	}
-	return jsonToolResult(result)
-}
-
 func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string `json:"config"`
@@ -1788,19 +1948,9 @@ func (s *Server) ensureRunnableConfig(configPath string) error {
 		}
 		return fmt.Errorf("effective subscription is unavailable; call subscriptions_refresh before run_runtime")
 	}
-	opts := configrender.Options{
-		SourcePath:         s.state.Paths.SubscriptionPath,
-		PolicyPath:         s.state.Paths.PolicyPath,
-		OutputPath:         configPath,
-		RulesCacheDir:      s.state.Paths.RulesCacheDir,
-		RuntimeProfilePath: s.state.Paths.RuntimeProfilePath,
-		Force:              true,
-		PacksSelectionPath: "",
-	}
-	if s.state.Paths.PacksSelectionPath != "" && fileExists(s.state.Paths.PacksSelectionPath) {
-		opts.PacksSelectionPath = s.state.Paths.PacksSelectionPath
-	}
-	if _, err := configrender.Render(opts); err != nil {
+	in := configToolInput{Output: configPath}
+	s.applyConfigToolDefaults(&in)
+	if _, err := renderCurrentConfig(in, true); err != nil {
 		return fmt.Errorf("render %s: %w", configPath, err)
 	}
 	return nil
@@ -1820,6 +1970,109 @@ func runtimeErrorResult(message string) map[string]any {
 			"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
 		},
 	}
+}
+
+func (s *Server) applyConfigToolDefaults(in *configToolInput) {
+	setDefault := func(value *string, fallback string) {
+		if strings.TrimSpace(*value) == "" {
+			*value = fallback
+		}
+	}
+	if s.state != nil {
+		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
+		setDefault(&in.Policy, s.state.Paths.PolicyPath)
+		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
+		setDefault(&in.RuntimeProfile, s.state.Paths.RuntimeProfilePath)
+		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
+		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
+		setDefault(&in.Output, s.state.Paths.GeneratedConfig)
+		if s.state.Paths.PacksSelectionPath != "" {
+			setDefault(&in.Selection, s.state.Paths.PacksSelectionPath)
+		}
+	}
+	setDefault(&in.Config, "localclash.yaml")
+	setDefault(&in.Subscription, "subscription.yaml")
+	setDefault(&in.Policy, "policies/loyalsoldier.yaml")
+	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
+	setDefault(&in.RuntimeProfile, runtimeprofile.DefaultPath)
+	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.yaml")
+	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
+	setDefault(&in.Selection, "localclash-packs.yaml")
+	setDefault(&in.Output, filepath.Join("generated", "mihomo.yaml"))
+	setDefault(&in.PatchesDir, filepath.Join(".runtime", "patches"))
+}
+
+func missingRenderInputs(in configToolInput) []string {
+	var missing []string
+	if !fileExists(in.Subscription) {
+		missing = append(missing, "subscription")
+	}
+	if !fileExists(in.Policy) {
+		missing = append(missing, "policy")
+	}
+	return missing
+}
+
+func inspectConfigFile(path string) configFileStatus {
+	status := configFileStatus{Path: path}
+	info, err := os.Stat(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			status.Error = err.Error()
+		}
+		return status
+	}
+	status.Present = true
+	status.Size = info.Size()
+	status.ModTime = info.ModTime().UTC().Format(time.RFC3339)
+	return status
+}
+
+func isGeneratedStale(output string, sources []string) bool {
+	outputInfo, err := os.Stat(output)
+	if err != nil {
+		return true
+	}
+	for _, source := range sources {
+		info, err := os.Stat(source)
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(outputInfo.ModTime()) {
+			return true
+		}
+	}
+	return false
+}
+
+func listConfigPatches(root string, limit int) []configPatchSummary {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() > entries[j].Name() })
+	var out []configPatchSummary
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		patchID := entry.Name()
+		summaryPath := filepath.Join(root, patchID, "summary.json")
+		item := configPatchSummary{PatchID: patchID, SummaryPath: summaryPath}
+		if data, err := os.ReadFile(summaryPath); err == nil {
+			var summary struct {
+				Valid bool `json:"valid"`
+			}
+			if json.Unmarshal(data, &summary) == nil {
+				item.Valid = &summary.Valid
+			}
+		}
+		out = append(out, item)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func fileExists(path string) bool {
@@ -1879,7 +2132,7 @@ func (s *Server) callRuntimeProfileConfigure(args json.RawMessage) (toolResult, 
 			result.NextActions = []string{
 				"call subscriptions_status",
 				"call subscriptions_refresh if subscription.yaml is unavailable",
-				"call config_draft_apply after routing intent changes, or rerun runtime_profile_configure after subscription state is ready",
+				"call config_patch_apply after routing changes, or rerun runtime_profile_configure after subscription state is ready",
 			}
 		} else if renderResult != nil {
 			result.Rendered = true
@@ -1901,21 +2154,13 @@ func (s *Server) renderGeneratedConfigWithRuntimeProfile(profilePath string) (*c
 	if s.state == nil || !fileExists(s.state.Paths.SubscriptionPath) {
 		return nil, fmt.Errorf("effective subscription is unavailable; call subscriptions_refresh before rendering generated config")
 	}
-	opts := configrender.Options{
-		SourcePath:         s.state.Paths.SubscriptionPath,
-		PolicyPath:         s.state.Paths.PolicyPath,
-		OutputPath:         s.state.Paths.GeneratedConfig,
-		RulesCacheDir:      s.state.Paths.RulesCacheDir,
-		RuntimeProfilePath: profilePath,
-		Force:              true,
-	}
-	if s.state.Paths.PacksSelectionPath != "" && fileExists(s.state.Paths.PacksSelectionPath) {
-		opts.PacksSelectionPath = s.state.Paths.PacksSelectionPath
-	}
-	result, err := configrender.Render(opts)
+	in := configToolInput{RuntimeProfile: profilePath}
+	s.applyConfigToolDefaults(&in)
+	rendered, err := renderCurrentConfig(in, true)
 	if err != nil {
 		return nil, err
 	}
+	result := rendered["render"].(configrender.Result)
 	return &result, nil
 }
 

@@ -84,7 +84,7 @@ type OverlayProxyGroupIntent struct {
 type OverlayCustomRuleIntent = localconfig.CustomRule
 
 type Result struct {
-	PlanID      string           `json:"draft_id"`
+	PlanID      string           `json:"patch_id"`
 	Output      string           `json:"output"`
 	SummaryPath string           `json:"summary_path"`
 	ConfigPath  string           `json:"config_path"`
@@ -108,7 +108,7 @@ type PlanInputs struct {
 
 type ApplyResult struct {
 	Applied       bool                `json:"applied"`
-	PlanID        string              `json:"draft_id"`
+	PlanID        string              `json:"patch_id"`
 	SummaryPath   string              `json:"summary_path"`
 	ConfigPath    string              `json:"config_path"`
 	SelectionPath string              `json:"selection_path"`
@@ -377,7 +377,7 @@ func normalizeOptions(opts Options) Options {
 		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	if opts.OutputDir == "" {
-		opts.OutputDir = filepath.Join(".runtime", "drafts")
+		opts.OutputDir = filepath.Join(".runtime", "patches")
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "localclash.yaml"
@@ -402,7 +402,7 @@ func normalizeOptions(opts Options) Options {
 
 func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 	if opts.PlansDir == "" {
-		opts.PlansDir = filepath.Join(".runtime", "drafts")
+		opts.PlansDir = filepath.Join(".runtime", "patches")
 	}
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.yaml"
@@ -438,7 +438,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.WorkDir = ".runtime/mihomo"
 	}
 	if opts.BackupDir == "" {
-		opts.BackupDir = filepath.Join(".runtime", "backups", "config-draft-apply")
+		opts.BackupDir = filepath.Join(".runtime", "backups", "config-patch-apply")
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
@@ -448,7 +448,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 
 func normalizeApplyLocatorOptions(opts ApplyOptions) ApplyOptions {
 	if opts.PlansDir == "" {
-		opts.PlansDir = filepath.Join(".runtime", "drafts")
+		opts.PlansDir = filepath.Join(".runtime", "patches")
 	}
 	if opts.Now.IsZero() {
 		opts.Now = time.Now()
@@ -708,10 +708,10 @@ func resolveSummaryPath(opts ApplyOptions) (string, error) {
 	}
 	id := strings.TrimSpace(opts.PlanID)
 	if id == "" {
-		return "", fmt.Errorf("draft_id is required")
+		return "", fmt.Errorf("patch_id is required")
 	}
 	if filepath.Base(id) != id || id == "." || id == ".." {
-		return "", fmt.Errorf("draft_id %q must be a single draft directory name", id)
+		return "", fmt.Errorf("patch_id %q must be a single patch directory name", id)
 	}
 	return filepath.Join(opts.PlansDir, id, "summary.json"), nil
 }

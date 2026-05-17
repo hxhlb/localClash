@@ -18,14 +18,8 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["environment_inspect"].SafetyLevel != SafeRead {
 		t.Fatalf("environment_inspect safety = %q, want %q", byName["environment_inspect"].SafetyLevel, SafeRead)
 	}
-	if byName["config_base_inspect"].SafetyLevel != SafeRead {
-		t.Fatalf("config_base_inspect safety = %q, want %q", byName["config_base_inspect"].SafetyLevel, SafeRead)
-	}
-	if byName["config_intent_inspect"].SafetyLevel != SafeRead {
-		t.Fatalf("config_intent_inspect safety = %q, want %q", byName["config_intent_inspect"].SafetyLevel, SafeRead)
-	}
-	if byName["config_overlay_inspect"].SafetyLevel != SafeRead {
-		t.Fatalf("config_overlay_inspect safety = %q, want %q", byName["config_overlay_inspect"].SafetyLevel, SafeRead)
+	if byName["config_status"].SafetyLevel != SafeRead {
+		t.Fatalf("config_status safety = %q, want %q", byName["config_status"].SafetyLevel, SafeRead)
 	}
 	if byName["nl_file"].SafetyLevel != SafeRead {
 		t.Fatalf("nl_file safety = %q, want %q", byName["nl_file"].SafetyLevel, SafeRead)
@@ -54,14 +48,17 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["subscription_nodes_search"].SafetyLevel != SafeRead {
 		t.Fatalf("subscription_nodes_search safety = %q, want %q", byName["subscription_nodes_search"].SafetyLevel, SafeRead)
 	}
-	if byName["config_draft_apply"].SafetyLevel != SafeWrite {
-		t.Fatalf("config_draft_apply safety = %q, want %q", byName["config_draft_apply"].SafetyLevel, SafeWrite)
+	if byName["config_patch_apply"].SafetyLevel != SafeWrite {
+		t.Fatalf("config_patch_apply safety = %q, want %q", byName["config_patch_apply"].SafetyLevel, SafeWrite)
 	}
-	if !strings.Contains(byName["config_draft_apply"].Description, "config_intent_inspect") {
-		t.Fatalf("config_draft_apply description should guide post-apply intent verification: %q", byName["config_draft_apply"].Description)
+	if !strings.Contains(byName["config_patch_apply"].Description, "generated/mihomo.yaml") {
+		t.Fatalf("config_patch_apply description should mention generated config: %q", byName["config_patch_apply"].Description)
 	}
-	if byName["config_draft_render"].SafetyLevel != SafeWrite {
-		t.Fatalf("config_draft_render safety = %q, want %q", byName["config_draft_render"].SafetyLevel, SafeWrite)
+	if byName["config_patch_create"].SafetyLevel != SafeWrite {
+		t.Fatalf("config_patch_create safety = %q, want %q", byName["config_patch_create"].SafetyLevel, SafeWrite)
+	}
+	if byName["config_render"].SafetyLevel != SafeWrite {
+		t.Fatalf("config_render safety = %q, want %q", byName["config_render"].SafetyLevel, SafeWrite)
 	}
 	if byName["proxy_group_build"].SafetyLevel != SafeWrite {
 		t.Fatalf("proxy_group_build safety = %q, want %q", byName["proxy_group_build"].SafetyLevel, SafeWrite)
@@ -93,7 +90,7 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
 		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)
 	}
-	for _, name := range []string{"config_test", "config_render", "config_plan_apply", "config_plan_render", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
+	for _, name := range []string{"config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "config_test", "config_plan_apply", "config_plan_render", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
 		if byName[name].Name != "" {
 			t.Fatalf("removed tool %q should not be registered", name)
 		}

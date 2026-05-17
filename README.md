@@ -219,22 +219,27 @@ question such as "what does sukkaw_ai cover?", call `pack_rules_read` directly.
 Ronnie's app maintenance packs are exposed as `syncnext_SyncnextProxy` and
 `syncnext_SyncnextUnbreak`.
 
-MCP config inspection tools:
+MCP config model:
 
-- `config_base_inspect`: inspect the generated base config summary. The base
-  layer is not modifiable through MCP plan tools.
-- `config_intent_inspect`: inspect localClash routing intent. The default
-  `view=durable` reads `localclash.yaml`; `view=working` adds current
-  subscription, runtime profile, and base policy context; `view=effective_preview`
-  renders a temporary, non-persistent Mihomo preview so agents can answer what
-  rules exist after subscription refresh even before Mihomo has ever started.
-  Agents should call this before draft rendering when they need to preserve or
-  reuse existing localClash intent.
-- `config_overlay_inspect`: inspect the localClash-managed overlay from
-  `x-localclash.overlay` metadata.
+- `localclash.yaml` is the source of truth.
+- `generated/mihomo.yaml` is a build artifact.
+- `.runtime/patches/<patch-id>/` contains review artifacts.
+
+MCP config tools:
+
+- `config_status`: inspect source-of-truth state, generated config presence,
+  render readiness, generated summaries, overlay metadata, and pending patches.
+- `config_render`: rebuild `generated/mihomo.yaml` from the current durable
+  `localclash.yaml`, subscription, policy, and runtime profile. If
+  `localclash.yaml` does not exist, it renders the base config without an
+  overlay. It ignores patches and does not start Mihomo.
+- `config_patch_create`: create a reviewable patch with candidate
+  `localclash.yaml` and `mihomo.yaml` under `.runtime/patches/<patch-id>/`.
+- `config_patch_apply`: apply a reviewed patch by writing `localclash.yaml`,
+  deriving `localclash-packs.yaml`, and regenerating `generated/mihomo.yaml`.
 
 Config render writes `x-localclash` metadata into generated configs so agents
-can distinguish immutable base config from future replaceable overlay config.
+can distinguish immutable base config from localClash-managed overlay config.
 
 MCP runtime profile tools:
 
@@ -252,49 +257,47 @@ OpenClash redir-host-mix reference. Advanced users can edit
 `localclash-runtime.yaml` directly, or ask an agent to use `nl_file` and `sed_file`
 for explicit line-based edits, but the product MCP path is profile switching.
 
-MCP draft-building tools:
+MCP patch-building tools:
 
 - `proxy_group_build`: build and validate a reusable proxy group target from a
   `name_regex` selector or exact `nodes`. This tool does not persist state; copy
-  the returned proxy group into `config_draft_render.overlay.proxy_groups` when a
-  draft should use it.
+  the returned proxy group into `config_patch_create.overlay.proxy_groups` when a
+  patch should use it.
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, or CIDRs that share one target.
-- `config_draft_render`: accepts proxy groups, third-party packs, and custom
+- `config_patch_create`: accepts proxy groups, third-party packs, and custom
   rules, then renders candidate `localclash.yaml`, derived
-  `localclash-packs.yaml`, and `mihomo.yaml` into `.runtime/drafts/<draft-id>/`.
+  `localclash-packs.yaml`, and `mihomo.yaml` into `.runtime/patches/<patch-id>/`.
   MCP `arguments` must be a JSON object, not a JSON-encoded string. If a pack or
   custom rule targets a new proxy group, include that group in
   `overlay.proxy_groups` in the same call.
-- `config_draft_apply`: applies a reviewed draft by writing durable
+- `config_patch_apply`: applies a reviewed patch by writing durable
   `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
-  `generated/mihomo.yaml`. After a successful apply, call
-  `config_intent_inspect` to verify the durable proxy groups, custom rules, and
-  packs that remain active.
+  `generated/mihomo.yaml`.
 
 For pack routing such as "Steam through HK", an agent should first call
-`config_intent_inspect` to discover reusable proxy groups and existing intent,
+`config_status` to discover reusable proxy groups and current durable state,
 then call `subscription_nodes_search`, build or reuse the target with
 `proxy_group_build`, inspect the pack with `packs_list` or `packs_get`, and call
-`config_draft_render` with the preserved `proxy_groups` and `packs`. For domain
-routing such as "huggingface.co through temporary line", inspect intent,
-search/build or reuse the proxy group, call `custom_rules_build`, then render a
-draft with preserved `proxy_groups` and `custom_rules`. For built-in targets such
+`config_patch_create` with the desired `proxy_groups` and `packs`. For domain
+routing such as "huggingface.co through temporary line", inspect status,
+search/build or reuse the proxy group, call `custom_rules_build`, then create a
+patch with desired `proxy_groups` and `custom_rules`. For built-in targets such
 as "xxx direct", skip proxy group creation and build custom rules with target
 `DIRECT`.
 
-Draft rendering does not overwrite active generated files, start or restart
-Mihomo, or apply router/OpenClash changes. After user review,
-`config_draft_apply` resolves selectors against the current subscription, backs
+Patch creation does not overwrite active generated files, start or restart
+Mihomo, or apply router system changes. After user review,
+`config_patch_apply` resolves selectors against the current subscription, backs
 up replaced local artifacts, writes `localclash.yaml`, derives
 `localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`. It still does
 not start or restart Mihomo; use `run_runtime` for that confirmed step. If an
-agent wants to preserve existing local intent, it must first inspect current
-local state and submit the full desired config, including retained packs,
-custom rules, and proxy groups.
+agent wants to preserve existing local state, it must first call `config_status`
+and submit the full desired config, including retained packs, custom rules, and
+proxy groups.
 The normal reviewed-change loop is:
-`config_intent_inspect` → `config_draft_render` → `config_draft_apply` →
-`config_intent_inspect`.
+`config_status` → `config_patch_create` → `config_patch_apply` →
+`config_status`.
 
 MCP runtime tool:
 
@@ -313,14 +316,15 @@ switch proxy groups, and does not modify system proxy settings.
 Minimal MCP closed loop:
 
 1. `subscriptions_refresh`
-2. `run_runtime`
-3. `runtime_status`
+2. `config_status`
+3. `config_render` if `generated/mihomo.yaml` is missing or stale
+4. `run_runtime`
+5. `runtime_status`
 
 This is the MCP form of the runtime loop. `doctor` remains the broader
 health-check entrypoint, including generated config validation. Agents should use
-`config_draft_render` and `config_draft_apply` for reviewed routing changes; raw
-`config_render` is a CLI/internal debug capability, not part of the product MCP
-surface.
+`config_patch_create` and `config_patch_apply` for reviewed routing changes, and
+`config_render` for plain rebuilds of the generated Mihomo config.
 
 For a local HTTP MCP smoke test, run:
 
@@ -444,8 +448,8 @@ subscription as a proxy source and owns the runtime rules, rule providers, and
 proxy groups locally. It also applies the active `localclash-runtime.yaml` runtime
 profile; use `go run . config render --runtime-profile <path> --force` to test an
 alternate profile file. For MCP-managed routing changes, prefer
-`config_draft_render` followed by `config_draft_apply`; direct `config render` is
-primarily a CLI/debug helper.
+`config_patch_create` followed by `config_patch_apply`; for plain MCP rebuilds,
+use `config_render`.
 
 The rule model is documented in `docs/rule-model.md`. In short, localClash
 renders a fixed local safety baseline first, then user overrides, optional rule
