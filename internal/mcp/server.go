@@ -241,6 +241,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionNodesList(args)
 	case "subscription_nodes_search":
 		return s.callSubscriptionNodesSearch(args)
+	case "runtime_status":
+		return s.callRuntimeStatus(args)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "tools_list":
@@ -259,6 +261,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callConfigRender(args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
+	case "stop_runtime":
+		return s.callStopRuntime(args)
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
@@ -765,6 +769,53 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 				"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
 			},
 		})
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config     string `json:"config"`
+		RuntimeDir string `json:"runtime_dir"`
+		LogFile    string `json:"log_file"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Config == "" {
+			in.Config = s.state.Paths.GeneratedConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+	}
+	return jsonToolResult(corerun.Status(corerun.StatusOptions{
+		ConfigPath: in.Config,
+		WorkDir:    in.RuntimeDir,
+		LogPath:    in.LogFile,
+	}))
+}
+
+func (s *Server) callStopRuntime(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		RuntimeDir string `json:"runtime_dir"`
+		TimeoutMS  int    `json:"timeout_ms"`
+		Force      bool   `json:"force"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.RuntimeDir == "" {
+		in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+	}
+	result, err := corerun.Stop(corerun.StopOptions{
+		WorkDir:   in.RuntimeDir,
+		Timeout:   time.Duration(in.TimeoutMS) * time.Millisecond,
+		ForceKill: in.Force,
+	})
+	if err != nil {
+		return toolResult{}, err
 	}
 	return jsonToolResult(result)
 }

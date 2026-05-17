@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -83,7 +84,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime"} {
+	for _, name := range []string{"doctor", "config_base_inspect", "config_overlay_inspect", "config_plan_render", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "virtual_nodes_list", "virtual_nodes_get", "config_render", "run_runtime", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -107,6 +108,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"packs_list":                SafeRead,
 		"subscription_nodes_list":   SafeRead,
 		"subscription_nodes_search": SafeRead,
+		"runtime_status":            SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
 		"virtual_nodes_get":         SafeRead,
@@ -116,6 +118,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
 		"run_runtime":               ConfirmRequired,
+		"stop_runtime":              ConfirmRequired,
 	}
 	got := map[string]SafetyLevel{}
 	for _, tool := range Registry() {
@@ -745,6 +748,112 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 	content := result.StructuredContent.(map[string]any)
 	if content["started"] != false || content["error"] == "" {
 		t.Fatalf("content = %+v, want started false error", content)
+	}
+}
+
+func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "runtime_status",
+			"arguments": map[string]any{
+				"config":      config,
+				"runtime_dir": workDir,
+				"log_file":    filepath.Join(workDir, "mihomo.log"),
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("runtime_status returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["running"] != true || int(content["pid"].(float64)) != os.Getpid() {
+		t.Fatalf("runtime_status content = %+v, want current pid running", content)
+	}
+	if content["external_ui_url"] != "http://127.0.0.1:9090/ui" {
+		t.Fatalf("external ui url = %v", content["external_ui_url"])
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("runtime_status structured content is not serializable: %v", err)
+	}
+}
+
+func TestStopRuntimeToolStopsStartedRuntime(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	writeTestExecutable(t, core, `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    echo configuration test is successful
+    exit 0
+  fi
+done
+sleep 30
+`)
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(dir, "runtime")
+	runResp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "run_runtime",
+			"arguments": map[string]any{
+				"core":        core,
+				"config":      config,
+				"runtime_dir": workDir,
+				"log_file":    filepath.Join(workDir, "mihomo.log"),
+			},
+		},
+	})
+	if runResp.Error != nil {
+		t.Fatalf("run_runtime returned JSON-RPC error: %+v", runResp.Error)
+	}
+	runResult := marshalToolResult(t, runResp.Result)
+	runContent := runResult.StructuredContent.(map[string]any)
+	pid := int(runContent["pid"].(float64))
+	defer killMCPProcess(pid)
+
+	stopResp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "stop_runtime",
+			"arguments": map[string]any{
+				"runtime_dir": workDir,
+				"timeout_ms":  2000,
+			},
+		},
+	})
+	if stopResp.Error != nil {
+		t.Fatalf("stop_runtime returned JSON-RPC error: %+v", stopResp.Error)
+	}
+	stopResult := marshalToolResult(t, stopResp.Result)
+	stopContent := stopResult.StructuredContent.(map[string]any)
+	if stopContent["stopped"] != true || stopContent["was_running"] != true || int(stopContent["pid"].(float64)) != pid {
+		t.Fatalf("stop_runtime content = %+v, want stopped pid %d", stopContent, pid)
+	}
+	if _, err := json.Marshal(stopResult.StructuredContent); err != nil {
+		t.Fatalf("stop_runtime structured content is not serializable: %v", err)
 	}
 }
 
