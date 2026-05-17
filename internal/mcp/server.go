@@ -431,8 +431,9 @@ func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 
 func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 	var in struct {
-		ID    string `json:"id"`
-		Cache string `json:"cache"`
+		ID         string `json:"id"`
+		Cache      string `json:"cache"`
+		RuntimeDir string `json:"runtime_dir"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
@@ -445,13 +446,18 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 		if id == "" {
 			return toolResult{}, fmt.Errorf("pack id is required")
 		}
+		runtimeDir := in.RuntimeDir
+		if runtimeDir == "" {
+			runtimeDir = s.state.Paths.MihomoRuntimeDir
+		}
 		detail, ok := s.state.Rules.Details[id]
 		if !ok {
 			return toolResult{}, fmt.Errorf("pack %q not found in bootstrap packs catalog", id)
 		}
+		detail = rules.AnnotatePackRuntime(detail, runtimeDir)
 		return jsonToolResult(rules.PackGetResult{Pack: detail})
 	}
-	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, ID: in.ID})
+	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, RuntimeDir: in.RuntimeDir, ID: in.ID})
 	if err != nil {
 		return toolResult{}, err
 	}

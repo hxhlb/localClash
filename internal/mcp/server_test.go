@@ -616,6 +616,20 @@ func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	if pack["id"] != "blackmatrix7_OpenAI" {
 		t.Fatalf("pack id = %v, want blackmatrix7_OpenAI", pack["id"])
 	}
+	if pack["catalog_path"] != ".runtime/rules/packs/blackmatrix7.yaml" {
+		t.Fatalf("catalog path = %v", pack["catalog_path"])
+	}
+	providers := pack["providers"].([]any)
+	provider := providers[0].(map[string]any)
+	if provider["provider_path"] != "./rule-packs/blackmatrix7/OpenAI.yaml" {
+		t.Fatalf("provider path = %v", provider["provider_path"])
+	}
+	if provider["resolved_runtime_path"] != ".runtime/mihomo/rule-packs/blackmatrix7/OpenAI.yaml" {
+		t.Fatalf("resolved runtime path = %v", provider["resolved_runtime_path"])
+	}
+	if provider["provider_file_exists"] != true {
+		t.Fatalf("provider file exists = %v, want true", provider["provider_file_exists"])
+	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("packs_get structured content is not serializable: %v", err)
 	}
@@ -626,9 +640,19 @@ func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
 		Rules: appinit.RulesState{
 			CatalogAvailable: true,
 			Details: map[string]rules.PackDetail{
-				"blackmatrix7_OpenAI": {ID: "blackmatrix7_OpenAI", Source: "blackmatrix7", Name: "OpenAI", Target: "AI"},
+				"blackmatrix7_OpenAI": {
+					ID:          "blackmatrix7_OpenAI",
+					Source:      "blackmatrix7",
+					Name:        "OpenAI",
+					Target:      "AI",
+					CatalogPath: ".runtime/rules/packs/blackmatrix7.yaml",
+					Providers: []rules.ProviderSummary{
+						{Name: "blackmatrix7_OpenAI", Path: "./rule-packs/blackmatrix7/OpenAI.yaml", ProviderPath: "./rule-packs/blackmatrix7/OpenAI.yaml"},
+					},
+				},
 			},
 		},
+		Paths: appinit.RuntimePaths{MihomoRuntimeDir: ".runtime/mihomo"},
 	}
 	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
 		"jsonrpc": "2.0",
@@ -646,6 +670,11 @@ func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
 	pack := result.StructuredContent.(map[string]any)["pack"].(map[string]any)
 	if pack["id"] != "blackmatrix7_OpenAI" {
 		t.Fatalf("pack = %+v, want OpenAI", pack)
+	}
+	providers := pack["providers"].([]any)
+	provider := providers[0].(map[string]any)
+	if provider["resolved_runtime_path"] != ".runtime/mihomo/rule-packs/blackmatrix7/OpenAI.yaml" {
+		t.Fatalf("provider = %+v, want resolved runtime path", provider)
 	}
 }
 
@@ -1114,6 +1143,13 @@ packs:
         path: ./rule-packs/blackmatrix7/OpenAI.yaml
 `)
 	if err := os.WriteFile(filepath.Join(cacheDir, "blackmatrix7.yaml"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	providerPath := filepath.Join(dir, ".runtime", "mihomo", "rule-packs", "blackmatrix7", "OpenAI.yaml")
+	if err := os.MkdirAll(filepath.Dir(providerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(providerPath, []byte("payload:\n  - DOMAIN,openai.com\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
