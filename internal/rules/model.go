@@ -195,7 +195,7 @@ func validateSource(source Source) error {
 		if source.BaseURL == "" {
 			return errors.New("base_url is required for sukkaw")
 		}
-	case "blackmatrix7", "v2fly-dlc":
+	case "blackmatrix7", "v2fly-dlc", "syncnext":
 		if source.RawBaseURL == "" {
 			return fmt.Errorf("raw_base_url is required for %s", source.Adapter)
 		}

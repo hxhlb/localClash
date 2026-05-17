@@ -201,6 +201,8 @@ question such as "does huggingface.co have a pack?", use `pack_rules_query`;
 if it reports incomplete cache coverage, use `packs_list` to find semantic
 candidates such as `ai`, call `pack_rules_prefetch`, then query again. For a
 question such as "what does sukkaw_ai cover?", call `pack_rules_read` directly.
+Ronnie's app maintenance packs are exposed as `syncnext_SyncnextProxy` and
+`syncnext_SyncnextUnbreak`.
 
 MCP config inspection tools:
 

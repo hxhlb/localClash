@@ -24,6 +24,8 @@ func adaptSource(ctx context.Context, source Source) (PackCache, error) {
 		return adaptBlackmatrix7(ctx, source)
 	case "v2fly-dlc":
 		return adaptV2FlyDLC(ctx, source)
+	case "syncnext":
+		return adaptSyncnext(source), nil
 	default:
 		return PackCache{}, fmt.Errorf("unknown adapter %q", source.Adapter)
 	}
@@ -135,6 +137,34 @@ func adaptV2FlyDLC(ctx context.Context, source Source) (PackCache, error) {
 	}
 	sort.Slice(packs, func(i, j int) bool { return packs[i].ID < packs[j].ID })
 	return PackCache{Version: 1, Source: source.ID, Adapter: source.Adapter, Renderable: false, Packs: packs}, nil
+}
+
+func adaptSyncnext(source Source) PackCache {
+	rawBaseURL := strings.TrimRight(source.RawBaseURL, "/")
+	packs := []Pack{
+		syncnextPack(source.ID, "SyncnextProxy", "Proxy domains maintained for Ronnie's apps", "PROXY", rawBaseURL+"/proxy-classical.yaml"),
+		syncnextPack(source.ID, "SyncnextUnbreak", "Direct/unbreak domains maintained for Ronnie's apps", "DIRECT", rawBaseURL+"/Unbreak-classical.yaml"),
+	}
+	return PackCache{Version: 1, Source: source.ID, Adapter: source.Adapter, Renderable: true, Packs: packs}
+}
+
+func syncnextPack(sourceID, id, name, target, url string) Pack {
+	return Pack{
+		ID:         id,
+		Name:       name,
+		Target:     target,
+		Renderable: true,
+		Components: []Component{
+			{
+				ID:         id,
+				Behavior:   "classical",
+				Format:     "yaml",
+				OrderClass: "mixed",
+				URL:        url,
+				Path:       "./rule-packs/" + sourceID + "/" + id + ".yaml",
+			},
+		},
+	}
 }
 
 func fetchGitHubEntries(ctx context.Context, apiURL string) ([]githubEntry, error) {

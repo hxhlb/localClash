@@ -207,6 +207,9 @@ func TestValidateSourceRequiresAdapterFields(t *testing.T) {
 	if err := validateSource(Source{ID: "blackmatrix7", Adapter: "blackmatrix7", URL: "https://github.com/blackmatrix7/ios_rule_script/tree/master/rule/Clash"}); err == nil {
 		t.Fatal("expected missing raw_base_url error")
 	}
+	if err := validateSource(Source{ID: "syncnext", Adapter: "syncnext", URL: "https://github.com/qoli/SyncnextClash"}); err == nil {
+		t.Fatal("expected missing raw_base_url error")
+	}
 }
 
 func TestGitHubAPIContentsURL(t *testing.T) {
@@ -217,6 +220,30 @@ func TestGitHubAPIContentsURL(t *testing.T) {
 	want := "https://api.github.com/repos/blackmatrix7/ios_rule_script/contents/rule/Clash?ref=master"
 	if got != want {
 		t.Fatalf("api url = %q, want %q", got, want)
+	}
+}
+
+func TestAdaptSyncnextBuildsAppMaintenancePacks(t *testing.T) {
+	cache := adaptSyncnext(Source{
+		ID:         "syncnext",
+		Adapter:    "syncnext",
+		URL:        "https://github.com/qoli/SyncnextClash",
+		RawBaseURL: "https://raw.githubusercontent.com/qoli/SyncnextClash/main",
+	})
+	if !cache.Renderable || len(cache.Packs) != 2 {
+		t.Fatalf("cache = %+v, want two renderable packs", cache)
+	}
+	if cache.Packs[0].ID != "SyncnextProxy" || cache.Packs[0].Target != "PROXY" {
+		t.Fatalf("first pack = %+v, want SyncnextProxy target PROXY", cache.Packs[0])
+	}
+	if cache.Packs[1].ID != "SyncnextUnbreak" || cache.Packs[1].Target != "DIRECT" {
+		t.Fatalf("second pack = %+v, want SyncnextUnbreak target DIRECT", cache.Packs[1])
+	}
+	if got := cache.Packs[0].Components[0].URL; got != "https://raw.githubusercontent.com/qoli/SyncnextClash/main/proxy-classical.yaml" {
+		t.Fatalf("proxy URL = %q", got)
+	}
+	if got := cache.Packs[1].Components[0].URL; got != "https://raw.githubusercontent.com/qoli/SyncnextClash/main/Unbreak-classical.yaml" {
+		t.Fatalf("unbreak URL = %q", got)
 	}
 }
 

@@ -1,0 +1,4 @@
+id: syncnext
+adapter: syncnext
+url: https://github.com/qoli/SyncnextClash
+raw_base_url: https://raw.githubusercontent.com/qoli/SyncnextClash/main
