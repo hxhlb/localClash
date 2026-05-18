@@ -35,6 +35,7 @@ Usage:
   localclash run [flags]
   localclash status [flags]
   localclash stop [flags]
+  localclash restart [flags]
   localclash doctor [flags]
   localclash mcp [flags]
   localclash reset [flags]
@@ -111,6 +112,15 @@ Flags for stop:
   --force                send SIGKILL if SIGTERM does not stop before timeout
   --json                 print machine-readable JSON result
 
+Flags for restart:
+  --core string          Mihomo core binary path (default from active runtime profile)
+  --config string        Mihomo runtime config path (default "generated/mihomo.yaml")
+  --workdir string       Mihomo runtime data directory (default ".runtime/mihomo")
+  --log string           Mihomo log file path (default "<workdir>/mihomo.log")
+  --timeout duration     stop timeout before reporting failure (default 5s)
+  --force                send SIGKILL if SIGTERM does not stop before timeout
+  --json                 print machine-readable JSON result
+
 Flags for doctor:
   --core string          Mihomo core binary path (default from active runtime profile)
   --subscription string  downloaded subscription YAML (default "subscription.yaml")
@@ -174,6 +184,9 @@ func run(args []string) error {
 	}
 	if len(args) >= 1 && args[0] == "stop" {
 		return runStop(args[1:], state)
+	}
+	if len(args) >= 1 && args[0] == "restart" {
+		return runRestart(args[1:], state)
 	}
 	if len(args) >= 1 && args[0] == "doctor" {
 		return runDoctor(args[1:], state)
@@ -501,6 +514,46 @@ func runStop(args []string, state appinit.RuntimeState) error {
 	return nil
 }
 
+func runRestart(args []string, state appinit.RuntimeState) error {
+	fs := flag.NewFlagSet("restart", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := corerun.RestartOptions{}
+	var asJSON bool
+	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
+	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "Mihomo runtime config path")
+	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
+	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
+	fs.DurationVar(&opts.StopTimeout, "timeout", 5*time.Second, "stop timeout before reporting failure")
+	fs.BoolVar(&opts.ForceKill, "force", false, "send SIGKILL if the runtime does not exit before timeout")
+	fs.BoolVar(&asJSON, "json", false, "print machine-readable JSON result")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	result, err := corerun.Restart(ctx, opts)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		if err := printJSON(result); err != nil {
+			return err
+		}
+	} else {
+		printRuntimeRestart(result)
+	}
+	if result.Error != "" {
+		return errors.New(result.Error)
+	}
+	return nil
+}
+
 func runDoctor(args []string, state appinit.RuntimeState) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -604,6 +657,29 @@ func printRuntimeStop(result corerun.StopResult) {
 	}
 	if result.Forced {
 		fmt.Println("forced: true")
+	}
+	if result.Error != "" {
+		fmt.Printf("error: %s\n", result.Error)
+	}
+}
+
+func printRuntimeRestart(result corerun.RestartResult) {
+	printRuntimeStop(result.Stop)
+	if result.Start.Started {
+		fmt.Printf("started mihomo runtime pid %d\n", result.Start.PID)
+	} else if result.Start.AlreadyRunning {
+		fmt.Printf("mihomo runtime already running pid %d\n", result.Start.PID)
+	} else {
+		fmt.Println("mihomo runtime was not started")
+	}
+	if result.Start.RuntimeDir != "" {
+		fmt.Printf("runtime dir: %s\n", result.Start.RuntimeDir)
+	}
+	if result.Start.Config != "" {
+		fmt.Printf("config: %s\n", result.Start.Config)
+	}
+	if result.Start.LogFile != "" {
+		fmt.Printf("log: %s\n", result.Start.LogFile)
 	}
 	if result.Error != "" {
 		fmt.Printf("error: %s\n", result.Error)

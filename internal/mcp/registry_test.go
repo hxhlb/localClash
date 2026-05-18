@@ -90,6 +90,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["run_runtime"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("run_runtime safety = %q, want %q", byName["run_runtime"].SafetyLevel, ConfirmRequired)
 	}
+	if byName["restart_runtime"].SafetyLevel != ConfirmRequired {
+		t.Fatalf("restart_runtime safety = %q, want %q", byName["restart_runtime"].SafetyLevel, ConfirmRequired)
+	}
 	if byName["stop_runtime"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("stop_runtime safety = %q, want %q", byName["stop_runtime"].SafetyLevel, ConfirmRequired)
 	}
@@ -101,6 +104,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
 		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)
+	}
+	if !strings.Contains(byName["restart_runtime"].Description, "instead of stop_runtime then run_runtime") {
+		t.Fatalf("restart_runtime description missing chain guidance: %q", byName["restart_runtime"].Description)
 	}
 	for _, name := range []string{"config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "config_test", "config_plan_apply", "config_plan_render", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
 		if byName[name].Name != "" {

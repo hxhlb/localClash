@@ -1,8 +1,10 @@
 package corerun
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,6 +36,15 @@ type StopOptions struct {
 	ForceKill bool
 }
 
+type RestartOptions struct {
+	CorePath    string
+	ConfigPath  string
+	WorkDir     string
+	LogPath     string
+	StopTimeout time.Duration
+	ForceKill   bool
+}
+
 type StopResult struct {
 	Stopped            bool   `json:"stopped"`
 	WasRunning         bool   `json:"was_running"`
@@ -46,6 +57,15 @@ type StopResult struct {
 	StalePIDFile       bool   `json:"stale_pid_file,omitempty"`
 	StalePIDFileReason string `json:"stale_pid_file_reason,omitempty"`
 	Error              string `json:"error,omitempty"`
+}
+
+type RestartResult struct {
+	Restarted   bool        `json:"restarted"`
+	Stop        StopResult  `json:"stop"`
+	Start       StartResult `json:"start"`
+	Error       string      `json:"error,omitempty"`
+	Warnings    []string    `json:"warnings,omitempty"`
+	NextActions []string    `json:"next_actions,omitempty"`
 }
 
 func Status(opts StatusOptions) StatusResult {
@@ -81,6 +101,62 @@ func Status(opts StatusOptions) StatusResult {
 	result.StalePIDFile = true
 	result.StalePIDFileReason = "pid file points to a process that is not running"
 	return result
+}
+
+func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
+	startOpts := normalizeStartOptions(StartOptions{
+		CorePath:   opts.CorePath,
+		ConfigPath: opts.ConfigPath,
+		WorkDir:    opts.WorkDir,
+		LogPath:    opts.LogPath,
+	})
+	runOpts := normalizeOptions(Options{
+		CorePath:   startOpts.CorePath,
+		ConfigPath: startOpts.ConfigPath,
+		WorkDir:    startOpts.WorkDir,
+		LogPath:    startOpts.LogPath,
+	})
+	result := RestartResult{
+		Warnings: append([]string(nil), NetworkInterruptionWarnings...),
+		NextActions: []string{
+			"call runtime_status to verify the restarted Mihomo process",
+		},
+	}
+	if err := runOpts.validate(); err != nil {
+		return result, err
+	}
+	if err := os.MkdirAll(runOpts.WorkDir, 0o755); err != nil {
+		return result, err
+	}
+	if err := os.MkdirAll(filepath.Dir(runOpts.LogPath), 0o755); err != nil {
+		return result, err
+	}
+	if err := testConfig(ctx, runOpts); err != nil {
+		return result, err
+	}
+
+	stop, err := Stop(StopOptions{
+		WorkDir:   runOpts.WorkDir,
+		Timeout:   opts.StopTimeout,
+		ForceKill: opts.ForceKill,
+	})
+	result.Stop = stop
+	if err != nil {
+		return result, err
+	}
+	if stop.Error != "" {
+		result.Error = stop.Error
+		return result, nil
+	}
+
+	start, err := Start(ctx, startOpts)
+	result.Start = start
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	result.Restarted = start.Started
+	return result, nil
 }
 
 func Stop(opts StopOptions) (StopResult, error) {

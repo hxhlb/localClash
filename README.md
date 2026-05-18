@@ -316,14 +316,19 @@ MCP runtime tool:
 - `run_runtime`: starts Mihomo from `generated/mihomo.yaml` in the background.
   If the effective subscription exists but the generated config is missing,
   localClash renders `generated/mihomo.yaml` before starting runtime.
+- `restart_runtime`: validates/renders config, stops the recorded Mihomo
+  process if needed, and starts it again in one confirmed call. Use this when
+  Mihomo is already running and the agent may lose connectivity between a
+  separate `stop_runtime` and `run_runtime`.
 
-`run_runtime` is `confirm_required`. localClash does not implement an
-interactive yes/no prompt inside the tool; the Agent SDK or MCP client must ask
-the user for confirmation before calling it. Starting or restarting the proxy
-runtime may temporarily interrupt network connectivity. The Agent itself may
+`run_runtime` and `restart_runtime` are `confirm_required`. localClash does not
+implement an interactive yes/no prompt inside the tool; the Agent SDK or MCP
+client must ask the user for confirmation before calling it. Starting or
+restarting the proxy runtime may temporarily interrupt network connectivity.
+The Agent itself may
 depend on the current network or proxy path and could lose its connection after
-this operation. `run_runtime` does not install router takeover rules, switch
-proxy groups, or modify system proxy settings.
+this operation. These tools do not install router takeover rules, switch proxy
+groups, or modify system proxy settings.
 
 Router profile takeover tools:
 
@@ -346,14 +351,14 @@ Minimal MCP closed loop:
 1. `subscriptions_refresh`
 2. `config_status`
 3. `config_render` if `generated/mihomo.yaml` is missing or stale
-4. `run_runtime`
+4. `run_runtime`, or `restart_runtime` if Mihomo is already running
 5. `runtime_status`
 
 Router MCP closed loop:
 
 1. `runtime_profile_configure` with `mode: router`
 2. `config_render`
-3. `run_runtime`
+3. `run_runtime`, or `restart_runtime` if Mihomo is already running
 4. `router_takeover_apply`
 5. `router_takeover_status`
 
@@ -518,13 +523,15 @@ Check or stop the background runtime started through MCP:
 ```bash
 go run . status
 go run . stop
+go run . restart
 ```
 
 `status` reads `.runtime/mihomo/mihomo.pid` and reports the generated config,
 log file, external controller, and dashboard URL when available. Use
 `go run . status --json` for scripts. `stop` sends SIGTERM to the recorded
 process and removes stale PID files; use `--force` to send SIGKILL if the
-runtime does not stop before `--timeout`.
+runtime does not stop before `--timeout`. `restart` validates the generated
+config before stopping the old process, then starts a new background runtime.
 
 ## Factory Reset
 

@@ -410,6 +410,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callRuntimeProfileConfigure(args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
+	case "restart_runtime":
+		return s.callRestartRuntime(ctx, args)
 	case "router_takeover_apply":
 		return s.callRouterTakeoverApply(ctx, args)
 	case "router_takeover_stop":
@@ -2005,6 +2007,60 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 	return jsonToolResult(result)
 }
 
+func (s *Server) callRestartRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config     string `json:"config"`
+		RuntimeDir string `json:"runtime_dir"`
+		Core       string `json:"core"`
+		Foreground bool   `json:"foreground"`
+		LogFile    string `json:"log_file"`
+		TimeoutMS  int    `json:"timeout_ms"`
+		Force      bool   `json:"force"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if in.Foreground {
+		return jsonToolResult(runtimeErrorResult("foreground=true is not supported by MCP restart_runtime; use the CLI restart command"))
+	}
+	if s.state != nil {
+		if in.Config == "" {
+			in.Config = s.state.Paths.GeneratedConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+		if in.Core == "" {
+			in.Core = s.state.Paths.CorePath
+		}
+		if in.Config == s.state.Paths.GeneratedConfig {
+			if err := s.ensureRunnableConfig(in.Config); err != nil {
+				return jsonToolResult(runtimeErrorResult("generated config is unavailable: " + err.Error()))
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	result, err := corerun.Restart(ctx, corerun.RestartOptions{
+		CorePath:    in.Core,
+		ConfigPath:  in.Config,
+		WorkDir:     in.RuntimeDir,
+		LogPath:     in.LogFile,
+		StopTimeout: time.Duration(in.TimeoutMS) * time.Millisecond,
+		ForceKill:   in.Force,
+	})
+	if err != nil {
+		return jsonToolResult(runtimeErrorResult(err.Error()))
+	}
+	if s.state != nil {
+		if profile, profileErr := runtimeprofile.StatusFor(s.state.Paths.RuntimeProfilePath); profileErr == nil && profile.Mode == runtimeprofile.ModeRouter {
+			result.Warnings = append(result.Warnings, "Runtime profile is router; restart_runtime only restarts Mihomo and does not capture router traffic.")
+			result.NextActions = append(result.NextActions, "call router_takeover_status to verify existing takeover rules, or router_takeover_apply after user confirmation if takeover is not active")
+		}
+	}
+	return jsonToolResult(result)
+}
+
 func (s *Server) ensureRunnableConfig(configPath string) error {
 	if fileExists(configPath) {
 		return nil
@@ -2192,7 +2248,8 @@ func (s *Server) callRuntimeProfileConfigure(args json.RawMessage) (toolResult, 
 		Status: status,
 		NextActions: []string{
 			"call runtime_status to inspect whether Mihomo is already running",
-			"call run_runtime only after user confirmation if the runtime should start with the updated generated config",
+			"call restart_runtime after user confirmation if Mihomo is already running and should load the updated generated config",
+			"call run_runtime after user confirmation if Mihomo is not running and should start with the updated generated config",
 		},
 	}
 	if s.state != nil {
