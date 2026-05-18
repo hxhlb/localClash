@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +91,73 @@ func TestAggregateStatus(t *testing.T) {
 	}
 	if got := aggregateStatus([]Check{{Status: statusOK}, {Status: statusFail}, {Status: statusWarn}}); got != statusFail {
 		t.Fatalf("aggregateStatus fail = %s, want %s", got, statusFail)
+	}
+}
+
+func TestCheckYAMLFileMissingPathIncludesResolvedPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "subscription.yaml"), []byte("proxies: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	check := checkYAMLFile("policy", "policy", filepath.Join("policies", "loyalsoldier.yaml"))
+	if check.Status != statusFail {
+		t.Fatalf("status = %s, want %s", check.Status, statusFail)
+	}
+	details := strings.Join(check.Details, "\n")
+	for _, want := range []string{
+		"working directory: " + dir,
+		"resolved path: " + filepath.Join(dir, "policies", "loyalsoldier.yaml"),
+	} {
+		if !strings.Contains(details, want) {
+			t.Fatalf("details = %q, want %q", details, want)
+		}
+	}
+}
+
+func TestRunIncludesWorkingDirectoryTreeWhenRequiredFileIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "subscription.yaml"), []byte("proxies: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Run(context.Background(), Options{
+		CorePath:         filepath.Join(dir, "missing-core"),
+		SubscriptionPath: "subscription.yaml",
+		ConfigPath:       filepath.Join("generated", "mihomo.yaml"),
+		PolicyPath:       filepath.Join("policies", "loyalsoldier.yaml"),
+		DashboardDir:     filepath.Join(dir, "missing-dashboard"),
+		WorkDir:          filepath.Join(dir, ".runtime", "mihomo"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workingDir *Check
+	for i := range report.Checks {
+		if report.Checks[i].ID == "working_directory" {
+			workingDir = &report.Checks[i]
+			break
+		}
+	}
+	if workingDir == nil {
+		t.Fatal("doctor report missing working_directory check")
+	}
+	if workingDir.Status != statusWarn || workingDir.Path != dir {
+		t.Fatalf("working_directory = %+v, want warn at temp dir", *workingDir)
+	}
+	details := strings.Join(workingDir.Details, "\n")
+	for _, want := range []string{"policies/", "subscription.yaml"} {
+		if !strings.Contains(details, want) {
+			t.Fatalf("working directory details = %q, want %q", details, want)
+		}
 	}
 }
 

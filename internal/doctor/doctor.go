@@ -70,11 +70,15 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	if policy.Status == statusOK {
 		checkPolicyMode(&policy)
 	}
+	shouldInspectWorkingDir := missingFileCheck(subscription) || missingFileCheck(config) || missingFileCheck(policy)
 
 	report.add(core)
 	report.add(subscription)
 	report.add(config)
 	report.add(policy)
+	if shouldInspectWorkingDir {
+		report.add(checkWorkingDirectory())
+	}
 
 	if config.Status == statusOK {
 		configData, _ := readYAMLMap(opts.ConfigPath)
@@ -176,6 +180,9 @@ func checkYAMLFile(id, title, path string) Check {
 	if err != nil {
 		check.Status = statusFail
 		check.Summary = fmt.Sprintf("file not found: %v", err)
+		if os.IsNotExist(err) {
+			check.Details = missingPathContext(path)
+		}
 		return check
 	}
 	if info.IsDir() {
@@ -191,6 +198,93 @@ func checkYAMLFile(id, title, path string) Check {
 	check.Status = statusOK
 	check.Summary = "exists and parses"
 	return check
+}
+
+func missingFileCheck(check Check) bool {
+	return check.Status == statusFail && strings.HasPrefix(check.Summary, "file not found:")
+}
+
+func missingPathContext(path string) []string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return []string{fmt.Sprintf("working directory unavailable: %v", err)}
+	}
+	details := []string{fmt.Sprintf("working directory: %s", cwd)}
+	if !filepath.IsAbs(path) {
+		details = append(details, fmt.Sprintf("resolved path: %s", filepath.Join(cwd, path)))
+	}
+	return details
+}
+
+func checkWorkingDirectory() Check {
+	check := Check{ID: "working_directory", Title: "working directory"}
+	cwd, err := os.Getwd()
+	if err != nil {
+		check.Status = statusWarn
+		check.Summary = fmt.Sprintf("cannot inspect working directory: %v", err)
+		return check
+	}
+	check.Status = statusWarn
+	check.Path = cwd
+	check.Summary = "required file is missing; inspect process working directory structure"
+	tree, err := workingDirectoryTree(cwd, 2, 80)
+	if err != nil {
+		check.Details = []string{fmt.Sprintf("working directory files unavailable: %v", err)}
+		return check
+	}
+	check.Details = tree
+	return check
+}
+
+func workingDirectoryTree(root string, maxDepth, maxEntries int) ([]string, error) {
+	var out []string
+	var walk func(string, string, int) error
+	walk = func(path, rel string, depth int) error {
+		if len(out) >= maxEntries {
+			return nil
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return err
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].IsDir() != entries[j].IsDir() {
+				return entries[i].IsDir()
+			}
+			return entries[i].Name() < entries[j].Name()
+		})
+		for _, entry := range entries {
+			if len(out) >= maxEntries {
+				break
+			}
+			name := entry.Name()
+			if name == ".git" {
+				continue
+			}
+			entryRel := filepath.Join(rel, name)
+			display := entryRel
+			if entry.IsDir() {
+				display += "/"
+			}
+			out = append(out, display)
+			if entry.IsDir() && depth < maxDepth {
+				if err := walk(filepath.Join(path, name), entryRel, depth+1); err != nil {
+					out = append(out, fmt.Sprintf("%s: %v", entryRel, err))
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(root, ".", 0); err != nil {
+		return nil, err
+	}
+	if len(out) == maxEntries {
+		out = append(out, fmt.Sprintf("... truncated after %d entries", maxEntries))
+	}
+	if len(out) == 0 {
+		out = append(out, "(empty)")
+	}
+	return out, nil
 }
 
 func checkSubscriptionProxyCount(check *Check) {
