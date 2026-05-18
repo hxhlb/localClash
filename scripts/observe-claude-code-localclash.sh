@@ -4,26 +4,9 @@ set -euo pipefail
 SERVER_NAME="${LOCALCLASH_OBSERVE_SERVER:-localclash}"
 MCP_URL="${LOCALCLASH_OBSERVE_MCP_URL:-http://192.168.6.1:8765/mcp}"
 MODE="${LOCALCLASH_OBSERVE_MODE:-print}"
-DEFAULT_ALLOWED_TOOLS="$(
-  IFS=,
-  echo "mcp__localclash__tools_list,\
-mcp__localclash__doctor,\
-mcp__localclash__environment_inspect,\
-mcp__localclash__config_status,\
-mcp__localclash__runtime_status,\
-mcp__localclash__runtime_profile_status,\
-mcp__localclash__subscriptions_status,\
-mcp__localclash__subscription_nodes_list,\
-mcp__localclash__subscription_nodes_search,\
-mcp__localclash__packs_list,\
-mcp__localclash__packs_get,\
-mcp__localclash__pack_rules_query,\
-mcp__localclash__pack_rules_read,\
-mcp__localclash__nl_file,\
-mcp__localclash__sed_file"
-)"
+DEFAULT_ALLOWED_TOOLS="mcp__${SERVER_NAME}__*"
 if [[ "${LOCALCLASH_OBSERVE_ALLOW_ALL:-0}" == "1" ]]; then
-  ALLOWED_TOOLS="mcp__localclash__*"
+  ALLOWED_TOOLS="mcp__${SERVER_NAME}__*"
 else
   ALLOWED_TOOLS="${LOCALCLASH_OBSERVE_ALLOWED_TOOLS:-${DEFAULT_ALLOWED_TOOLS}}"
 fi

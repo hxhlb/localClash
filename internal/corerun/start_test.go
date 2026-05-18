@@ -3,6 +3,7 @@ package corerun
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -64,6 +65,7 @@ func TestStartAlreadyRunningDoesNotStartSecondRuntime(t *testing.T) {
 	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(currentPID)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stubProcessCommandLine(t, currentPID, []string{core, "-d", workDir, "-f", config})
 
 	result, err := Start(context.Background(), StartOptions{
 		CorePath:   core,
@@ -116,6 +118,49 @@ sleep 30
 	}
 	if _, err := os.Stat(runtimePIDPath(workDir)); err != nil {
 		t.Fatalf("pid file missing: %v", err)
+	}
+}
+
+func TestStartKillsRuntimeWhenPIDFileCannotBeWritten(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	writeStartExecutable(t, core, `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    echo configuration test is successful
+    exit 0
+  fi
+done
+sleep 30
+`)
+	config := writeStartConfig(t, dir)
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(runtimePIDPath(workDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	startedPID := 0
+	originalHook := afterProcessStart
+	afterProcessStart = func(cmd *exec.Cmd) {
+		startedPID = cmd.Process.Pid
+	}
+	t.Cleanup(func() {
+		afterProcessStart = originalHook
+	})
+
+	_, err := Start(context.Background(), StartOptions{
+		CorePath:   core,
+		ConfigPath: config,
+		WorkDir:    workDir,
+		LogPath:    filepath.Join(workDir, "mihomo.log"),
+	})
+	if err == nil {
+		t.Fatal("Start error = nil, want pid write failure")
+	}
+	if startedPID == 0 {
+		t.Fatal("afterProcessStart hook did not capture started pid")
+	}
+	if processRunning(startedPID) {
+		t.Fatalf("process pid %d still running after pid write failure", startedPID)
 	}
 }
 

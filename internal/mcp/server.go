@@ -1290,11 +1290,9 @@ func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	if s.state != nil {
-		result, err := listPacksFromState(*s.state, in.Source, in.Name, in.Target, in.Limit)
-		if err != nil {
-			return toolResult{}, err
+		if in.Cache == "" {
+			in.Cache = s.state.Paths.RulesCacheDir
 		}
-		return jsonToolResult(result)
 	}
 	result, err := rules.ListPacks(rules.PackListOptions{
 		CacheDir: in.Cache,
@@ -1319,26 +1317,12 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	if s.state != nil {
-		if !s.state.Rules.CatalogAvailable {
-			return toolResult{}, fmt.Errorf("packs catalog is unavailable: %s", s.state.Rules.Diagnostic)
+		if in.Cache == "" {
+			in.Cache = s.state.Paths.RulesCacheDir
 		}
-		id := strings.TrimSpace(in.ID)
-		if id == "" {
-			return toolResult{}, fmt.Errorf("pack id is required")
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
-		runtimeDir := in.RuntimeDir
-		if runtimeDir == "" {
-			runtimeDir = s.state.Paths.MihomoRuntimeDir
-		}
-		detail, ok := s.state.Rules.Details[id]
-		if !ok {
-			return toolResult{}, fmt.Errorf("pack %q not found in bootstrap packs catalog", id)
-		}
-		detail = rules.AnnotatePackRuntime(detail, runtimeDir)
-		return jsonToolResult(rules.PackGetResult{Pack: detail, NextActions: []string{
-			"Use pack_rules_read with this pack id to inspect provider rule contents.",
-			"Use pack_rules_prefetch with candidate pack ids before pack_rules_query when local provider-cache coverage is incomplete.",
-		}})
 	}
 	result, err := rules.GetPack(rules.PackGetOptions{CacheDir: in.Cache, RuntimeDir: in.RuntimeDir, ID: in.ID})
 	if err != nil {
@@ -1463,33 +1447,6 @@ func (s *Server) applyPackRulesDefaults(cache, sources, providerCache *string) {
 		}
 		*providerCache = filepath.Join(runtimeRoot, "rules", "provider-cache")
 	}
-}
-
-func listPacksFromState(state appinit.RuntimeState, source, name, target string, limit int) (rules.PackListResult, error) {
-	if !state.Rules.CatalogAvailable {
-		return rules.PackListResult{}, fmt.Errorf("packs catalog is unavailable: %s", state.Rules.Diagnostic)
-	}
-	nameFilter := strings.ToLower(strings.TrimSpace(name))
-	var packs []rules.PackSummary
-	for _, pack := range state.Rules.Packs {
-		if source != "" && pack.Source != source {
-			continue
-		}
-		if target != "" && pack.Target != target {
-			continue
-		}
-		if nameFilter != "" && !strings.Contains(strings.ToLower(pack.Name), nameFilter) && !strings.Contains(strings.ToLower(pack.ID), nameFilter) {
-			continue
-		}
-		if pack.TargetMeaning == "" {
-			pack.TargetMeaning = "catalog default/recommended target; not active configuration"
-		}
-		packs = append(packs, pack)
-	}
-	if limit > 0 && len(packs) > limit {
-		packs = packs[:limit]
-	}
-	return rules.PackListResult{Total: len(packs), Packs: packs, Guidance: rules.PackListGuidance(), NextActions: rules.PackListNextActions()}, nil
 }
 
 func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
@@ -2297,6 +2254,7 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string `json:"config"`
 		RuntimeDir string `json:"runtime_dir"`
+		Core       string `json:"core"`
 		LogFile    string `json:"log_file"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
@@ -2309,8 +2267,12 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 		if in.RuntimeDir == "" {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
+		if in.Core == "" {
+			in.Core = s.state.Paths.CorePath
+		}
 	}
 	return jsonToolResult(corerun.Status(corerun.StatusOptions{
+		CorePath:   in.Core,
 		ConfigPath: in.Config,
 		WorkDir:    in.RuntimeDir,
 		LogPath:    in.LogFile,

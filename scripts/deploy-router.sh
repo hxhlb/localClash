@@ -215,9 +215,7 @@ remote_link="$3"
 remote_workdir="$4"
 
 mkdir -p "$(dirname "$remote_bin")"
-if [ -e "$remote_bin" ]; then
-  cp -p "$remote_bin" "$remote_bin.bak.$(date +%Y%m%d%H%M%S)"
-fi
+rm -f "$remote_bin".bak.*
 cp "$remote_tmp" "$remote_bin.tmp"
 chmod 0755 "$remote_bin.tmp"
 mv "$remote_bin.tmp" "$remote_bin"

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1325,16 +1326,15 @@ func TestToolsCallPacksListReturnsSerializableResult(t *testing.T) {
 	}
 }
 
-func TestToolsCallPacksListUsesBootstrapCatalog(t *testing.T) {
+func TestToolsCallPacksListReadsCurrentCatalogWhenServerStateIsStale(t *testing.T) {
+	setupMCPPackCache(t)
 	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir: filepath.Join(".runtime", "rules", "packs"),
+		},
 		Rules: appinit.RulesState{
-			CatalogAvailable: true,
-			Packs: []rules.PackSummary{
-				{ID: "blackmatrix7_OpenAI", Source: "blackmatrix7", Name: "OpenAI", Target: "AI", ProviderCount: 1, RuleCount: 1},
-			},
-			Details: map[string]rules.PackDetail{
-				"blackmatrix7_OpenAI": {ID: "blackmatrix7_OpenAI", Source: "blackmatrix7", Name: "OpenAI", Target: "AI"},
-			},
+			CatalogAvailable: false,
+			Diagnostic:       "stale bootstrap diagnostic",
 		},
 	}
 	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
@@ -1356,11 +1356,12 @@ func TestToolsCallPacksListUsesBootstrapCatalog(t *testing.T) {
 	}
 }
 
-func TestToolsCallPacksListReturnsBootstrapDiagnostics(t *testing.T) {
+func TestToolsCallPacksListReturnsCurrentCatalogError(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
 	state := appinit.RuntimeState{
-		Rules: appinit.RulesState{
-			CatalogAvailable: false,
-			Diagnostic:       "rules cache unavailable",
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir: filepath.Join(".runtime", "rules", "packs"),
 		},
 	}
 	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
@@ -1372,8 +1373,8 @@ func TestToolsCallPacksListReturnsBootstrapDiagnostics(t *testing.T) {
 			"arguments": map[string]any{},
 		},
 	})
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, "rules cache unavailable") {
-		t.Fatalf("response error = %+v, want bootstrap diagnostic", resp.Error)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, ".runtime") {
+		t.Fatalf("response error = %+v, want current cache error", resp.Error)
 	}
 }
 
@@ -1415,23 +1416,17 @@ func TestToolsCallPacksGetReturnsSerializableResult(t *testing.T) {
 	}
 }
 
-func TestToolsCallPacksGetUsesBootstrapCatalog(t *testing.T) {
+func TestToolsCallPacksGetReadsCurrentCatalogWhenServerStateIsStale(t *testing.T) {
+	setupMCPPackCache(t)
 	state := appinit.RuntimeState{
-		Rules: appinit.RulesState{
-			CatalogAvailable: true,
-			Details: map[string]rules.PackDetail{
-				"blackmatrix7_OpenAI": {
-					ID:     "blackmatrix7_OpenAI",
-					Source: "blackmatrix7",
-					Name:   "OpenAI",
-					Target: "AI",
-					Providers: []rules.ProviderSummary{
-						{Name: "blackmatrix7_OpenAI", Path: "./rule-packs/blackmatrix7/OpenAI.yaml"},
-					},
-				},
-			},
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir:    filepath.Join(".runtime", "rules", "packs"),
+			MihomoRuntimeDir: ".runtime/mihomo",
 		},
-		Paths: appinit.RuntimePaths{MihomoRuntimeDir: ".runtime/mihomo"},
+		Rules: appinit.RulesState{
+			CatalogAvailable: false,
+			Diagnostic:       "stale bootstrap diagnostic",
+		},
 	}
 	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
 		"jsonrpc": "2.0",
@@ -1766,11 +1761,19 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	config := filepath.Join(dir, "mihomo.yaml")
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	core := filepath.Join(dir, "mihomo")
+	writeTestExecutable(t, core, "#!/bin/sh\nsleep 30\n")
+	cmd := exec.Command(core, "-d", workDir, "-f", config)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer killMCPProcess(cmd.Process.Pid)
+	go func() { _ = cmd.Wait() }()
+	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	resp := callHandle(t, map[string]any{
@@ -1782,6 +1785,7 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 			"arguments": map[string]any{
 				"config":      config,
 				"runtime_dir": workDir,
+				"core":        core,
 				"log_file":    filepath.Join(workDir, "mihomo.log"),
 			},
 		},
@@ -1791,7 +1795,7 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["running"] != true || int(content["pid"].(float64)) != os.Getpid() {
+	if content["running"] != true || int(content["pid"].(float64)) != cmd.Process.Pid {
 		t.Fatalf("runtime_status content = %+v, want current pid running", content)
 	}
 	if content["external_ui_url"] != "http://127.0.0.1:9090/ui" {

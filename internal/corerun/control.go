@@ -12,6 +12,7 @@ import (
 )
 
 type StatusOptions struct {
+	CorePath   string
 	ConfigPath string
 	WorkDir    string
 	LogPath    string
@@ -20,6 +21,7 @@ type StatusOptions struct {
 type StatusResult struct {
 	Running            bool   `json:"running"`
 	PID                int    `json:"pid,omitempty"`
+	ProcessAlive       bool   `json:"process_alive,omitempty"`
 	PIDFile            string `json:"pid_file"`
 	StalePIDFile       bool   `json:"stale_pid_file,omitempty"`
 	StalePIDFileReason string `json:"stale_pid_file_reason,omitempty"`
@@ -73,6 +75,7 @@ type RestartResult struct {
 
 func Status(opts StatusOptions) StatusResult {
 	normalized := normalizeStartOptions(StartOptions{
+		CorePath:   opts.CorePath,
 		ConfigPath: opts.ConfigPath,
 		WorkDir:    opts.WorkDir,
 		LogPath:    opts.LogPath,
@@ -97,12 +100,18 @@ func Status(opts StatusOptions) StatusResult {
 		return result
 	}
 	result.PID = pid
-	if processRunning(pid) {
-		result.Running = true
+	if !processRunning(pid) {
+		result.StalePIDFile = true
+		result.StalePIDFileReason = "pid file points to a process that is not running"
 		return result
 	}
-	result.StalePIDFile = true
-	result.StalePIDFileReason = "pid file points to a process that is not running"
+	result.ProcessAlive = true
+	if ok, reason := processMatchesRuntime(pid, normalized); !ok {
+		result.StalePIDFile = true
+		result.StalePIDFileReason = reason
+		return result
+	}
+	result.Running = true
 	return result
 }
 
@@ -261,4 +270,56 @@ func waitForExit(pid int, timeout time.Duration) bool {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+func processMatchesRuntime(pid int, opts StartOptions) (bool, string) {
+	args, ok, err := readProcessCommandLine(pid)
+	if err != nil || !ok || len(args) == 0 {
+		return true, ""
+	}
+	if !processCommandLooksLikeCore(args[0], opts.CorePath) {
+		return false, "pid file points to a live process, but it is not the configured Mihomo core"
+	}
+	if !processCommandHasArg(args, "-d", opts.WorkDir) {
+		return false, "pid file points to a live process, but it is not using the configured runtime directory"
+	}
+	if !processCommandHasArg(args, "-f", opts.ConfigPath) {
+		return false, "pid file points to a live process, but it is not using the configured config"
+	}
+	return true, ""
+}
+
+var readProcessCommandLine = func(pid int) ([]string, bool, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	fields := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
+	if len(fields) == 1 && fields[0] == "" {
+		return nil, true, nil
+	}
+	return fields, true, nil
+}
+
+func processCommandLooksLikeCore(command, corePath string) bool {
+	commandBase := filepath.Base(command)
+	coreBase := filepath.Base(corePath)
+	if command == corePath || commandBase == coreBase {
+		return true
+	}
+	lower := strings.ToLower(commandBase)
+	return strings.Contains(lower, "mihomo")
+}
+
+func processCommandHasArg(args []string, flag, expected string) bool {
+	expected = filepath.Clean(expected)
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && filepath.Clean(args[i+1]) == expected {
+			return true
+		}
+	}
+	return false
 }

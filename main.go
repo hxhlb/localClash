@@ -459,6 +459,7 @@ func runStatus(args []string, state appinit.RuntimeState) error {
 
 	var opts corerun.StatusOptions
 	var asJSON bool
+	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
 	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "Mihomo runtime config path")
 	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
 	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
@@ -626,6 +627,9 @@ func printRuntimeStatus(result corerun.StatusResult) {
 	}
 	fmt.Printf("runtime dir: %s\n", result.RuntimeDir)
 	fmt.Printf("pid file: %s\n", result.PIDFile)
+	if result.PID != 0 {
+		fmt.Printf("pid alive: %t\n", result.ProcessAlive)
+	}
 	fmt.Printf("config: %s\n", result.Config)
 	fmt.Printf("log: %s\n", result.LogFile)
 	if result.ExternalController != "" {

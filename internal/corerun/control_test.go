@@ -27,6 +27,7 @@ func TestStatusReportsRunningRuntime(t *testing.T) {
 	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
 
 	result := Status(StatusOptions{
 		ConfigPath: config,
@@ -38,6 +39,34 @@ func TestStatusReportsRunningRuntime(t *testing.T) {
 	}
 	if result.ExternalUIURL != "http://127.0.0.1:9090/ui" {
 		t.Fatalf("external ui url = %q", result.ExternalUIURL)
+	}
+}
+
+func TestStatusReportsStalePIDWhenProcessDoesNotMatchRuntime(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := writeStartConfig(t, dir)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(cmd.Process.Pid)
+	go func() { _ = cmd.Wait() }()
+	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{"sleep", "30"})
+
+	result := Status(StatusOptions{
+		ConfigPath: config,
+		WorkDir:    workDir,
+		LogPath:    filepath.Join(workDir, "mihomo.log"),
+	})
+	if result.Running || !result.ProcessAlive || !result.StalePIDFile || !strings.Contains(result.StalePIDFileReason, "not the configured Mihomo core") {
+		t.Fatalf("status = %+v, want live non-runtime pid reported stale", result)
 	}
 }
 
@@ -150,10 +179,25 @@ sleep 30
 	if err == nil || !strings.Contains(err.Error(), "mihomo config test failed") {
 		t.Fatalf("restart error = %v, want pretest failure", err)
 	}
-	status := Status(StatusOptions{WorkDir: workDir})
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
+	status := Status(StatusOptions{ConfigPath: config, WorkDir: workDir})
 	if !status.Running || status.PID != cmd.Process.Pid {
 		t.Fatalf("status after failed restart = %+v, want original runtime still running", status)
 	}
+}
+
+func stubProcessCommandLine(t *testing.T, pid int, args []string) {
+	t.Helper()
+	original := readProcessCommandLine
+	readProcessCommandLine = func(candidate int) ([]string, bool, error) {
+		if candidate == pid {
+			return args, true, nil
+		}
+		return original(candidate)
+	}
+	t.Cleanup(func() {
+		readProcessCommandLine = original
+	})
 }
 
 func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {

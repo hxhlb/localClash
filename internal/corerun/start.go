@@ -44,6 +44,8 @@ var NetworkInterruptionWarnings = []string{
 	"The Agent itself may depend on the current network/proxy path and could be disconnected after this operation.",
 }
 
+var afterProcessStart = func(*exec.Cmd) {}
+
 func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	opts = normalizeStartOptions(opts)
 	if opts.Foreground {
@@ -75,10 +77,19 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 
 	pidPath := runtimePIDPath(runOpts.WorkDir)
 	if pid, ok := readRunningPID(pidPath); ok {
-		baseResult.AlreadyRunning = true
-		baseResult.PID = pid
-		baseResult.Warnings = append(baseResult.Warnings, "Runtime is already running; run_runtime did not start a second process.")
-		return baseResult, nil
+		if match, _ := processMatchesRuntime(pid, StartOptions{
+			CorePath:   runOpts.CorePath,
+			ConfigPath: runOpts.ConfigPath,
+			WorkDir:    runOpts.WorkDir,
+			LogPath:    runOpts.LogPath,
+		}); !match {
+			_ = os.Remove(pidPath)
+		} else {
+			baseResult.AlreadyRunning = true
+			baseResult.PID = pid
+			baseResult.Warnings = append(baseResult.Warnings, "Runtime is already running; run_runtime did not start a second process.")
+			return baseResult, nil
+		}
 	}
 	if err := testConfig(ctx, runOpts); err != nil {
 		return StartResult{}, err
@@ -96,7 +107,10 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 		_ = logFile.Close()
 		return StartResult{}, err
 	}
+	afterProcessStart(cmd)
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
 		_ = logFile.Close()
 		return StartResult{}, err
 	}
