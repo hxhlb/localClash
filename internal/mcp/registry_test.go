@@ -96,6 +96,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["stop_runtime"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("stop_runtime safety = %q, want %q", byName["stop_runtime"].SafetyLevel, ConfirmRequired)
 	}
+	if !strings.Contains(byName["stop_runtime"].Description, "router_takeover_stop") || !strings.Contains(byName["stop_runtime"].Description, "force=true") {
+		t.Fatalf("stop_runtime description missing takeover guard guidance: %q", byName["stop_runtime"].Description)
+	}
 	if byName["router_takeover_apply"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("router_takeover_apply safety = %q, want %q", byName["router_takeover_apply"].SafetyLevel, ConfirmRequired)
 	}

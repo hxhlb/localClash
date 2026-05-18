@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"localclash/internal/appinit"
+	"localclash/internal/routertakeover"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 )
@@ -1862,6 +1863,53 @@ sleep 30
 	}
 	if _, err := json.Marshal(stopResult.StructuredContent); err != nil {
 		t.Fatalf("stop_runtime structured content is not serializable: %v", err)
+	}
+}
+
+func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
+	original := routerTakeoverStatus
+	routerTakeoverStatus = func(ctx context.Context, opts routertakeover.Options) (routertakeover.Result, error) {
+		return routertakeover.Result{
+			ProfileMode:    runtimeprofile.ModeRouter,
+			RuntimeRunning: true,
+			Effective:      true,
+		}, nil
+	}
+	t.Cleanup(func() {
+		routerTakeoverStatus = original
+	})
+
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "stop_runtime",
+			"arguments": map[string]any{
+				"runtime_profile": filepath.Join(dir, "localclash-runtime.yaml"),
+				"runtime_dir":     workDir,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("stop_runtime returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["refused"] != true || !strings.Contains(content["error"].(string), "router takeover") {
+		t.Fatalf("stop_runtime content = %+v, want router takeover refusal", content)
+	}
+	actions := content["next_actions"].([]any)
+	if len(actions) == 0 || !strings.Contains(actions[0].(string), "router_takeover_stop") {
+		t.Fatalf("next_actions = %+v, want router_takeover_stop guidance", actions)
 	}
 }
 

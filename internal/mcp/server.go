@@ -33,6 +33,8 @@ type Server struct {
 	state *appinit.RuntimeState
 }
 
+var routerTakeoverStatus = routertakeover.Status
+
 func NewServer() *Server {
 	return &Server{}
 }
@@ -419,7 +421,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "sed_file":
 		return callSedFile(args)
 	case "stop_runtime":
-		return s.callStopRuntime(args)
+		return s.callStopRuntime(ctx, args)
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
@@ -2392,17 +2394,67 @@ func (s *Server) callRouterTakeoverStop(ctx context.Context, args json.RawMessag
 	return jsonToolResult(result)
 }
 
-func (s *Server) callStopRuntime(args json.RawMessage) (toolResult, error) {
+func (s *Server) callStopRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		RuntimeDir string `json:"runtime_dir"`
-		TimeoutMS  int    `json:"timeout_ms"`
-		Force      bool   `json:"force"`
+		RuntimeProfile string `json:"runtime_profile"`
+		Config         string `json:"config"`
+		RuntimeDir     string `json:"runtime_dir"`
+		LogFile        string `json:"log_file"`
+		StateDir       string `json:"state_dir"`
+		DNSPort        int    `json:"dns_port"`
+		RedirPort      int    `json:"redir_port"`
+		TunDevice      string `json:"tun_device"`
+		TimeoutMS      int    `json:"timeout_ms"`
+		Force          bool   `json:"force"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil && in.RuntimeDir == "" {
-		in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+	if s.state != nil {
+		if in.RuntimeProfile == "" {
+			in.RuntimeProfile = s.state.Paths.RuntimeProfilePath
+		}
+		if in.Config == "" {
+			in.Config = s.state.Paths.GeneratedConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+	}
+	if !in.Force && (s.state != nil || strings.TrimSpace(in.RuntimeProfile) != "") {
+		takeover, takeoverErr := routerTakeoverStatus(ctx, routertakeover.Options{
+			RuntimeProfile: in.RuntimeProfile,
+			ConfigPath:     in.Config,
+			RuntimeDir:     in.RuntimeDir,
+			LogPath:        in.LogFile,
+			StateDir:       in.StateDir,
+			DNSPort:        in.DNSPort,
+			RedirPort:      in.RedirPort,
+			TunDevice:      in.TunDevice,
+		})
+		if takeoverErr == nil && takeover.Effective {
+			status := corerun.Status(corerun.StatusOptions{
+				ConfigPath: in.Config,
+				WorkDir:    in.RuntimeDir,
+				LogPath:    in.LogFile,
+			})
+			return jsonToolResult(corerun.StopResult{
+				Refused:    true,
+				WasRunning: status.Running,
+				PID:        status.PID,
+				RuntimeDir: status.RuntimeDir,
+				PIDFile:    status.PIDFile,
+				Error:      "router takeover is effective; stopping Mihomo would break the router traffic path",
+				Warnings: []string{
+					"router takeover is currently effective and depends on the Mihomo runtime.",
+					"stop_runtime refused to stop Mihomo because router traffic may still be redirected to it.",
+				},
+				NextActions: []string{
+					"call router_takeover_stop after user confirmation, then call stop_runtime again",
+					"or call stop_runtime with force=true if the user explicitly accepts breaking the active router traffic path",
+				},
+			})
+		}
 	}
 	result, err := corerun.Stop(corerun.StopOptions{
 		WorkDir:   in.RuntimeDir,

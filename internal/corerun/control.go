@@ -46,17 +46,20 @@ type RestartOptions struct {
 }
 
 type StopResult struct {
-	Stopped            bool   `json:"stopped"`
-	WasRunning         bool   `json:"was_running"`
-	PID                int    `json:"pid,omitempty"`
-	Signal             string `json:"signal,omitempty"`
-	Forced             bool   `json:"forced,omitempty"`
-	RuntimeDir         string `json:"runtime_dir"`
-	PIDFile            string `json:"pid_file"`
-	RemovedPIDFile     bool   `json:"removed_pid_file,omitempty"`
-	StalePIDFile       bool   `json:"stale_pid_file,omitempty"`
-	StalePIDFileReason string `json:"stale_pid_file_reason,omitempty"`
-	Error              string `json:"error,omitempty"`
+	Stopped            bool     `json:"stopped"`
+	WasRunning         bool     `json:"was_running"`
+	Refused            bool     `json:"refused,omitempty"`
+	PID                int      `json:"pid,omitempty"`
+	Signal             string   `json:"signal,omitempty"`
+	Forced             bool     `json:"forced,omitempty"`
+	RuntimeDir         string   `json:"runtime_dir"`
+	PIDFile            string   `json:"pid_file"`
+	RemovedPIDFile     bool     `json:"removed_pid_file,omitempty"`
+	StalePIDFile       bool     `json:"stale_pid_file,omitempty"`
+	StalePIDFileReason string   `json:"stale_pid_file_reason,omitempty"`
+	Error              string   `json:"error,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	NextActions        []string `json:"next_actions,omitempty"`
 }
 
 type RestartResult struct {

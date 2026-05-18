@@ -72,7 +72,7 @@ func Registry() []Tool {
 		{Name: "router_takeover_apply", SafetyLevel: ConfirmRequired, Description: "Apply localClash-owned OpenWrt router takeover runtime rules for router profile mode. Uses localClash router redir-host-mix behavior: TCP redir-host, DNS hijack, fwmark route, and TUN forwarding. Does not persist firewall config; call only after run_runtime or restart_runtime and user confirmation."},
 		{Name: "router_takeover_stop", SafetyLevel: ConfirmRequired, Description: "Remove localClash-owned OpenWrt router takeover runtime rules without stopping Mihomo. This changes firewall, DNS, and policy-routing runtime state and requires user confirmation."},
 		{Name: "sed_file", SafetyLevel: SafeWrite, Description: "Apply sed-style repository-local text edits with dry-run diff output. Defaults to dry_run=true."},
-		{Name: "stop_runtime", SafetyLevel: ConfirmRequired, Description: "Stop the Mihomo runtime recorded by the local PID file. Requires external Agent/MCP client confirmation because stopping the proxy runtime may interrupt network connectivity."},
+		{Name: "stop_runtime", SafetyLevel: ConfirmRequired, Description: "Stop the Mihomo runtime recorded by the local PID file. Refuses by default when router takeover is effective because router traffic still depends on Mihomo; call router_takeover_stop first or pass force=true only after explicit user confirmation."},
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools
@@ -447,9 +447,16 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"timeout_ms":  map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
-				"force":       map[string]any{"type": "boolean", "description": "Send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
+				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path used to detect router takeover. Defaults to localclash-runtime.yaml."},
+				"config":          map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to generated/mihomo.yaml."},
+				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
+				"log_file":        map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
+				"state_dir":       map[string]any{"type": "string", "description": "localClash router takeover runtime state directory used for takeover detection. Defaults to /tmp/localclash/router-takeover."},
+				"dns_port":        map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo DNS listen port used for takeover detection. Defaults to router profile DNS listen port or 7874."},
+				"redir_port":      map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo redir-port used for takeover detection. Defaults to router profile redir-port or 7892."},
+				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device used for takeover detection. Defaults to router profile TUN device or utun."},
+				"timeout_ms":      map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
+				"force":           map[string]any{"type": "boolean", "description": "Bypass the active router takeover guard and send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
 			},
 		}
 	case "subscriptions_status":

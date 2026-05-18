@@ -320,6 +320,10 @@ MCP runtime tool:
   process if needed, and starts it again in one confirmed call. Use this when
   Mihomo is already running and the agent may lose connectivity between a
   separate `stop_runtime` and `run_runtime`.
+- `stop_runtime`: stops Mihomo only when it is not still required by active
+  router takeover. If `router_takeover_status.effective` is true, call
+  `router_takeover_stop` first, or pass `force: true` only after explicit user
+  confirmation.
 
 `run_runtime` and `restart_runtime` are `confirm_required`. localClash does not
 implement an interactive yes/no prompt inside the tool; the Agent SDK or MCP
@@ -532,6 +536,9 @@ log file, external controller, and dashboard URL when available. Use
 process and removes stale PID files; use `--force` to send SIGKILL if the
 runtime does not stop before `--timeout`. `restart` validates the generated
 config before stopping the old process, then starts a new background runtime.
+The MCP `stop_runtime` tool adds an Agent safety guard: it refuses to stop
+Mihomo while localClash router takeover is effective unless `force: true` is
+explicitly supplied.
 
 ## Factory Reset
 
