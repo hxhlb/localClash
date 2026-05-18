@@ -12,7 +12,7 @@ Flags:
   --host HOST          SSH target (default: root@192.168.6.1)
   --arch ARCH          Go target arch (default: arm64)
   --remote-bin PATH    Router install path (default: /usr/local/bin/localclash)
-  --workdir PATH       Router working directory (default: /root)
+  --workdir PATH       Router working directory (default: /root/localclash)
   --mcp-addr ADDR      Router MCP bind address (default: 0.0.0.0:8765)
   --mcp-path PATH      Router MCP JSON-RPC path (default: /mcp)
   --skip-tests         Skip go test before building
@@ -22,9 +22,10 @@ Flags:
 
 Environment variables with the LOCALCLASH_ prefix can also override defaults:
 LOCALCLASH_ROUTER_SSH, LOCALCLASH_ROUTER_ARCH, LOCALCLASH_REMOTE_BIN,
-LOCALCLASH_ROUTER_WORKDIR, LOCALCLASH_MCP_ADDR, LOCALCLASH_MCP_PATH,
-LOCALCLASH_SKIP_TESTS, LOCALCLASH_SSH_CONNECT_TIMEOUT,
-LOCALCLASH_SSH_LOG_LEVEL, LOCALCLASH_TAIL_LOGS, LOCALCLASH_TAIL_LINES.
+LOCALCLASH_ROUTER_WORKDIR, LOCALCLASH_ROUTER_LEGACY_WORKDIR,
+LOCALCLASH_MCP_ADDR, LOCALCLASH_MCP_PATH, LOCALCLASH_SKIP_TESTS,
+LOCALCLASH_SSH_CONNECT_TIMEOUT, LOCALCLASH_SSH_LOG_LEVEL,
+LOCALCLASH_TAIL_LOGS, LOCALCLASH_TAIL_LINES.
 USAGE
 }
 
@@ -68,7 +69,8 @@ router_ssh="${LOCALCLASH_ROUTER_SSH:-root@192.168.6.1}"
 target_os="linux"
 target_arch="${LOCALCLASH_ROUTER_ARCH:-arm64}"
 remote_bin="${LOCALCLASH_REMOTE_BIN:-/usr/local/bin/localclash}"
-remote_workdir="${LOCALCLASH_ROUTER_WORKDIR:-/root}"
+remote_workdir="${LOCALCLASH_ROUTER_WORKDIR:-/root/localclash}"
+legacy_workdir="${LOCALCLASH_ROUTER_LEGACY_WORKDIR:-/root}"
 mcp_addr="${LOCALCLASH_MCP_ADDR:-0.0.0.0:8765}"
 mcp_path="${LOCALCLASH_MCP_PATH:-/mcp}"
 skip_tests="${LOCALCLASH_SKIP_TESTS:-0}"
@@ -142,6 +144,7 @@ remote_assets_tmp="/tmp/localclash-assets.$$"
 
 reject_unsafe_value "remote_bin" "${remote_bin}"
 reject_unsafe_value "remote_workdir" "${remote_workdir}"
+reject_unsafe_value "legacy_workdir" "${legacy_workdir}"
 reject_unsafe_value "mcp_addr" "${mcp_addr}"
 reject_unsafe_value "mcp_path" "${mcp_path}"
 reject_unsafe_value "mcp_log" "${mcp_log}"
@@ -221,6 +224,46 @@ rm -f "$remote_tmp"
 ln -sf "$remote_bin" "$remote_link"
 "$remote_bin" --help >/dev/null
 sha256sum "$remote_bin"
+EOS
+
+log "preparing isolated workdir ${remote_workdir}"
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_workdir}" "${legacy_workdir}" <<'EOS'
+set -eu
+remote_workdir="$1"
+legacy_workdir="$2"
+
+mkdir -p "$remote_workdir"
+if [ "$remote_workdir" = "$legacy_workdir" ]; then
+  printf 'migrated legacy localClash artifacts: 0\n'
+  exit 0
+fi
+
+migrated=0
+for file in \
+  localclash-subscriptions.yaml \
+  subscription.yaml \
+  localclash.yaml \
+  localclash-packs.yaml \
+  localclash-runtime.yaml
+do
+  source="$legacy_workdir/$file"
+  target="$remote_workdir/$file"
+  if [ -f "$source" ] && [ ! -e "$target" ]; then
+    mkdir -p "$(dirname "$target")"
+    cp -p "$source" "$target"
+    migrated=$((migrated + 1))
+  fi
+done
+
+for dir in generated policies rule-sources .runtime; do
+  source="$legacy_workdir/$dir"
+  target="$remote_workdir/$dir"
+  if [ -d "$source" ] && [ ! -e "$target" ]; then
+    cp -a "$source" "$target"
+    migrated=$((migrated + 1))
+  fi
+done
+printf 'migrated legacy localClash artifacts: %s\n' "$migrated"
 EOS
 
 assets_archive="$(mktemp "${TMPDIR:-/tmp}/localclash-assets.XXXXXX")"
