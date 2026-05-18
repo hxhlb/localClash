@@ -207,11 +207,12 @@ log "uploading binary to ${router_ssh}:${remote_tmp}"
 scp "${ssh_opts[@]}" "${local_bin}" "${router_ssh}:${remote_tmp}"
 
 log "installing binary at ${remote_bin}"
-ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_tmp}" "${remote_bin}" "${remote_link}" <<'EOS'
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_tmp}" "${remote_bin}" "${remote_link}" "${remote_workdir}" <<'EOS'
 set -eu
 remote_tmp="$1"
 remote_bin="$2"
 remote_link="$3"
+remote_workdir="$4"
 
 mkdir -p "$(dirname "$remote_bin")"
 if [ -e "$remote_bin" ]; then
@@ -221,7 +222,15 @@ cp "$remote_tmp" "$remote_bin.tmp"
 chmod 0755 "$remote_bin.tmp"
 mv "$remote_bin.tmp" "$remote_bin"
 rm -f "$remote_tmp"
-ln -sf "$remote_bin" "$remote_link"
+rm -f "$remote_link"
+cat >"$remote_link" <<WRAPPER
+#!/bin/sh
+set -eu
+mkdir -p '$remote_workdir'
+cd '$remote_workdir'
+exec '$remote_bin' "\$@"
+WRAPPER
+chmod 0755 "$remote_link"
 "$remote_bin" --help >/dev/null
 sha256sum "$remote_bin"
 EOS
@@ -255,7 +264,7 @@ do
   fi
 done
 
-for dir in generated policies rule-sources .runtime; do
+for dir in bin generated policies rule-sources .runtime; do
   source="$legacy_workdir/$dir"
   target="$remote_workdir/$dir"
   if [ -d "$source" ] && [ ! -e "$target" ]; then

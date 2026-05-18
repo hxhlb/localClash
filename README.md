@@ -124,15 +124,15 @@ scripts/deploy-router.sh --host root@192.168.6.1
 ```
 
 The script builds `bin/linux-arm64/localclash`, installs it to the router at
-`/usr/local/bin/localclash`, ensures `/usr/bin/localclash` is available, installs
-the OpenWrt procd service `/etc/init.d/localclash-mcp`, and runs MCP from the
-isolated working directory `/root/localclash` by default. On first deployment to
-that directory it copies existing localClash files from `/root` when the target
-file is missing, installs missing base assets from `policies/` and
-`rule-sources/` without overwriting existing files, and restarts the MCP HTTP
-server on `http://192.168.6.1:8765/mcp`. After deployment it follows the router
-MCP log with `tail -f` until interrupted with `Ctrl+C`; use `--no-tail` for
-non-interactive automation.
+`/usr/local/bin/localclash`, installs `/usr/bin/localclash` as a wrapper that
+enters `/root/localclash`, installs the OpenWrt procd service
+`/etc/init.d/localclash-mcp`, and runs MCP from the same isolated working
+directory by default. On first deployment to that directory it copies existing
+localClash files from `/root` when the target file is missing, installs missing
+base assets from `policies/` and `rule-sources/` without overwriting existing
+files, and restarts the MCP HTTP server on `http://192.168.6.1:8765/mcp`. After
+deployment it follows the router MCP log with `tail -f` until interrupted with
+`Ctrl+C`; use `--no-tail` for non-interactive automation.
 
 Tool safety levels are part of the tool metadata:
 
