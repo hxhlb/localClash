@@ -264,6 +264,10 @@ them. Advanced users can edit `profiles/*.yaml` directly, or ask an agent to use
 `nl_file` and `sed_file` for explicit line-based edits. The product MCP path is
 still profile switching, not granular DNS/TUN patching.
 
+When `core: smart` is active, rendered proxy groups with localClash `auto`
+intent are materialized as Mihomo `type: smart` groups. With `core: meta`, the
+same `auto` intent remains `url-test`.
+
 MCP patch-building tools:
 
 - `proxy_group_build`: build and validate a reusable proxy group target from a

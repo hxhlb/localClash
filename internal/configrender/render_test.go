@@ -265,6 +265,59 @@ func TestRenderAppliesActiveRuntimeProfile(t *testing.T) {
 	}
 }
 
+func TestRenderSmartCoreMaterializesAutoGroupsAsSmart(t *testing.T) {
+	paths := writeRenderFixture(t)
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.yaml")
+	if _, err := runtimeprofile.Configure(profilePath, "", runtimeprofile.CoreSmart); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, paths.selection, `version: 1
+proxy_groups:
+  AI:
+    nodes: ["🇯🇵日本01 | JP"]
+    auto: true
+enabled_packs:
+  - source: sukkaw
+    pack: ai
+    target: AI
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		PolicyPath:         paths.policy,
+		OutputPath:         filepath.Join(paths.dir, "smart.yaml"),
+		PacksSelectionPath: paths.selection,
+		RulesCacheDir:      paths.cacheDir,
+		RuntimeProfilePath: profilePath,
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Core != runtimeprofile.CoreSmart {
+		t.Fatalf("core = %q, want smart", result.Core)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	for _, name := range []string{"AUTO", "AI"} {
+		group := proxyGroupFromConfig(t, config, name)
+		if group["type"] != "smart" {
+			t.Fatalf("%s type = %v, want smart", name, group["type"])
+		}
+		if group["url"] != nil || group["interval"] != nil {
+			t.Fatalf("%s kept url-test fields: %+v", name, group)
+		}
+		if group["uselightgbm"] != true || group["prefer-asn"] != true {
+			t.Fatalf("%s smart options = %+v, want defaults", name, group)
+		}
+	}
+	metadata := config["x-localclash"].(map[string]any)
+	overlay := metadata["overlay"].(map[string]any)
+	proxyGroups := overlay["proxy_groups"].([]any)
+	if got := proxyGroups[0].(map[string]any)["mode"]; got != "auto" {
+		t.Fatalf("metadata proxy group mode = %v, want original auto intent", got)
+	}
+}
+
 func TestMergeRuleProvidersRejectsConflict(t *testing.T) {
 	base := map[string]any{"applications": map[string]any{}}
 	err := mergeRuleProviders(base, map[string]map[string]any{"applications": {}})
@@ -432,6 +485,18 @@ func proxyGroupNamesFromConfig(config map[string]any) map[string]bool {
 		out[group["name"].(string)] = true
 	}
 	return out
+}
+
+func proxyGroupFromConfig(t *testing.T, config map[string]any, name string) map[string]any {
+	t.Helper()
+	for _, raw := range config["proxy-groups"].([]any) {
+		group := raw.(map[string]any)
+		if group["name"] == name {
+			return group
+		}
+	}
+	t.Fatalf("missing proxy-group %q", name)
+	return nil
 }
 
 func testStringSlice(raw any) []string {

@@ -155,6 +155,9 @@ func Render(opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if runtimeFile.Core == runtimeprofile.CoreSmart {
+		applySmartCoreProxyGroups(rendered, runtimeFile.Smart)
+	}
 	runtimeprofile.ApplyToConfig(rendered, profile)
 	rendered[configmeta.Key] = buildLocalClashMetadata(selection, fragment)
 
@@ -451,6 +454,50 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 	}
 	config["rules"] = rules
 	return config, nil
+}
+
+func applySmartCoreProxyGroups(config map[string]any, opts runtimeprofile.SmartOptions) {
+	groups, ok := config["proxy-groups"].([]map[string]any)
+	if !ok {
+		return
+	}
+	for _, group := range groups {
+		groupType := strings.ToLower(strings.TrimSpace(stringValue(group["type"])))
+		if groupType == "url-test" {
+			group["type"] = "smart"
+			delete(group, "url")
+			delete(group, "interval")
+			delete(group, "tolerance")
+			groupType = "smart"
+		}
+		if groupType == "smart" {
+			applySmartGroupOptions(group, opts)
+		}
+	}
+}
+
+func applySmartGroupOptions(group map[string]any, opts runtimeprofile.SmartOptions) {
+	if opts.UseLightGBM {
+		setDefaultAny(group, "uselightgbm", true)
+	}
+	if opts.PreferASN {
+		setDefaultAny(group, "prefer-asn", true)
+	}
+	if opts.CollectData {
+		setDefaultAny(group, "collectdata", true)
+	}
+	if opts.SampleRate != 0 {
+		setDefaultAny(group, "sample-rate", opts.SampleRate)
+	}
+	if strings.TrimSpace(opts.PolicyPriority) != "" {
+		setDefaultAny(group, "policy-priority", opts.PolicyPriority)
+	}
+}
+
+func setDefaultAny(values map[string]any, key string, value any) {
+	if _, exists := values[key]; !exists {
+		values[key] = value
+	}
 }
 
 func buildOrderedRules(pol policy, mode policyMode, fragment *rulespkg.Fragment) ([]string, error) {
