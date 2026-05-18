@@ -12,7 +12,6 @@ mihomo:
   external-controller: 0.0.0.0:9090
   external-ui: ui/zashboard
   ipv6: true
-  interface-name: pppoe-wan
   geodata-mode: true
   geodata-loader: standard
   tcp-concurrent: true
@@ -33,13 +32,42 @@ mihomo:
     respect-rules: true
     fake-ip-filter-mode: blacklist
     nameserver:
-      - tcp://127.0.0.1:5335
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
     proxy-server-nameserver:
-      - tcp://127.0.0.1:5335
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
     direct-nameserver:
-      - tcp://127.0.0.1:5335
+      - https://dns.alidns.com/dns-query
+      - https://doh.pub/dns-query
     default-nameserver:
-      - tcp://127.0.0.1:5335
+      - 223.5.5.5
+      - 119.29.29.29
+    fallback:
+      - tls://1.1.1.1
+      - tls://8.8.8.8
+    fallback-filter:
+      geoip: true
+      geoip-code: CN
+      geosite:
+        - gfw
+      ipcidr:
+        - 0.0.0.0/8
+        - 10.0.0.0/8
+        - 100.64.0.0/10
+        - 127.0.0.0/8
+        - 169.254.0.0/16
+        - 172.16.0.0/12
+        - 192.0.0.0/24
+        - 192.0.2.0/24
+        - 192.88.99.0/24
+        - 192.168.0.0/16
+        - 198.18.0.0/15
+        - 198.51.100.0/24
+        - 203.0.113.0/24
+        - 224.0.0.0/4
+        - 240.0.0.0/4
+        - 255.255.255.255/32
   tun:
     enable: true
     stack: mixed
@@ -91,7 +119,6 @@ mihomo:
     write-to-system: true
 deploy:
   lan-interface: br-lan
-  wan-interface: pppoe-wan
   router-self-proxy: true
   dnsmasq-redirect: true
   ipv6-mode: 3

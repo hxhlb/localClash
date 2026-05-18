@@ -1,6 +1,7 @@
 package runtimeprofile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,7 +93,6 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		"bind-address":        "*",
 		"external-controller": "0.0.0.0:9090",
 		"ipv6":                true,
-		"interface-name":      "pppoe-wan",
 		"geodata-mode":        true,
 		"geodata-loader":      "standard",
 		"tcp-concurrent":      true,
@@ -110,6 +110,21 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 	if dns["enhanced-mode"] != "redir-host" || dns["listen"] != "0.0.0.0:7874" || dns["respect-rules"] != true {
 		t.Fatalf("router dns = %+v, want redir-host dns on 0.0.0.0:7874 with respect-rules", dns)
 	}
+	for _, key := range []string{"nameserver", "proxy-server-nameserver", "direct-nameserver", "default-nameserver"} {
+		if strings.Contains(fmt.Sprint(dns[key]), "127.0.0.1:5335") {
+			t.Fatalf("router dns %s = %+v, must not depend on Ronnie's local mosDNS", key, dns[key])
+		}
+	}
+	if !strings.Contains(fmt.Sprint(dns["fallback"]), "tls://1.1.1.1") || !strings.Contains(fmt.Sprint(dns["fallback"]), "tls://8.8.8.8") {
+		t.Fatalf("router dns fallback = %+v, want global encrypted fallback resolvers", dns["fallback"])
+	}
+	filter, ok := dns["fallback-filter"].(map[string]any)
+	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || !strings.Contains(fmt.Sprint(filter["geosite"]), "gfw") {
+		t.Fatalf("router dns fallback-filter = %+v, want geoip CN and geosite gfw anti-pollution filter", dns["fallback-filter"])
+	}
+	if _, ok := mihomo["interface-name"]; ok {
+		t.Fatalf("router default must not pin Ronnie's WAN device: %+v", mihomo["interface-name"])
+	}
 	tun := mihomo["tun"].(map[string]any)
 	if tun["stack"] != "mixed" || tun["device"] != "utun" || tun["auto-route"] != false || tun["auto-redirect"] != false {
 		t.Fatalf("router tun = %+v, want mixed utun without Mihomo auto-route/auto-redirect", tun)
@@ -120,6 +135,9 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 	}
 	if _, ok := profile.Deploy["openclash-conflict"]; ok {
 		t.Fatalf("router deploy must not contain OpenClash conflict policy: %+v", profile.Deploy)
+	}
+	if _, ok := profile.Deploy["wan-interface"]; ok {
+		t.Fatalf("router deploy must not pin Ronnie's WAN interface: %+v", profile.Deploy)
 	}
 }
 
