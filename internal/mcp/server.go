@@ -980,6 +980,7 @@ func configStatusNextActions(render configRenderState) []string {
 				actions = append(actions, "call subscriptions_status", "call subscriptions_refresh to create subscription.yaml")
 			case "policy":
 				actions = append(actions,
+					"call doctor to inspect localClash base assets and generated config state before choosing a repair path",
 					"localClash base assets are incomplete; policies/loyalsoldier.yaml must exist before rendering",
 					"on router deployments, rerun scripts/deploy-router.sh so missing policies/ and rule-sources/ files are installed under the MCP working directory",
 					"do not create a config patch to fix missing base assets",

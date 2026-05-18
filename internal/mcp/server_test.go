@@ -406,7 +406,7 @@ func TestToolsCallConfigRenderReportsMissingPolicyAsBaseAssetsProblem(t *testing
 		t.Fatal(err)
 	}
 	actions := string(actionsData)
-	for _, want := range []string{"base assets", "deploy-router.sh", "do not create a config patch"} {
+	for _, want := range []string{"call doctor", "base assets", "deploy-router.sh", "do not create a config patch"} {
 		if !strings.Contains(actions, want) {
 			t.Fatalf("next_actions = %s, want %q", actions, want)
 		}
