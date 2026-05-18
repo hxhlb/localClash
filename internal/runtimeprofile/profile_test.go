@@ -119,8 +119,12 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		t.Fatalf("router dns fallback = %+v, want global encrypted fallback resolvers", dns["fallback"])
 	}
 	filter, ok := dns["fallback-filter"].(map[string]any)
-	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || !strings.Contains(fmt.Sprint(filter["geosite"]), "gfw") {
-		t.Fatalf("router dns fallback-filter = %+v, want geoip CN and geosite gfw anti-pollution filter", dns["fallback-filter"])
+	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || filter["geosite"] != nil {
+		t.Fatalf("router dns fallback-filter = %+v, want geoip CN and no deprecated geosite filter", dns["fallback-filter"])
+	}
+	policy, ok := dns["nameserver-policy"].(map[string]any)
+	if !ok || !strings.Contains(fmt.Sprint(policy["geosite:gfw"]), "tls://1.1.1.1") || !strings.Contains(fmt.Sprint(policy["geosite:gfw"]), "tls://8.8.8.8") {
+		t.Fatalf("router dns nameserver-policy = %+v, want geosite:gfw to use global encrypted resolvers", dns["nameserver-policy"])
 	}
 	if _, ok := mihomo["interface-name"]; ok {
 		t.Fatalf("router default must not pin Ronnie's WAN device: %+v", mihomo["interface-name"])
