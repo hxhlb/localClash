@@ -62,15 +62,17 @@ type SmartOptions struct {
 }
 
 type Status struct {
-	Path              string         `json:"path"`
-	Exists            bool           `json:"exists"`
-	Mode              string         `json:"mode"`
-	Core              string         `json:"core"`
-	CorePath          string         `json:"core_path"`
-	AvailableModes    []string       `json:"available_modes"`
-	AvailableCores    []string       `json:"available_cores"`
-	Summary           map[string]any `json:"summary"`
-	SmartGroupDefault SmartOptions   `json:"smart_group_default"`
+	Path                   string         `json:"path"`
+	Exists                 bool           `json:"exists"`
+	Mode                   string         `json:"mode"`
+	Core                   string         `json:"core"`
+	CorePath               string         `json:"core_path"`
+	AvailableModes         []string       `json:"available_modes"`
+	AvailableCores         []string       `json:"available_cores"`
+	Summary                map[string]any `json:"summary"`
+	SmartGroupDefault      SmartOptions   `json:"smart_group_default"`
+	RouterTakeoverRequired bool           `json:"router_takeover_required,omitempty"`
+	NextActions            []string       `json:"next_actions,omitempty"`
 }
 
 func Load(path string) (File, bool, error) {
@@ -113,7 +115,7 @@ func StatusFor(path string) (Status, error) {
 		cores = append(cores, name)
 	}
 	sort.Strings(cores)
-	return Status{
+	status := Status{
 		Path:              path,
 		Exists:            exists,
 		Mode:              file.Mode,
@@ -123,7 +125,21 @@ func StatusFor(path string) (Status, error) {
 		AvailableCores:    cores,
 		Summary:           summarize(profile),
 		SmartGroupDefault: file.Smart,
-	}, nil
+	}
+	if file.Mode == ModeRouter {
+		status.RouterTakeoverRequired = true
+		status.NextActions = []string{
+			"call config_render when generated/mihomo.yaml is missing or stale",
+			"call run_runtime after user confirmation to start Mihomo",
+			"call router_takeover_apply after user confirmation to capture router traffic",
+		}
+	} else {
+		status.NextActions = []string{
+			"call config_render when generated/mihomo.yaml is missing or stale",
+			"call run_runtime after user confirmation to start Mihomo",
+		}
+	}
+	return status, nil
 }
 
 func Configure(path, mode, core string) (Status, error) {
@@ -213,7 +229,7 @@ func DefaultFile() File {
 				},
 			},
 			ModeRouter: {
-				Description: "Router transparent proxy based on Ronnie's OpenClash redir-host-mix defaults.",
+				Description: "Router transparent proxy based on Ronnie's redir-host-mix defaults.",
 				Mihomo: map[string]any{
 					"mixed-port":          7893,
 					"redir-port":          7892,
@@ -227,6 +243,20 @@ func DefaultFile() File {
 					"external-controller": "0.0.0.0:9090",
 					"external-ui":         "ui/zashboard",
 					"ipv6":                true,
+					"interface-name":      "pppoe-wan",
+					"geodata-mode":        true,
+					"geodata-loader":      "standard",
+					"tcp-concurrent":      true,
+					"unified-delay":       true,
+					"find-process-mode":   "off",
+					"keep-alive-interval": 15,
+					"keep-alive-idle":     600,
+					"geox-url": map[string]any{
+						"mmdb":    "https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb",
+						"geoip":   "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat",
+						"geosite": "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat",
+						"asn":     "https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb",
+					},
 					"dns": map[string]any{
 						"enable":                  true,
 						"ipv6":                    true,
@@ -251,15 +281,41 @@ func DefaultFile() File {
 						"strict-route":             false,
 						"disable-icmp-forwarding":  false,
 					},
+					"sniffer": map[string]any{
+						"enable":               true,
+						"override-destination": true,
+						"sniff": map[string]any{
+							"QUIC": map[string]any{
+								"ports": []int{443},
+							},
+							"TLS": map[string]any{
+								"ports": []int{443, 8443},
+							},
+							"HTTP": map[string]any{
+								"ports":                []any{80, "8080-8880"},
+								"override-destination": true,
+							},
+						},
+						"force-domain":      []string{"+.netflix.com", "+.nflxvideo.net", "+.amazonaws.com", "+.media.dssott.com"},
+						"skip-domain":       []string{"Mijia Cloud", "dlg.io.mi.com", "+.oray.com", "+.sunlogin.net", "+.push.apple.com"},
+						"force-dns-mapping": true,
+						"parse-pure-ip":     true,
+					},
 					"profile": map[string]any{"store-selected": true},
+					"ntp": map[string]any{
+						"enable":          true,
+						"server":          "time.apple.com",
+						"port":            123,
+						"interval":        30,
+						"write-to-system": true,
+					},
 				},
 				Deploy: map[string]any{
-					"lan-interface":      "br-lan",
-					"wan-interface":      "pppoe-wan",
-					"router-self-proxy":  true,
-					"dnsmasq-redirect":   true,
-					"ipv6-mode":          3,
-					"openclash-conflict": "block_apply",
+					"lan-interface":     "br-lan",
+					"wan-interface":     "pppoe-wan",
+					"router-self-proxy": true,
+					"dnsmasq-redirect":  true,
+					"ipv6-mode":         3,
 				},
 			},
 		},
@@ -294,6 +350,24 @@ func normalizeFile(file File) File {
 	}
 	if !file.Smart.UseLightGBM && !file.Smart.PreferASN && !file.Smart.CollectData && file.Smart.SampleRate == 0 && file.Smart.PolicyPriority == "" {
 		file.Smart = SmartOptions{UseLightGBM: true, PreferASN: true}
+	}
+	defaults := DefaultFile()
+	if file.Profiles == nil {
+		file.Profiles = cloneProfiles(defaults.Profiles)
+	} else {
+		for name, defaultProfile := range defaults.Profiles {
+			profile, ok := file.Profiles[name]
+			if !ok {
+				file.Profiles[name] = cloneProfile(defaultProfile)
+				continue
+			}
+			if strings.TrimSpace(profile.Description) == "" {
+				profile.Description = defaultProfile.Description
+			}
+			profile.Mihomo = mergeMissingMap(profile.Mihomo, defaultProfile.Mihomo)
+			profile.Deploy = mergeMissingMap(profile.Deploy, defaultProfile.Deploy)
+			file.Profiles[name] = profile
+		}
 	}
 	return file
 }
@@ -376,6 +450,43 @@ func cloneValue(value any) any {
 	default:
 		return value
 	}
+}
+
+func cloneProfiles(profiles map[string]Profile) map[string]Profile {
+	out := map[string]Profile{}
+	for name, profile := range profiles {
+		out[name] = cloneProfile(profile)
+	}
+	return out
+}
+
+func cloneProfile(profile Profile) Profile {
+	return Profile{
+		Description: profile.Description,
+		Mihomo:      mergeMissingMap(nil, profile.Mihomo),
+		Deploy:      mergeMissingMap(nil, profile.Deploy),
+	}
+}
+
+func mergeMissingMap(dst, defaults map[string]any) map[string]any {
+	if len(defaults) == 0 && dst == nil {
+		return nil
+	}
+	if dst == nil {
+		dst = map[string]any{}
+	}
+	for key, value := range defaults {
+		if existing, ok := dst[key]; ok {
+			existingMap, existingIsMap := existing.(map[string]any)
+			defaultMap, defaultIsMap := value.(map[string]any)
+			if existingIsMap && defaultIsMap {
+				dst[key] = mergeMissingMap(existingMap, defaultMap)
+			}
+			continue
+		}
+		dst[key] = cloneValue(value)
+	}
+	return dst
 }
 
 func summarize(profile Profile) map[string]any {

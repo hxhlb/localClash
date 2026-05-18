@@ -38,6 +38,9 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 	if status.Mode != ModeRouter || status.Core != CoreSmart || status.CorePath != SmartCorePath {
 		t.Fatalf("status = %+v, want router smart", status)
 	}
+	if !status.RouterTakeoverRequired {
+		t.Fatal("router profile should require router takeover after run_runtime")
+	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
@@ -48,6 +51,97 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 	}
 	if !exists || file.Version != 1 || file.Mode != ModeRouter || file.Core != CoreSmart {
 		t.Fatalf("loaded file = %+v exists=%v", file, exists)
+	}
+}
+
+func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
+	file := DefaultFile()
+	profile := file.Profiles[ModeRouter]
+	mihomo := profile.Mihomo
+
+	for key, want := range map[string]any{
+		"mixed-port":          7893,
+		"redir-port":          7892,
+		"tproxy-port":         7895,
+		"allow-lan":           true,
+		"bind-address":        "*",
+		"external-controller": "0.0.0.0:9090",
+		"ipv6":                true,
+		"interface-name":      "pppoe-wan",
+		"geodata-mode":        true,
+		"geodata-loader":      "standard",
+		"tcp-concurrent":      true,
+		"unified-delay":       true,
+		"find-process-mode":   "off",
+		"keep-alive-interval": 15,
+		"keep-alive-idle":     600,
+	} {
+		if got := mihomo[key]; got != want {
+			t.Fatalf("router mihomo[%q] = %v, want %v", key, got, want)
+		}
+	}
+
+	dns := mihomo["dns"].(map[string]any)
+	if dns["enhanced-mode"] != "redir-host" || dns["listen"] != "0.0.0.0:7874" || dns["respect-rules"] != true {
+		t.Fatalf("router dns = %+v, want redir-host dns on 0.0.0.0:7874 with respect-rules", dns)
+	}
+	tun := mihomo["tun"].(map[string]any)
+	if tun["stack"] != "mixed" || tun["device"] != "utun" || tun["auto-route"] != false || tun["auto-redirect"] != false {
+		t.Fatalf("router tun = %+v, want mixed utun without Mihomo auto-route/auto-redirect", tun)
+	}
+	sniffer := mihomo["sniffer"].(map[string]any)
+	if sniffer["enable"] != true || sniffer["override-destination"] != true || sniffer["force-dns-mapping"] != true || sniffer["parse-pure-ip"] != true {
+		t.Fatalf("router sniffer = %+v, want enabled DNS mapping and pure-IP parsing", sniffer)
+	}
+	if _, ok := profile.Deploy["openclash-conflict"]; ok {
+		t.Fatalf("router deploy must not contain OpenClash conflict policy: %+v", profile.Deploy)
+	}
+}
+
+func TestLoadBackfillsMissingRouterDefaultsWithoutOverwritingUserValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DefaultPath)
+	if err := os.WriteFile(path, []byte(`version: 1
+mode: router
+core: meta
+profiles:
+  router:
+    mihomo:
+      mixed-port: 9000
+      dns:
+        listen: 127.0.0.1:5353
+cores:
+  meta:
+    path: custom-meta
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	file, exists, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("profile file should exist")
+	}
+	router := file.Profiles[ModeRouter]
+	if router.Mihomo["mixed-port"] != 9000 {
+		t.Fatalf("mixed-port = %v, want preserved user value 9000", router.Mihomo["mixed-port"])
+	}
+	dns := router.Mihomo["dns"].(map[string]any)
+	if dns["listen"] != "127.0.0.1:5353" {
+		t.Fatalf("dns.listen = %v, want preserved user value", dns["listen"])
+	}
+	if dns["enhanced-mode"] != "redir-host" {
+		t.Fatalf("dns.enhanced-mode = %v, want backfilled redir-host", dns["enhanced-mode"])
+	}
+	if router.Mihomo["interface-name"] != "pppoe-wan" {
+		t.Fatalf("interface-name = %v, want backfilled pppoe-wan", router.Mihomo["interface-name"])
+	}
+	if _, ok := router.Mihomo["sniffer"].(map[string]any); !ok {
+		t.Fatalf("sniffer was not backfilled: %+v", router.Mihomo)
+	}
+	if _, ok := file.Profiles[ModeNormal]; !ok {
+		t.Fatalf("normal profile should be backfilled: %+v", file.Profiles)
 	}
 }
 

@@ -39,6 +39,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["runtime_status"].SafetyLevel != SafeRead {
 		t.Fatalf("runtime_status safety = %q, want %q", byName["runtime_status"].SafetyLevel, SafeRead)
 	}
+	if byName["router_takeover_status"].SafetyLevel != SafeRead {
+		t.Fatalf("router_takeover_status safety = %q, want %q", byName["router_takeover_status"].SafetyLevel, SafeRead)
+	}
 	if byName["tools_list"].SafetyLevel != SafeRead {
 		t.Fatalf("tools_list safety = %q, want %q", byName["tools_list"].SafetyLevel, SafeRead)
 	}
@@ -89,6 +92,12 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if byName["stop_runtime"].SafetyLevel != ConfirmRequired {
 		t.Fatalf("stop_runtime safety = %q, want %q", byName["stop_runtime"].SafetyLevel, ConfirmRequired)
+	}
+	if byName["router_takeover_apply"].SafetyLevel != ConfirmRequired {
+		t.Fatalf("router_takeover_apply safety = %q, want %q", byName["router_takeover_apply"].SafetyLevel, ConfirmRequired)
+	}
+	if byName["router_takeover_stop"].SafetyLevel != ConfirmRequired {
+		t.Fatalf("router_takeover_stop safety = %q, want %q", byName["router_takeover_stop"].SafetyLevel, ConfirmRequired)
 	}
 	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
 		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)

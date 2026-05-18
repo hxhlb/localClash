@@ -108,7 +108,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -136,6 +136,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscription_nodes_search": SafeRead,
 		"runtime_status":            SafeRead,
 		"runtime_profile_status":    SafeRead,
+		"router_takeover_status":    SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
 		"config_patch_apply":        SafeWrite,
@@ -151,6 +152,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
 		"run_runtime":               ConfirmRequired,
+		"router_takeover_apply":     ConfirmRequired,
+		"router_takeover_stop":      ConfirmRequired,
 		"stop_runtime":              ConfirmRequired,
 	}
 	got := map[string]SafetyLevel{}

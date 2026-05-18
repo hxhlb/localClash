@@ -23,6 +23,7 @@ import (
 	"localclash/internal/envinspect"
 	"localclash/internal/fileops"
 	"localclash/internal/localconfig"
+	"localclash/internal/routertakeover"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
@@ -389,6 +390,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callRuntimeStatus(args)
 	case "runtime_profile_status":
 		return s.callRuntimeProfileStatus(args)
+	case "router_takeover_status":
+		return s.callRouterTakeoverStatus(ctx, args)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "tools_list":
@@ -407,6 +410,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callRuntimeProfileConfigure(args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
+	case "router_takeover_apply":
+		return s.callRouterTakeoverApply(ctx, args)
+	case "router_takeover_stop":
+		return s.callRouterTakeoverStop(ctx, args)
 	case "sed_file":
 		return callSedFile(args)
 	case "stop_runtime":
@@ -1989,6 +1996,12 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 	if err != nil {
 		return jsonToolResult(runtimeErrorResult(err.Error()))
 	}
+	if s.state != nil {
+		if profile, profileErr := runtimeprofile.StatusFor(s.state.Paths.RuntimeProfilePath); profileErr == nil && profile.Mode == runtimeprofile.ModeRouter {
+			result.Warnings = append(result.Warnings, "Runtime profile is router; run_runtime only starts Mihomo and does not capture router traffic.")
+			result.NextActions = append(result.NextActions, "call router_takeover_apply after user confirmation to install localClash-owned OpenWrt firewall, DNS, and TUN takeover rules")
+		}
+	}
 	return jsonToolResult(result)
 }
 
@@ -2243,6 +2256,83 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 		WorkDir:    in.RuntimeDir,
 		LogPath:    in.LogFile,
 	}))
+}
+
+type routerTakeoverInput struct {
+	RuntimeProfile string `json:"runtime_profile"`
+	Config         string `json:"config"`
+	RuntimeDir     string `json:"runtime_dir"`
+	LogFile        string `json:"log_file"`
+	StateDir       string `json:"state_dir"`
+	DNSPort        int    `json:"dns_port"`
+	RedirPort      int    `json:"redir_port"`
+	TunDevice      string `json:"tun_device"`
+	DryRun         bool   `json:"dry_run"`
+}
+
+func (s *Server) routerTakeoverOptions(args json.RawMessage) (routertakeover.Options, error) {
+	var in routerTakeoverInput
+	if err := json.Unmarshal(args, &in); err != nil {
+		return routertakeover.Options{}, err
+	}
+	if s.state != nil {
+		if in.RuntimeProfile == "" {
+			in.RuntimeProfile = s.state.Paths.RuntimeProfilePath
+		}
+		if in.Config == "" {
+			in.Config = s.state.Paths.GeneratedConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+	}
+	return routertakeover.Options{
+		RuntimeProfile: in.RuntimeProfile,
+		ConfigPath:     in.Config,
+		RuntimeDir:     in.RuntimeDir,
+		LogPath:        in.LogFile,
+		StateDir:       in.StateDir,
+		DNSPort:        in.DNSPort,
+		RedirPort:      in.RedirPort,
+		TunDevice:      in.TunDevice,
+		DryRun:         in.DryRun,
+	}, nil
+}
+
+func (s *Server) callRouterTakeoverStatus(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	opts, err := s.routerTakeoverOptions(args)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result, err := routertakeover.Status(ctx, opts)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callRouterTakeoverApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	opts, err := s.routerTakeoverOptions(args)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result, err := routertakeover.Apply(ctx, opts)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callRouterTakeoverStop(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	opts, err := s.routerTakeoverOptions(args)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result, err := routertakeover.Stop(ctx, opts)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
 }
 
 func (s *Server) callStopRuntime(args json.RawMessage) (toolResult, error) {

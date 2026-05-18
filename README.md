@@ -1,7 +1,7 @@
 # localClash
 
 Local Mihomo runtime wrapper with an MCP management interface for AI-assisted
-Clash, Mihomo, and OpenClash workflows.
+Clash, Mihomo, and router workflows.
 
 ## Direction
 
@@ -24,7 +24,7 @@ localClash should expose:
 - Deterministic renderers for rules, packs, proxy groups, and runtime
   Mihomo configs.
 - Read-only diagnostics and runtime inspection for safe agent observation.
-- Router adapters for OpenClash workflows, with write operations gated by
+- Router adapters for OpenWrt workflows, with write operations gated by
   explicit user confirmation.
 
 New users should start with [First Use](docs/first-use.md) for the shortest
@@ -71,7 +71,7 @@ not the main MCP workflow for agents.
 
 AI agents should produce policy intent, plans, and reviewed changes, not edit
 active Clash YAML directly. localClash should turn reviewed intent into
-Clash/OpenClash artifacts with validation, diff preview, config tests, backups,
+Clash/Mihomo artifacts with validation, diff preview, config tests, backups,
 and rollback support.
 
 Safe operations include inspection, diagnosis, rendering into generated files,
@@ -154,9 +154,9 @@ and localClash files. Subscription URLs, proxy server addresses, passwords,
 UUIDs, WAN credentials, and private keys are redacted or omitted.
 
 The server marks `run_runtime` as `confirm_required`, and assumes the Agent SDK
-or MCP client has completed confirmation before calling it. `switch_proxy_group`
-and `apply_router_config` are not part of the minimal runtime loop. zashboard
-remains Mihomo's runtime dashboard only, not localClash's configuration UI.
+or MCP client has completed confirmation before calling it. Router traffic
+takeover is a separate confirmed step from starting Mihomo. zashboard remains
+Mihomo's runtime dashboard only, not localClash's configuration UI.
 
 MCP subscription bootstrap tools:
 
@@ -257,7 +257,7 @@ MCP runtime profile tools:
 
 `normal` is the standalone local proxy profile and matches the original generated
 Mihomo shell. `router` is a transparent-proxy profile based on the local
-OpenClash redir-host-mix reference. Advanced users can edit
+router redir-host-mix reference. Advanced users can edit
 `localclash-runtime.yaml` directly, or ask an agent to use `nl_file` and `sed_file`
 for explicit line-based edits, but the product MCP path is profile switching.
 
@@ -319,8 +319,24 @@ interactive yes/no prompt inside the tool; the Agent SDK or MCP client must ask
 the user for confirmation before calling it. Starting or restarting the proxy
 runtime may temporarily interrupt network connectivity. The Agent itself may
 depend on the current network or proxy path and could lose its connection after
-this operation. `run_runtime` does not modify router/OpenClash config, does not
-switch proxy groups, and does not modify system proxy settings.
+this operation. `run_runtime` does not install router takeover rules, switch
+proxy groups, or modify system proxy settings.
+
+Router profile takeover tools:
+
+- `router_takeover_status`: inspect localClash-owned OpenWrt takeover runtime
+  state.
+- `router_takeover_apply`: after `run_runtime`, install localClash-owned
+  Redir-Host Mix runtime rules: TCP redir-host, DNS hijack, fwmark route, and
+  TUN forwarding. This must not write persistent firewall configuration.
+- `router_takeover_stop`: remove localClash-owned takeover rules without
+  stopping Mihomo.
+
+These tools are for `router` profile mode. In `normal` mode, agents should use
+only `config_render` and `run_runtime`; `router_takeover_apply` will refuse to
+apply until the runtime profile is switched to `router`. Router takeover rules
+are runtime state; reboot clears them, and `router_takeover_stop` removes the
+localClash-owned rules explicitly.
 
 Minimal MCP closed loop:
 
@@ -329,6 +345,14 @@ Minimal MCP closed loop:
 3. `config_render` if `generated/mihomo.yaml` is missing or stale
 4. `run_runtime`
 5. `runtime_status`
+
+Router MCP closed loop:
+
+1. `runtime_profile_configure` with `mode: router`
+2. `config_render`
+3. `run_runtime`
+4. `router_takeover_apply`
+5. `router_takeover_status`
 
 This is the MCP form of the runtime loop. `doctor` remains the broader
 health-check entrypoint, including generated config validation. Agents should use
@@ -404,7 +428,7 @@ go run . core download --dry-run
 ```
 
 To download router cores, make the router target explicit. This downloads Linux
-`meta` and OpenClash `smart` cores for the requested architecture:
+`meta` and `smart` cores for the requested architecture:
 
 ```bash
 go run . core download --target router --arch arm64 --force
@@ -424,7 +448,7 @@ Download a subscription with a Clash-compatible User-Agent:
 go run . subscription download --url "https://example.com/playlist?token=..." --output subscription.yaml --force
 ```
 
-The default User-Agent is `clash-verge/v1.5.1`, matching the known OpenClash subscription setting. The downloaded subscription file is local data and should not be committed.
+The default User-Agent is `clash-verge/v1.5.1`. The downloaded subscription file is local data and should not be committed.
 
 ## Dashboard
 

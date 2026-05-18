@@ -36,6 +36,7 @@ type StartResult struct {
 	ExternalController string   `json:"external_controller,omitempty"`
 	ExternalUIURL      string   `json:"external_ui_url,omitempty"`
 	Warnings           []string `json:"warnings"`
+	NextActions        []string `json:"next_actions,omitempty"`
 }
 
 var NetworkInterruptionWarnings = []string{
