@@ -208,7 +208,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 		ProxyGroups: []IntentProxyGroup{},
 		CustomRules: []IntentCustomRule{},
 		Packs:       []IntentPack{},
-		Note:        "Intent is read from durable localclash.yaml. Use it before rendering a draft to preserve existing proxy groups, packs, and custom rules.",
+		Note:        "Intent is read from durable localclash.yaml. Use it before creating a patch to preserve existing proxy groups, packs, and custom rules.",
 	}
 	config, err := localconfig.Load(path)
 	if err != nil {

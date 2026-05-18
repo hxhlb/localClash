@@ -371,6 +371,48 @@ func TestToolsCallConfigRenderReportsMissingSubscription(t *testing.T) {
 	}
 }
 
+func TestToolsCallConfigRenderReportsMissingPolicyAsBaseAssetsProblem(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	if err := os.Remove(paths.policy); err != nil {
+		t.Fatal(err)
+	}
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_render",
+			"arguments": map[string]any{
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_render returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["rendered"] != false {
+		t.Fatalf("content = %+v, want not rendered", content)
+	}
+	missing := content["missing_inputs"].([]any)
+	if len(missing) != 1 || missing[0] != "policy" {
+		t.Fatalf("missing = %+v, want policy", missing)
+	}
+	actionsData, err := json.Marshal(content["next_actions"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions := string(actionsData)
+	for _, want := range []string{"base assets", "deploy-router.sh", "do not create a config patch"} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("next_actions = %s, want %q", actions, want)
+		}
+	}
+}
+
 func TestToolsCallNLFileReturnsNumberedText(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

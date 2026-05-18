@@ -5,8 +5,8 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/deploy-router.sh [flags]
 
-Build localClash for an OpenWrt/Linux router, deploy the binary over SSH, and
-install or restart the router MCP HTTP procd service.
+Build localClash for an OpenWrt/Linux router, deploy the binary and missing base
+assets over SSH, and install or restart the router MCP HTTP procd service.
 
 Flags:
   --host HOST          SSH target (default: root@192.168.6.1)
@@ -138,6 +138,7 @@ mcp_log="${remote_workdir}/.runtime/logs/localclash-mcp.log"
 local_bin="bin/${target_os}-${target_arch}/localclash"
 remote_tmp="/tmp/localclash.new.$$"
 remote_init_tmp="/tmp/localclash-mcp.init.$$"
+remote_assets_tmp="/tmp/localclash-assets.$$"
 
 reject_unsafe_value "remote_bin" "${remote_bin}"
 reject_unsafe_value "remote_workdir" "${remote_workdir}"
@@ -222,11 +223,46 @@ ln -sf "$remote_bin" "$remote_link"
 sha256sum "$remote_bin"
 EOS
 
+assets_archive="$(mktemp "${TMPDIR:-/tmp}/localclash-assets.XXXXXX.tar.gz")"
 init_file="$(mktemp "${TMPDIR:-/tmp}/localclash-mcp.init.XXXXXX")"
 cleanup() {
-  rm -f "${init_file}"
+  rm -f "${init_file}" "${assets_archive}"
 }
 trap cleanup EXIT
+
+log "uploading base assets to ${router_ssh}:${remote_assets_tmp}"
+tar -czf "${assets_archive}" policies rule-sources
+scp "${ssh_opts[@]}" "${assets_archive}" "${router_ssh}:${remote_assets_tmp}"
+
+log "installing missing base assets under ${remote_workdir}"
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_assets_tmp}" "${remote_workdir}" <<'EOS'
+set -eu
+remote_assets_tmp="$1"
+remote_workdir="$2"
+assets_tmp_dir="/tmp/localclash-assets.$$"
+
+cleanup() {
+  rm -rf "$assets_tmp_dir" "$remote_assets_tmp"
+}
+trap cleanup EXIT
+
+rm -rf "$assets_tmp_dir"
+mkdir -p "$assets_tmp_dir" "$remote_workdir"
+tar -xzf "$remote_assets_tmp" -C "$assets_tmp_dir"
+cd "$assets_tmp_dir"
+installed=0
+for file in $(find policies rule-sources -type f | sort); do
+  target="$remote_workdir/$file"
+  if [ -e "$target" ]; then
+    continue
+  fi
+  mkdir -p "$(dirname "$target")"
+  cp "$file" "$target"
+  chmod 0644 "$target"
+  installed=$((installed + 1))
+done
+printf 'installed missing base assets: %s\n' "$installed"
+EOS
 
 cat >"${init_file}" <<EOF
 #!/bin/sh /etc/rc.common
