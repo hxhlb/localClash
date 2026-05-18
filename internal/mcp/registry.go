@@ -36,9 +36,8 @@ type ToolSummary struct {
 }
 
 type ToolsListResult struct {
-	Tools            []ToolSummary `json:"tools"`
-	Count            int           `json:"count"`
-	ClientNamingNote string        `json:"client_naming_note,omitempty"`
+	Tools []ToolSummary `json:"tools"`
+	Count int           `json:"count"`
 }
 
 func Registry() []Tool {
@@ -108,9 +107,8 @@ func ToolSummaries() ToolsListResult {
 		})
 	}
 	return ToolsListResult{
-		Tools:            summaries,
-		Count:            len(summaries),
-		ClientNamingNote: "Some clients prefix MCP tool names with the server id, for example localclash_doctor.",
+		Tools: summaries,
+		Count: len(summaries),
 	}
 }
 

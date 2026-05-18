@@ -202,9 +202,6 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 	if byName["doctor"].Name == "" || byName["subscriptions_status"].Name == "" {
 		t.Fatalf("tools_list missing expected tools: %+v", byName)
 	}
-	if !strings.Contains(structured.ClientNamingNote, "localclash_doctor") {
-		t.Fatalf("client naming note = %q, want OpenWebUI-style prefix example", structured.ClientNamingNote)
-	}
 }
 
 func TestToolsCallRuntimeProfileConfigureAndStatus(t *testing.T) {
