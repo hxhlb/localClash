@@ -83,6 +83,7 @@ func BuildPlan() ([]Target, error) {
 		{Path: "localclash-packs.yaml", Kind: "file"},
 		{Path: "localclash-subscriptions.yaml", Kind: "file"},
 		{Path: "localclash-runtime.yaml", Kind: "file"},
+		{Path: "profiles", Kind: "directory"},
 	}
 	subscriptions, err := filepath.Glob("subscription*.yaml")
 	if err != nil {

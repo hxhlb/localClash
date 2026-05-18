@@ -2,7 +2,6 @@ package routertakeover
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -74,7 +73,7 @@ func TestApplyDryRunScriptHasShellSyntax(t *testing.T) {
 func TestApplyRejectsNormalProfileBeforeSystemChanges(t *testing.T) {
 	dir := t.TempDir()
 	profilePath := filepath.Join(dir, runtimeprofile.DefaultPath)
-	if err := os.WriteFile(profilePath, []byte("version: 1\nmode: normal\ncore: meta\nprofiles:\n  normal:\n    mihomo:\n      mixed-port: 7890\n  router:\n    mihomo:\n      mixed-port: 7893\ncores:\n  meta:\n    path: bin/linux-arm64/mihomo-meta\n  smart:\n    path: bin/linux-arm64/mihomo-smart\n"), 0o644); err != nil {
+	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeNormal, runtimeprofile.CoreMeta); err != nil {
 		t.Fatal(err)
 	}
 

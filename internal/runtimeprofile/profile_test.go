@@ -3,16 +3,18 @@ package runtimeprofile
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestStatusForMissingFileUsesNormalDefault(t *testing.T) {
-	status, err := StatusFor(filepath.Join(t.TempDir(), DefaultPath))
+func TestStatusForMissingFileInitializesEditableProfilesFromDefaults(t *testing.T) {
+	dir := t.TempDir()
+	status, err := StatusFor(filepath.Join(dir, DefaultPath))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Exists {
-		t.Fatal("missing profile file should report exists=false")
+	if !status.Exists {
+		t.Fatal("missing runtime profile should be initialized")
 	}
 	if status.Mode != ModeNormal {
 		t.Fatalf("mode = %q, want %q", status.Mode, ModeNormal)
@@ -22,6 +24,17 @@ func TestStatusForMissingFileUsesNormalDefault(t *testing.T) {
 	}
 	if status.Summary["mixed-port"] != 7890 {
 		t.Fatalf("summary mixed-port = %v, want 7890", status.Summary["mixed-port"])
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "profiles", "normal.default.yaml"),
+		filepath.Join(dir, "profiles", "router.default.yaml"),
+		filepath.Join(dir, "profiles", "normal.yaml"),
+		filepath.Join(dir, "profiles", "router.yaml"),
+		filepath.Join(dir, DefaultPath),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected initialized profile file %s: %v", path, err)
+		}
 	}
 }
 
@@ -44,6 +57,14 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	if !contains(text, "path: profiles/normal.yaml") || !contains(text, "path: profiles/router.yaml") || contains(text, "mihomo:") {
+		t.Fatalf("runtime selector file =\n%s\nwant profile paths without embedded mihomo profile bodies", text)
+	}
 
 	file, exists, err := Load(path)
 	if err != nil {
@@ -52,6 +73,10 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 	if !exists || file.Version != 1 || file.Mode != ModeRouter || file.Core != CoreSmart {
 		t.Fatalf("loaded file = %+v exists=%v", file, exists)
 	}
+}
+
+func contains(text, needle string) bool {
+	return strings.Contains(text, needle)
 }
 
 func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
@@ -98,20 +123,25 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 	}
 }
 
-func TestLoadBackfillsMissingRouterDefaultsWithoutOverwritingUserValues(t *testing.T) {
-	path := filepath.Join(t.TempDir(), DefaultPath)
+func TestLoadUsesUserProfileFileWithoutBackfillingDeletedSettings(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultPath)
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "router.yaml"), `mihomo:
+  mixed-port: 9000
+  dns:
+    listen: 127.0.0.1:5353
+`)
 	if err := os.WriteFile(path, []byte(`version: 1
 mode: router
 core: meta
 profiles:
   router:
-    mihomo:
-      mixed-port: 9000
-      dns:
-        listen: 127.0.0.1:5353
+    path: profiles/router.yaml
 cores:
   meta:
     path: custom-meta
+  smart:
+    path: custom-smart
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -131,17 +161,17 @@ cores:
 	if dns["listen"] != "127.0.0.1:5353" {
 		t.Fatalf("dns.listen = %v, want preserved user value", dns["listen"])
 	}
-	if dns["enhanced-mode"] != "redir-host" {
-		t.Fatalf("dns.enhanced-mode = %v, want backfilled redir-host", dns["enhanced-mode"])
+	if _, ok := dns["enhanced-mode"]; ok {
+		t.Fatalf("dns.enhanced-mode should not be backfilled into user profile: %+v", dns)
 	}
-	if router.Mihomo["interface-name"] != "pppoe-wan" {
-		t.Fatalf("interface-name = %v, want backfilled pppoe-wan", router.Mihomo["interface-name"])
+	if _, ok := router.Mihomo["interface-name"]; ok {
+		t.Fatalf("interface-name should not be backfilled into user profile: %+v", router.Mihomo)
 	}
-	if _, ok := router.Mihomo["sniffer"].(map[string]any); !ok {
-		t.Fatalf("sniffer was not backfilled: %+v", router.Mihomo)
+	if _, ok := router.Mihomo["sniffer"].(map[string]any); ok {
+		t.Fatalf("sniffer should not be backfilled into user profile: %+v", router.Mihomo)
 	}
-	if _, ok := file.Profiles[ModeNormal]; !ok {
-		t.Fatalf("normal profile should be backfilled: %+v", file.Profiles)
+	if _, ok := file.Profiles[ModeNormal]; ok {
+		t.Fatalf("normal profile should not be injected into explicit runtime file: %+v", file.Profiles)
 	}
 }
 
@@ -168,5 +198,15 @@ func TestApplyToConfigSkipsDynamicKeys(t *testing.T) {
 	dns := config["dns"].(map[string]any)
 	if dns["enable"] != true || dns["listen"] != "0.0.0.0:7874" || dns["keep"] != true {
 		t.Fatalf("dns = %+v, want merged preset dns", dns)
+	}
+}
+
+func writeRuntimeProfileTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

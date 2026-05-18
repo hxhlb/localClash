@@ -1,6 +1,7 @@
 package runtimeprofile
 
 import (
+	"embed"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+//go:embed profiles/*.default.yaml
+var defaultProfileFS embed.FS
 
 const (
 	DefaultPath = "localclash-runtime.yaml"
@@ -44,9 +48,23 @@ type File struct {
 }
 
 type Profile struct {
+	Path        string         `yaml:"path,omitempty" json:"path,omitempty"`
 	Description string         `yaml:"description,omitempty" json:"description,omitempty"`
 	Mihomo      map[string]any `yaml:"mihomo" json:"mihomo"`
 	Deploy      map[string]any `yaml:"deploy,omitempty" json:"deploy,omitempty"`
+}
+
+type diskFile struct {
+	Version  int                   `yaml:"version" json:"version"`
+	Mode     string                `yaml:"mode" json:"mode"`
+	Core     string                `yaml:"core" json:"core"`
+	Profiles map[string]profileRef `yaml:"profiles" json:"profiles"`
+	Cores    map[string]Core       `yaml:"cores" json:"cores"`
+	Smart    SmartOptions          `yaml:"smart,omitempty" json:"smart,omitempty"`
+}
+
+type profileRef struct {
+	Path string `yaml:"path" json:"path"`
 }
 
 type Core struct {
@@ -77,22 +95,40 @@ type Status struct {
 
 func Load(path string) (File, bool, error) {
 	path = normalizePath(path)
+	if err := ensureProfileFiles(path); err != nil {
+		return File{}, false, err
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return DefaultFile(), false, nil
+		file := DefaultFile()
+		if err := write(path, file); err != nil {
+			return File{}, false, err
+		}
+		return file, true, nil
 	}
 	if err != nil {
 		return File{}, false, err
 	}
-	var file File
-	if err := yaml.Unmarshal(data, &file); err != nil {
-		return File{}, true, err
-	}
-	file = normalizeFile(file)
-	if err := validate(file); err != nil {
+	file, err := parseFile(path, data)
+	if err != nil {
 		return File{}, true, err
 	}
 	return file, true, nil
+}
+
+func parseFile(path string, data []byte) (File, error) {
+	var disk diskFile
+	if err := yaml.Unmarshal(data, &disk); err != nil {
+		return File{}, err
+	}
+	file, err := materializeDiskFile(path, normalizeDiskFile(disk))
+	if err != nil {
+		return File{}, err
+	}
+	if err := validate(file); err != nil {
+		return File{}, err
+	}
+	return file, nil
 }
 
 func StatusFor(path string) (Status, error) {
@@ -206,7 +242,7 @@ func ApplyToConfig(config map[string]any, profile Profile) {
 }
 
 func DefaultFile() File {
-	return File{
+	file := File{
 		Version: 1,
 		Mode:    ModeNormal,
 		Core:    CoreMeta,
@@ -214,112 +250,18 @@ func DefaultFile() File {
 			CoreMeta:  {Path: MetaCorePath},
 			CoreSmart: {Path: SmartCorePath},
 		},
-		Smart: SmartOptions{UseLightGBM: true, PreferASN: true},
-		Profiles: map[string]Profile{
-			ModeNormal: {
-				Description: "Local standalone Mihomo proxy, matching localClash's original generated config.",
-				Mihomo: map[string]any{
-					"mixed-port":          7890,
-					"allow-lan":           false,
-					"mode":                "rule",
-					"log-level":           "info",
-					"external-controller": "127.0.0.1:9090",
-					"external-ui":         "ui/zashboard",
-					"unified-delay":       true,
-				},
-			},
-			ModeRouter: {
-				Description: "Router transparent proxy based on Ronnie's redir-host-mix defaults.",
-				Mihomo: map[string]any{
-					"mixed-port":          7893,
-					"redir-port":          7892,
-					"tproxy-port":         7895,
-					"port":                7890,
-					"socks-port":          7891,
-					"allow-lan":           true,
-					"bind-address":        "*",
-					"mode":                "rule",
-					"log-level":           "warning",
-					"external-controller": "0.0.0.0:9090",
-					"external-ui":         "ui/zashboard",
-					"ipv6":                true,
-					"interface-name":      "pppoe-wan",
-					"geodata-mode":        true,
-					"geodata-loader":      "standard",
-					"tcp-concurrent":      true,
-					"unified-delay":       true,
-					"find-process-mode":   "off",
-					"keep-alive-interval": 15,
-					"keep-alive-idle":     600,
-					"geox-url": map[string]any{
-						"mmdb":    "https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb",
-						"geoip":   "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat",
-						"geosite": "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat",
-						"asn":     "https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb",
-					},
-					"dns": map[string]any{
-						"enable":                  true,
-						"ipv6":                    true,
-						"enhanced-mode":           "redir-host",
-						"listen":                  "0.0.0.0:7874",
-						"respect-rules":           true,
-						"fake-ip-filter-mode":     "blacklist",
-						"nameserver":              []string{"tcp://127.0.0.1:5335"},
-						"proxy-server-nameserver": []string{"tcp://127.0.0.1:5335"},
-						"direct-nameserver":       []string{"tcp://127.0.0.1:5335"},
-						"default-nameserver":      []string{"tcp://127.0.0.1:5335"},
-					},
-					"tun": map[string]any{
-						"enable":                   true,
-						"stack":                    "mixed",
-						"device":                   "utun",
-						"dns-hijack":               []string{"127.0.0.1:53"},
-						"endpoint-independent-nat": true,
-						"auto-route":               false,
-						"auto-detect-interface":    false,
-						"auto-redirect":            false,
-						"strict-route":             false,
-						"disable-icmp-forwarding":  false,
-					},
-					"sniffer": map[string]any{
-						"enable":               true,
-						"override-destination": true,
-						"sniff": map[string]any{
-							"QUIC": map[string]any{
-								"ports": []int{443},
-							},
-							"TLS": map[string]any{
-								"ports": []int{443, 8443},
-							},
-							"HTTP": map[string]any{
-								"ports":                []any{80, "8080-8880"},
-								"override-destination": true,
-							},
-						},
-						"force-domain":      []string{"+.netflix.com", "+.nflxvideo.net", "+.amazonaws.com", "+.media.dssott.com"},
-						"skip-domain":       []string{"Mijia Cloud", "dlg.io.mi.com", "+.oray.com", "+.sunlogin.net", "+.push.apple.com"},
-						"force-dns-mapping": true,
-						"parse-pure-ip":     true,
-					},
-					"profile": map[string]any{"store-selected": true},
-					"ntp": map[string]any{
-						"enable":          true,
-						"server":          "time.apple.com",
-						"port":            123,
-						"interval":        30,
-						"write-to-system": true,
-					},
-				},
-				Deploy: map[string]any{
-					"lan-interface":     "br-lan",
-					"wan-interface":     "pppoe-wan",
-					"router-self-proxy": true,
-					"dnsmasq-redirect":  true,
-					"ipv6-mode":         3,
-				},
-			},
-		},
+		Smart:    SmartOptions{UseLightGBM: true, PreferASN: true},
+		Profiles: map[string]Profile{},
 	}
+	for _, mode := range []string{ModeNormal, ModeRouter} {
+		profile, err := readEmbeddedDefaultProfile(mode)
+		if err != nil {
+			panic(fmt.Sprintf("invalid embedded %s default profile: %v", mode, err))
+		}
+		profile.Path = userProfileRelPath(mode)
+		file.Profiles[mode] = profile
+	}
+	return file
 }
 
 func normalizePath(path string) string {
@@ -329,7 +271,7 @@ func normalizePath(path string) string {
 	return path
 }
 
-func normalizeFile(file File) File {
+func normalizeDiskFile(file diskFile) diskFile {
 	if file.Version == 0 {
 		file.Version = 1
 	}
@@ -351,25 +293,133 @@ func normalizeFile(file File) File {
 	if !file.Smart.UseLightGBM && !file.Smart.PreferASN && !file.Smart.CollectData && file.Smart.SampleRate == 0 && file.Smart.PolicyPriority == "" {
 		file.Smart = SmartOptions{UseLightGBM: true, PreferASN: true}
 	}
-	defaults := DefaultFile()
-	if file.Profiles == nil {
-		file.Profiles = cloneProfiles(defaults.Profiles)
-	} else {
-		for name, defaultProfile := range defaults.Profiles {
-			profile, ok := file.Profiles[name]
-			if !ok {
-				file.Profiles[name] = cloneProfile(defaultProfile)
-				continue
-			}
-			if strings.TrimSpace(profile.Description) == "" {
-				profile.Description = defaultProfile.Description
-			}
-			profile.Mihomo = mergeMissingMap(profile.Mihomo, defaultProfile.Mihomo)
-			profile.Deploy = mergeMissingMap(profile.Deploy, defaultProfile.Deploy)
-			file.Profiles[name] = profile
+	for name, core := range file.Cores {
+		core.Path = expandRuntimePlaceholders(core.Path)
+		file.Cores[name] = core
+	}
+	if len(file.Profiles) == 0 {
+		file.Profiles = map[string]profileRef{}
+		for _, mode := range []string{ModeNormal, ModeRouter} {
+			file.Profiles[mode] = profileRef{Path: userProfileRelPath(mode)}
 		}
 	}
 	return file
+}
+
+func materializeDiskFile(path string, disk diskFile) (File, error) {
+	file := File{
+		Version:  disk.Version,
+		Mode:     disk.Mode,
+		Core:     disk.Core,
+		Cores:    disk.Cores,
+		Smart:    disk.Smart,
+		Profiles: map[string]Profile{},
+	}
+	baseDir := filepath.Dir(path)
+	for mode, ref := range disk.Profiles {
+		profilePath := strings.TrimSpace(ref.Path)
+		if profilePath == "" {
+			return File{}, fmt.Errorf("runtime profile %q has no path", mode)
+		}
+		profile, err := readProfileFile(resolveRuntimePath(baseDir, profilePath))
+		if err != nil {
+			return File{}, fmt.Errorf("load runtime profile %q from %s: %w", mode, profilePath, err)
+		}
+		profile.Path = profilePath
+		file.Profiles[mode] = profile
+	}
+	return file, nil
+}
+
+func expandRuntimePlaceholders(value string) string {
+	return strings.NewReplacer(
+		"${LOCALCLASH_HOST_OS}", runtime.GOOS,
+		"${LOCALCLASH_HOST_ARCH}", runtime.GOARCH,
+		"${LOCALCLASH_HOST_PLATFORM}", runtime.GOOS+"-"+runtime.GOARCH,
+	).Replace(value)
+}
+
+func ensureProfileFiles(runtimePath string) error {
+	baseDir := filepath.Dir(normalizePath(runtimePath))
+	for _, mode := range []string{ModeNormal, ModeRouter} {
+		defaultPath := resolveRuntimePath(baseDir, defaultProfileRelPath(mode))
+		if err := writeDefaultProfileFile(defaultPath, defaultProfileBytes(mode)); err != nil {
+			return err
+		}
+		userPath := resolveRuntimePath(baseDir, userProfileRelPath(mode))
+		if _, err := os.Stat(userPath); errors.Is(err, os.ErrNotExist) {
+			data, err := os.ReadFile(defaultPath)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(userPath, data, 0o644); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeDefaultProfileFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == string(data) {
+		return nil
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+func defaultProfileBytes(mode string) []byte {
+	data, err := defaultProfileFS.ReadFile(filepath.ToSlash(defaultProfileRelPath(mode)))
+	if err != nil {
+		panic(fmt.Sprintf("missing embedded %s default profile: %v", mode, err))
+	}
+	return []byte(expandRuntimePlaceholders(string(data)))
+}
+
+func readEmbeddedDefaultProfile(mode string) (Profile, error) {
+	var profile Profile
+	if err := yaml.Unmarshal(defaultProfileBytes(mode), &profile); err != nil {
+		return Profile{}, err
+	}
+	return profile, nil
+}
+
+func readProfileFile(path string) (Profile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Profile{}, err
+	}
+	var profile Profile
+	if err := yaml.Unmarshal(data, &profile); err != nil {
+		return Profile{}, err
+	}
+	return profile, nil
+}
+
+func defaultProfileRelPath(mode string) string {
+	return filepath.Join("profiles", mode+".default.yaml")
+}
+
+func userProfileRelPath(mode string) string {
+	return filepath.Join("profiles", mode+".yaml")
+}
+
+func resolveRuntimePath(baseDir, path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	if strings.TrimSpace(baseDir) == "" || baseDir == "." {
+		return path
+	}
+	return filepath.Join(baseDir, path)
 }
 
 func validate(file File) error {
@@ -409,7 +459,22 @@ func write(path string, file File) error {
 			return err
 		}
 	}
-	data, err := yaml.Marshal(file)
+	disk := diskFile{
+		Version:  file.Version,
+		Mode:     file.Mode,
+		Core:     file.Core,
+		Cores:    file.Cores,
+		Smart:    file.Smart,
+		Profiles: map[string]profileRef{},
+	}
+	for name, profile := range file.Profiles {
+		profilePath := strings.TrimSpace(profile.Path)
+		if profilePath == "" {
+			profilePath = userProfileRelPath(name)
+		}
+		disk.Profiles[name] = profileRef{Path: profilePath}
+	}
+	data, err := yaml.Marshal(disk)
 	if err != nil {
 		return err
 	}
@@ -450,43 +515,6 @@ func cloneValue(value any) any {
 	default:
 		return value
 	}
-}
-
-func cloneProfiles(profiles map[string]Profile) map[string]Profile {
-	out := map[string]Profile{}
-	for name, profile := range profiles {
-		out[name] = cloneProfile(profile)
-	}
-	return out
-}
-
-func cloneProfile(profile Profile) Profile {
-	return Profile{
-		Description: profile.Description,
-		Mihomo:      mergeMissingMap(nil, profile.Mihomo),
-		Deploy:      mergeMissingMap(nil, profile.Deploy),
-	}
-}
-
-func mergeMissingMap(dst, defaults map[string]any) map[string]any {
-	if len(defaults) == 0 && dst == nil {
-		return nil
-	}
-	if dst == nil {
-		dst = map[string]any{}
-	}
-	for key, value := range defaults {
-		if existing, ok := dst[key]; ok {
-			existingMap, existingIsMap := existing.(map[string]any)
-			defaultMap, defaultIsMap := value.(map[string]any)
-			if existingIsMap && defaultIsMap {
-				dst[key] = mergeMissingMap(existingMap, defaultMap)
-			}
-			continue
-		}
-		dst[key] = cloneValue(value)
-	}
-	return dst
 }
 
 func summarize(profile Profile) map[string]any {

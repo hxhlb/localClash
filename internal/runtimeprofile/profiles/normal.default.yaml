@@ -1,0 +1,9 @@
+description: Local standalone Mihomo proxy, matching localClash's original generated config.
+mihomo:
+  mixed-port: 7890
+  allow-lan: false
+  mode: rule
+  log-level: info
+  external-controller: 127.0.0.1:9090
+  external-ui: ui/zashboard
+  unified-delay: true

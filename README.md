@@ -251,15 +251,18 @@ MCP runtime profile tools:
   Mihomo summary.
 - `runtime_profile_configure`: switch `mode` (`normal` or `router`) and/or
   `core` (`meta` or `smart`) in `localclash-runtime.yaml`, then rerender
-  `generated/mihomo.yaml` when the
-  effective subscription is available. It does not start or restart Mihomo and
-  does not expose individual DNS, TUN, or firewall switches.
+  `generated/mihomo.yaml` when the effective subscription is available. It does
+  not start or restart Mihomo and does not edit profile contents.
 
 `normal` is the standalone local proxy profile and matches the original generated
 Mihomo shell. `router` is a transparent-proxy profile based on the local
-router redir-host-mix reference. Advanced users can edit
-`localclash-runtime.yaml` directly, or ask an agent to use `nl_file` and `sed_file`
-for explicit line-based edits, but the product MCP path is profile switching.
+router redir-host-mix reference. Profile contents are ordinary YAML files under
+`profiles/`: `normal.yaml` and `router.yaml` are user-owned, while
+`normal.default.yaml` and `router.default.yaml` are templates. On first use,
+localClash writes the `.default.yaml` files and copies missing user profiles from
+them. Advanced users can edit `profiles/*.yaml` directly, or ask an agent to use
+`nl_file` and `sed_file` for explicit line-based edits. The product MCP path is
+still profile switching, not granular DNS/TUN patching.
 
 MCP patch-building tools:
 
@@ -404,9 +407,9 @@ local-only diagnosis.
 
 ## Local Data
 
-Do not commit downloaded subscriptions, active router profiles, generated
+Do not commit downloaded subscriptions, user-edited `profiles/*.yaml`, generated
 configs, `localclash.yaml`, `localclash-packs.yaml`, or files containing node
-credentials.
+credentials. Committed `.default.yaml` profile templates are source files.
 
 ## Core Download
 
@@ -478,9 +481,10 @@ go run . config render --force
 
 The default render path is `generated/mihomo.yaml`. The renderer treats the
 subscription as a proxy source and owns the runtime rules, rule providers, and
-proxy groups locally. It also applies the active `localclash-runtime.yaml` runtime
-profile; use `go run . config render --runtime-profile <path> --force` to test an
-alternate profile file. For MCP-managed routing changes, prefer
+proxy groups locally. It also applies the active mode from
+`localclash-runtime.yaml`, which points to editable profile YAML files under
+`profiles/`; use `go run . config render --runtime-profile <path> --force` to
+test an alternate runtime selector. For MCP-managed routing changes, prefer
 `config_patch_create` followed by `config_patch_apply`; for plain MCP rebuilds,
 use `config_render`.
 
@@ -531,7 +535,7 @@ an installed-but-unconfigured state:
 go run . reset
 ```
 
-The command deletes `.runtime/`, `generated/`, `subscription*.yaml`,
+The command deletes `.runtime/`, `generated/`, `profiles/`, `subscription*.yaml`,
 `localclash.yaml`, `localclash-packs.yaml`, `localclash-subscriptions.yaml`, and
 `localclash-runtime.yaml`. It keeps downloaded binaries in `bin/`, built-in
 policies, rule sources, source code, docs, and scripts. By default it prints the

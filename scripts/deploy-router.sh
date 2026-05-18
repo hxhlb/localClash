@@ -264,7 +264,7 @@ do
   fi
 done
 
-for dir in bin generated policies rule-sources .runtime; do
+for dir in bin generated policies profiles rule-sources .runtime; do
   source="$legacy_workdir/$dir"
   target="$remote_workdir/$dir"
   if [ -d "$source" ] && [ ! -e "$target" ]; then

@@ -7,6 +7,7 @@ localclash.yaml
 localclash-packs.yaml
 localclash-subscriptions.yaml
 localclash-runtime.yaml
+/profiles/
 *.secret.yaml
 *.local.yaml
 subscription*.yaml
