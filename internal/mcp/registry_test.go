@@ -66,6 +66,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["custom_rules_build"].SafetyLevel != SafeWrite {
 		t.Fatalf("custom_rules_build safety = %q, want %q", byName["custom_rules_build"].SafetyLevel, SafeWrite)
 	}
+	if byName["rule_provider_build"].SafetyLevel != SafeWrite {
+		t.Fatalf("rule_provider_build safety = %q, want %q", byName["rule_provider_build"].SafetyLevel, SafeWrite)
+	}
 	if byName["pack_rules_prefetch"].SafetyLevel != SafeWrite {
 		t.Fatalf("pack_rules_prefetch safety = %q, want %q", byName["pack_rules_prefetch"].SafetyLevel, SafeWrite)
 	}

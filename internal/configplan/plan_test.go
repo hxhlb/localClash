@@ -138,6 +138,59 @@ func TestRenderProxyGroupPlan(t *testing.T) {
 	assertMetadataHasNoSensitiveFields(t, metadata)
 }
 
+func TestRenderExternalRuleProviderPlan(t *testing.T) {
+	paths := writePlanFixture(t)
+
+	result, err := Render(context.Background(), Options{
+		PlanName:     "us-proxy",
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			RuleProviders: []OverlayRuleProviderIntent{
+				{
+					ID:       "US-Proxy",
+					Target:   "PROXY",
+					Type:     "http",
+					Behavior: "classical",
+					Format:   "yaml",
+					Path:     "./rule_provider/US-Proxy.yaml",
+					URL:      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
+					Interval: 86400,
+					Reason:   "User supplied qoli US proxy rule-provider.",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changes.RuleProvidersAdded != 1 || result.Changes.RulesAdded != 1 {
+		t.Fatalf("changes = %+v, want one provider and one rule", result.Changes)
+	}
+	if len(result.Overlay.RuleProviders) != 1 || result.Overlay.RuleProviders[0].ID != "US-Proxy" {
+		t.Fatalf("overlay rule providers = %+v, want US-Proxy", result.Overlay.RuleProviders)
+	}
+	config := readYAMLMap(t, result.Output)
+	providers := config["rule-providers"].(map[string]any)
+	provider := providers["US-Proxy"].(map[string]any)
+	if provider["url"] != "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml" {
+		t.Fatalf("provider = %+v, want qoli url", provider)
+	}
+	rules := config["rules"].([]any)
+	if !containsRule(rules, "RULE-SET,US-Proxy,PROXY") {
+		t.Fatalf("rules missing external provider rule: %+v", rules)
+	}
+	metadata := config["x-localclash"].(map[string]any)
+	overlay := metadata["overlay"].(map[string]any)
+	if len(overlay["rule_providers"].([]any)) != 1 {
+		t.Fatalf("metadata rule providers = %+v, want one", overlay["rule_providers"])
+	}
+}
+
 func TestRenderProxyGroupMatchPlanWritesCandidateLocalClashConfig(t *testing.T) {
 	paths := writePlanFixture(t)
 
@@ -530,6 +583,15 @@ func proxyGroupNames(config map[string]any) map[string]bool {
 		out[group["name"].(string)] = true
 	}
 	return out
+}
+
+func containsRule(rules []any, want string) bool {
+	for _, raw := range rules {
+		if raw == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertMetadataHasNoSensitiveFields(t *testing.T, value any) {

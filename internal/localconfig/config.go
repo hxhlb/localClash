@@ -2,6 +2,7 @@ package localconfig
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,10 +15,11 @@ import (
 )
 
 type Config struct {
-	Version     int                   `json:"version" yaml:"version"`
-	ProxyGroups map[string]ProxyGroup `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
-	CustomRules []CustomRule          `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
-	Packs       []Pack                `json:"packs" yaml:"packs,omitempty"`
+	Version       int                    `json:"version" yaml:"version"`
+	ProxyGroups   map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
+	CustomRules   []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
+	RuleProviders []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
+	Packs         []Pack                 `json:"packs" yaml:"packs,omitempty"`
 }
 
 type ProxyGroup struct {
@@ -57,6 +59,18 @@ type CustomRuleLine struct {
 	NoResolve bool   `json:"no_resolve,omitempty" yaml:"no_resolve,omitempty"`
 }
 
+type ExternalRuleProvider struct {
+	ID       string `json:"id" yaml:"id"`
+	Target   string `json:"target" yaml:"target"`
+	Reason   string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Type     string `json:"type,omitempty" yaml:"type,omitempty"`
+	Behavior string `json:"behavior,omitempty" yaml:"behavior,omitempty"`
+	Format   string `json:"format,omitempty" yaml:"format,omitempty"`
+	Path     string `json:"path,omitempty" yaml:"path,omitempty"`
+	URL      string `json:"url,omitempty" yaml:"url,omitempty"`
+	Interval int    `json:"interval,omitempty" yaml:"interval,omitempty"`
+}
+
 type ResolveOptions struct {
 	Config              Config
 	SubscriptionPath    string
@@ -66,12 +80,13 @@ type ResolveOptions struct {
 }
 
 type Resolved struct {
-	Config      Config             `json:"config"`
-	Selection   rules.Selection    `json:"selection"`
-	ProxyGroups []ProxyGroupResult `json:"proxy_groups"`
-	CustomRules []CustomRuleResult `json:"custom_rules"`
-	Packs       []PackResult       `json:"packs"`
-	Warnings    []string           `json:"warnings"`
+	Config        Config               `json:"config"`
+	Selection     rules.Selection      `json:"selection"`
+	ProxyGroups   []ProxyGroupResult   `json:"proxy_groups"`
+	CustomRules   []CustomRuleResult   `json:"custom_rules"`
+	RuleProviders []RuleProviderResult `json:"rule_providers"`
+	Packs         []PackResult         `json:"packs"`
+	Warnings      []string             `json:"warnings"`
 }
 
 type ProxyGroupResult struct {
@@ -96,6 +111,18 @@ type CustomRuleResult struct {
 	RuleCount int              `json:"rule_count"`
 	Reason    string           `json:"reason,omitempty"`
 	Rules     []CustomRuleLine `json:"rules,omitempty"`
+}
+
+type RuleProviderResult struct {
+	ID       string `json:"id"`
+	Target   string `json:"target"`
+	Reason   string `json:"reason,omitempty"`
+	Type     string `json:"type"`
+	Behavior string `json:"behavior"`
+	Format   string `json:"format"`
+	Path     string `json:"path"`
+	URL      string `json:"url,omitempty"`
+	Interval int    `json:"interval,omitempty"`
 }
 
 type SubscriptionNode struct {
@@ -243,7 +270,13 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	}
 	resolvedConfig.CustomRules = resolvedCustomRules
 	selection.CustomRules = customRulesForSelection(resolvedCustomRules)
-	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, CustomRules: customRuleResults, Packs: packResults}, nil
+	resolvedRuleProviders, ruleProviderResults, err := resolveRuleProviders(resolvedConfig.RuleProviders, selection.ProxyGroups)
+	if err != nil {
+		return Resolved{}, err
+	}
+	resolvedConfig.RuleProviders = resolvedRuleProviders
+	selection.RuleProviders = ruleProvidersForSelection(resolvedRuleProviders)
+	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, CustomRules: customRuleResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
 }
 
 type SubscriptionNodeOptions struct {
@@ -475,6 +508,108 @@ func normalizeCustomRuleLine(id string, rule CustomRuleLine) (CustomRuleLine, er
 	return rule, nil
 }
 
+func resolveRuleProviders(providers []ExternalRuleProvider, proxyGroups map[string]rules.ProxyGroup) ([]ExternalRuleProvider, []RuleProviderResult, error) {
+	resolved := make([]ExternalRuleProvider, 0, len(providers))
+	results := make([]RuleProviderResult, 0, len(providers))
+	ids := map[string]bool{}
+	for _, provider := range providers {
+		normalized, err := NormalizeRuleProvider(provider)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ids[normalized.ID] {
+			return nil, nil, fmt.Errorf("rule provider %q is defined more than once", normalized.ID)
+		}
+		ids[normalized.ID] = true
+		if !isBuiltInTarget(normalized.Target) {
+			if _, ok := proxyGroups[normalized.Target]; !ok {
+				return nil, nil, fmt.Errorf("rule provider target %q requires a matching proxy group", normalized.Target)
+			}
+		}
+		resolved = append(resolved, normalized)
+		results = append(results, ruleProviderResult(normalized))
+	}
+	return resolved, results, nil
+}
+
+func NormalizeRuleProvider(provider ExternalRuleProvider) (ExternalRuleProvider, error) {
+	provider.ID = strings.TrimSpace(provider.ID)
+	if provider.ID == "" {
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider id is required")
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+$`).MatchString(provider.ID) {
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider %q contains unsupported characters", provider.ID)
+	}
+	provider.Target = strings.TrimSpace(provider.Target)
+	if provider.Target == "" {
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider %q target is required", provider.ID)
+	}
+	provider.Type = strings.ToLower(strings.TrimSpace(provider.Type))
+	if provider.Type == "" {
+		provider.Type = "http"
+	}
+	provider.Behavior = strings.ToLower(strings.TrimSpace(provider.Behavior))
+	if provider.Behavior == "" {
+		provider.Behavior = "classical"
+	}
+	provider.Format = strings.ToLower(strings.TrimSpace(provider.Format))
+	if provider.Format == "" {
+		provider.Format = "yaml"
+	}
+	provider.Path = strings.TrimSpace(provider.Path)
+	if provider.Path == "" {
+		provider.Path = "./rule_provider/" + provider.ID + ".yaml"
+	}
+	provider.URL = strings.TrimSpace(provider.URL)
+	switch provider.Type {
+	case "http":
+		if provider.URL == "" {
+			return ExternalRuleProvider{}, fmt.Errorf("rule provider %q url is required for http type", provider.ID)
+		}
+		parsed, err := url.Parse(provider.URL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return ExternalRuleProvider{}, fmt.Errorf("rule provider %q url is invalid", provider.ID)
+		}
+		if provider.Interval == 0 {
+			provider.Interval = 86400
+		}
+	case "file":
+		if provider.URL != "" {
+			return ExternalRuleProvider{}, fmt.Errorf("rule provider %q url is only supported for http type", provider.ID)
+		}
+	default:
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider %q type %q is unsupported", provider.ID, provider.Type)
+	}
+	switch provider.Behavior {
+	case "classical", "domain", "ipcidr":
+	default:
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider %q behavior %q is unsupported", provider.ID, provider.Behavior)
+	}
+	switch provider.Format {
+	case "yaml", "text", "mrs":
+	default:
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider %q format %q is unsupported", provider.ID, provider.Format)
+	}
+	if provider.Interval < 0 {
+		return ExternalRuleProvider{}, fmt.Errorf("rule provider %q interval must be non-negative", provider.ID)
+	}
+	return provider, nil
+}
+
+func ruleProviderResult(provider ExternalRuleProvider) RuleProviderResult {
+	return RuleProviderResult{
+		ID:       provider.ID,
+		Target:   provider.Target,
+		Reason:   provider.Reason,
+		Type:     provider.Type,
+		Behavior: provider.Behavior,
+		Format:   provider.Format,
+		Path:     provider.Path,
+		URL:      provider.URL,
+		Interval: provider.Interval,
+	}
+}
+
 func customRulesForSelection(customRules []CustomRule) []rules.CustomRule {
 	out := make([]rules.CustomRule, 0, len(customRules))
 	for _, custom := range customRules {
@@ -491,6 +626,24 @@ func customRulesForSelection(customRules []CustomRule) []rules.CustomRule {
 			Target: custom.Target,
 			Reason: custom.Reason,
 			Rules:  lines,
+		})
+	}
+	return out
+}
+
+func ruleProvidersForSelection(providers []ExternalRuleProvider) []rules.ExternalRuleProvider {
+	out := make([]rules.ExternalRuleProvider, 0, len(providers))
+	for _, provider := range providers {
+		out = append(out, rules.ExternalRuleProvider{
+			ID:       provider.ID,
+			Target:   provider.Target,
+			Reason:   provider.Reason,
+			Type:     provider.Type,
+			Behavior: provider.Behavior,
+			Format:   provider.Format,
+			Path:     provider.Path,
+			URL:      provider.URL,
+			Interval: provider.Interval,
 		})
 	}
 	return out

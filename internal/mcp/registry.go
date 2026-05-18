@@ -62,6 +62,7 @@ func Registry() []Tool {
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read provider rules for one pack by id, downloading missing provider-cache entries for that pack only."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_create.overlay.proxy_groups when a patch should use it."},
+		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_create.overlay.rule_providers."},
 		{Name: "runtime_profile_configure", SafetyLevel: SafeWrite, Description: "Switch the active Mihomo runtime mode and/or core by writing localclash-runtime.yaml, then rerender generated/mihomo.yaml when the effective subscription is available. This does not edit DNS/TUN details directly and does not start or restart Mihomo."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
@@ -278,6 +279,8 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "target", "rules"},
 		}
+	case "rule_provider_build":
+		return ruleProviderInputSchema("External rule-provider id, for example US-Proxy.")
 	case "config_patch_create":
 		matchIntent := map[string]any{
 			"type":                 "object",
@@ -323,6 +326,7 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "target", "rules"},
 		}
+		ruleProviderIntent := ruleProviderInputSchema("External rule-provider id, for example US-Proxy.")
 		proxyGroupIntent := map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -353,12 +357,13 @@ func inputSchemaForTool(name string) map[string]any {
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test. Defaults to true."},
 				"overlay": map[string]any{
 					"type":                 "object",
-					"description":          "Desired localClash overlay. If packs[].target or custom_rules[].target references a proxy group that is not already in durable localclash.yaml, include that proxy group in overlay.proxy_groups in this same call.",
+					"description":          "Desired localClash overlay. If packs[].target, custom_rules[].target, or rule_providers[].target references a proxy group that is not already in durable localclash.yaml, include that proxy group in overlay.proxy_groups in this same call.",
 					"additionalProperties": false,
 					"properties": map[string]any{
-						"packs":        map[string]any{"type": "array", "items": packIntent},
-						"custom_rules": map[string]any{"type": "array", "items": customRuleIntent},
-						"proxy_groups": map[string]any{"type": "array", "items": proxyGroupIntent},
+						"packs":          map[string]any{"type": "array", "items": packIntent},
+						"custom_rules":   map[string]any{"type": "array", "items": customRuleIntent},
+						"rule_providers": map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},
+						"proxy_groups":   map[string]any{"type": "array", "items": proxyGroupIntent},
 					},
 				},
 			},
@@ -558,5 +563,24 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": true,
 		}
+	}
+}
+
+func ruleProviderInputSchema(idDescription string) map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"id":       map[string]any{"type": "string", "description": idDescription},
+			"target":   map[string]any{"type": "string", "description": "Rule target such as DIRECT, REJECT, PROXY, or a proxy group id."},
+			"reason":   map[string]any{"type": "string", "description": "Short durable reason for this external provider."},
+			"type":     map[string]any{"type": "string", "enum": []string{"http", "file"}, "description": "Mihomo rule-provider type. Defaults to http."},
+			"behavior": map[string]any{"type": "string", "enum": []string{"classical", "domain", "ipcidr"}, "description": "Mihomo rule-provider behavior. Defaults to classical."},
+			"format":   map[string]any{"type": "string", "enum": []string{"yaml", "text", "mrs"}, "description": "Mihomo rule-provider format. Defaults to yaml."},
+			"path":     map[string]any{"type": "string", "description": "Local rule-provider cache path. Defaults to ./rule_provider/<id>.yaml."},
+			"url":      map[string]any{"type": "string", "description": "Remote provider URL. Required for http providers."},
+			"interval": map[string]any{"type": "integer", "minimum": 0, "description": "Refresh interval in seconds. Defaults to 86400 for http providers."},
+		},
+		"required": []string{"id", "target"},
 	}
 }

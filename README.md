@@ -269,11 +269,14 @@ MCP patch-building tools:
   patch should use it.
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, or CIDRs that share one target.
-- `config_patch_create`: accepts proxy groups, third-party packs, and custom
-  rules, then renders candidate `localclash.yaml`, derived
+- `rule_provider_build`: build and validate a user-supplied external Mihomo
+  rule-provider, such as `US-Proxy` from a raw GitHub URL, before adding it to
+  `config_patch_create.overlay.rule_providers`.
+- `config_patch_create`: accepts proxy groups, third-party packs, custom rules,
+  and external rule-providers, then renders candidate `localclash.yaml`, derived
   `localclash-packs.yaml`, and `mihomo.yaml` into `.runtime/patches/<patch-id>/`.
   MCP `arguments` must be a JSON object, not a JSON-encoded string. If a pack or
-  custom rule targets a new proxy group, include that group in
+  custom rule or external provider targets a new proxy group, include that group in
   `overlay.proxy_groups` in the same call.
 - `config_patch_apply`: applies a reviewed patch by writing durable
   `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
@@ -288,7 +291,9 @@ routing such as "huggingface.co through temporary line", inspect status,
 search/build or reuse the proxy group, call `custom_rules_build`, then create a
 patch with desired `proxy_groups` and `custom_rules`. For built-in targets such
 as "xxx direct", skip proxy group creation and build custom rules with target
-`DIRECT`.
+`DIRECT`. For external provider routing such as adding a raw `US-Proxy`
+rule-provider URL, call `rule_provider_build`, then create a patch with desired
+`rule_providers`; do not edit `generated/mihomo.yaml` directly.
 
 Patch creation does not overwrite active generated files, start or restart
 Mihomo, or apply router system changes. After user review,
@@ -297,8 +302,8 @@ up replaced local artifacts, writes `localclash.yaml`, derives
 `localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`. It still does
 not start or restart Mihomo; use `run_runtime` for that confirmed step. If an
 agent wants to preserve existing local state, it must first call `config_status`
-and submit the full desired config, including retained packs, custom rules, and
-proxy groups.
+and submit the full desired config, including retained packs, custom rules,
+external rule-providers, and proxy groups.
 The normal reviewed-change loop is:
 `config_status` → `config_patch_create` → `config_patch_apply` →
 `config_status`.

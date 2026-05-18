@@ -49,10 +49,11 @@ type Component struct {
 }
 
 type Selection struct {
-	Version     int                   `yaml:"version"`
-	ProxyGroups map[string]ProxyGroup `yaml:"proxy_groups,omitempty"`
-	CustomRules []CustomRule          `yaml:"custom_rules,omitempty"`
-	EnabledPack []SelectedPack        `yaml:"enabled_packs"`
+	Version       int                    `yaml:"version"`
+	ProxyGroups   map[string]ProxyGroup  `yaml:"proxy_groups,omitempty"`
+	CustomRules   []CustomRule           `yaml:"custom_rules,omitempty"`
+	RuleProviders []ExternalRuleProvider `yaml:"rule_providers,omitempty"`
+	EnabledPack   []SelectedPack         `yaml:"enabled_packs"`
 }
 
 type ProxyGroup struct {
@@ -80,6 +81,18 @@ type CustomRuleLine struct {
 	Type      string `yaml:"type" json:"type"`
 	Value     string `yaml:"value" json:"value"`
 	NoResolve bool   `yaml:"no_resolve,omitempty" json:"no_resolve,omitempty"`
+}
+
+type ExternalRuleProvider struct {
+	ID       string `yaml:"id" json:"id"`
+	Target   string `yaml:"target" json:"target"`
+	Reason   string `yaml:"reason,omitempty" json:"reason,omitempty"`
+	Type     string `yaml:"type" json:"type"`
+	Behavior string `yaml:"behavior" json:"behavior"`
+	Format   string `yaml:"format" json:"format"`
+	Path     string `yaml:"path" json:"path"`
+	URL      string `yaml:"url,omitempty" json:"url,omitempty"`
+	Interval int    `yaml:"interval,omitempty" json:"interval,omitempty"`
 }
 
 type Fragment struct {
@@ -326,6 +339,21 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		}
 		fragment.Rules = append(fragment.Rules, lines...)
 	}
+	for _, provider := range selection.RuleProviders {
+		target, proxyGroup, err := renderTarget(provider.Target, targets)
+		if err != nil {
+			return Fragment{}, err
+		}
+		if proxyGroup {
+			usedProxyGroups[target] = true
+		}
+		rendered, err := renderExternalRuleProvider(provider)
+		if err != nil {
+			return Fragment{}, err
+		}
+		fragment.RuleProviders[provider.ID] = rendered
+		fragment.Rules = append(fragment.Rules, fmt.Sprintf("RULE-SET,%s,%s", provider.ID, target))
+	}
 	for _, enabled := range selection.EnabledPack {
 		cache, ok := caches[enabled.Source]
 		if !ok {
@@ -363,6 +391,29 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 	}
 	fragment.ProxyGroups = proxyGroups
 	return fragment, nil
+}
+
+func renderExternalRuleProvider(provider ExternalRuleProvider) (map[string]any, error) {
+	id := strings.TrimSpace(provider.ID)
+	if id == "" {
+		return nil, fmt.Errorf("rule provider id is required")
+	}
+	out := map[string]any{
+		"type":     strings.TrimSpace(provider.Type),
+		"behavior": strings.TrimSpace(provider.Behavior),
+		"format":   strings.TrimSpace(provider.Format),
+		"path":     strings.TrimSpace(provider.Path),
+	}
+	if out["type"] == "" || out["behavior"] == "" || out["format"] == "" || out["path"] == "" {
+		return nil, fmt.Errorf("rule provider %q requires type, behavior, format, and path", id)
+	}
+	if strings.TrimSpace(provider.URL) != "" {
+		out["url"] = strings.TrimSpace(provider.URL)
+	}
+	if provider.Interval > 0 {
+		out["interval"] = provider.Interval
+	}
+	return out, nil
 }
 
 func renderCustomRuleLines(custom CustomRule, target string) ([]string, error) {

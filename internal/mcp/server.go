@@ -401,6 +401,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callProxyGroupBuild(args)
 	case "custom_rules_build":
 		return callCustomRulesBuild(args)
+	case "rule_provider_build":
+		return callRuleProviderBuild(args)
 	case "runtime_profile_configure":
 		return s.callRuntimeProfileConfigure(args)
 	case "run_runtime":
@@ -845,6 +847,47 @@ func callCustomRulesBuild(args json.RawMessage) (toolResult, error) {
 		"id":          id,
 		"target":      target,
 		"rule_count":  len(in.Rules),
+	})
+}
+
+func callRuleProviderBuild(args json.RawMessage) (toolResult, error) {
+	var in localconfig.ExternalRuleProvider
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	provider, err := localconfig.NormalizeRuleProvider(in)
+	if err != nil {
+		return toolResult{}, err
+	}
+	selection := rules.Selection{
+		Version: 1,
+		RuleProviders: []rules.ExternalRuleProvider{{
+			ID:       provider.ID,
+			Target:   "DIRECT",
+			Reason:   provider.Reason,
+			Type:     provider.Type,
+			Behavior: provider.Behavior,
+			Format:   provider.Format,
+			Path:     provider.Path,
+			URL:      provider.URL,
+			Interval: provider.Interval,
+		}},
+	}
+	if _, err := rules.RenderFragment(selection, map[string]rules.PackCache{}); err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(map[string]any{
+		"rule_provider": provider,
+		"id":            provider.ID,
+		"target":        provider.Target,
+		"provider": map[string]any{
+			"type":     provider.Type,
+			"behavior": provider.Behavior,
+			"format":   provider.Format,
+			"path":     provider.Path,
+			"url":      provider.URL,
+			"interval": provider.Interval,
+		},
 	})
 }
 

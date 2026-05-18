@@ -108,7 +108,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -143,6 +143,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"config_render":             SafeWrite,
 		"proxy_group_build":         SafeWrite,
 		"custom_rules_build":        SafeWrite,
+		"rule_provider_build":       SafeWrite,
 		"pack_rules_prefetch":       SafeWrite,
 		"pack_rules_read":           SafeWrite,
 		"runtime_profile_configure": SafeWrite,
@@ -1049,6 +1050,36 @@ func TestToolsCallCustomRulesBuildReturnsReusableIntent(t *testing.T) {
 	}
 }
 
+func TestToolsCallRuleProviderBuildReturnsReusableIntent(t *testing.T) {
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "rule_provider_build",
+			"arguments": map[string]any{
+				"id":       "US-Proxy",
+				"target":   "PROXY",
+				"url":      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
+				"behavior": "classical",
+				"reason":   "User supplied qoli US proxy rules.",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("rule_provider_build returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["id"] != "US-Proxy" || content["target"] != "PROXY" {
+		t.Fatalf("rule provider content = %+v, want US-Proxy target PROXY", content)
+	}
+	provider := content["rule_provider"].(map[string]any)
+	if provider["path"] != "./rule_provider/US-Proxy.yaml" || provider["interval"] != float64(86400) {
+		t.Fatalf("provider defaults = %+v, want default path and interval", provider)
+	}
+}
+
 func TestToolsCallConfigPatchCreateSupportsCustomRulesWithoutPacks(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
@@ -1092,6 +1123,52 @@ func TestToolsCallConfigPatchCreateSupportsCustomRulesWithoutPacks(t *testing.T)
 	config := readMCPFile(t, content["output"].(string))
 	if !strings.Contains(config, "DOMAIN-SUFFIX,huggingface.co,TempLine") || !strings.Contains(config, "name: TempLine") {
 		t.Fatalf("candidate config missing custom rule or proxy group:\n%s", config)
+	}
+}
+
+func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_patch_create",
+			"arguments": map[string]any{
+				"patch_name":   "us-proxy",
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+				"patches_dir":  paths.outputDir,
+				"test":         false,
+				"overlay": map[string]any{
+					"rule_providers": []map[string]any{
+						{
+							"id":       "US-Proxy",
+							"target":   "PROXY",
+							"type":     "http",
+							"behavior": "classical",
+							"format":   "yaml",
+							"path":     "./rule_provider/US-Proxy.yaml",
+							"url":      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
+							"interval": 86400,
+						},
+					},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["valid"] != true {
+		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
+	}
+	config := readMCPFile(t, content["output"].(string))
+	if !strings.Contains(config, "RULE-SET,US-Proxy,PROXY") || !strings.Contains(config, "US-Proxy:") || !strings.Contains(config, "us_proxy.yaml") {
+		t.Fatalf("candidate config missing external rule-provider:\n%s", config)
 	}
 }
 

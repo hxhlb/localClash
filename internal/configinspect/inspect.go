@@ -71,23 +71,25 @@ type OverlayResult struct {
 }
 
 type IntentResult struct {
-	Config           string             `json:"config"`
-	Layer            string             `json:"layer"`
-	Modifiable       bool               `json:"modifiable"`
-	Exists           bool               `json:"exists"`
-	Valid            bool               `json:"valid"`
-	Resolved         bool               `json:"resolved"`
-	Version          int                `json:"version,omitempty"`
-	LoadError        string             `json:"load_error,omitempty"`
-	ResolveError     string             `json:"resolve_error,omitempty"`
-	ProxyGroupsCount int                `json:"proxy_groups_count"`
-	ProxyGroups      []IntentProxyGroup `json:"proxy_groups"`
-	CustomRulesCount int                `json:"custom_rules_count"`
-	CustomRules      []IntentCustomRule `json:"custom_rules"`
-	PacksCount       int                `json:"packs_count"`
-	Packs            []IntentPack       `json:"packs"`
-	Truncated        bool               `json:"truncated,omitempty"`
-	Note             string             `json:"note"`
+	Config             string               `json:"config"`
+	Layer              string               `json:"layer"`
+	Modifiable         bool                 `json:"modifiable"`
+	Exists             bool                 `json:"exists"`
+	Valid              bool                 `json:"valid"`
+	Resolved           bool                 `json:"resolved"`
+	Version            int                  `json:"version,omitempty"`
+	LoadError          string               `json:"load_error,omitempty"`
+	ResolveError       string               `json:"resolve_error,omitempty"`
+	ProxyGroupsCount   int                  `json:"proxy_groups_count"`
+	ProxyGroups        []IntentProxyGroup   `json:"proxy_groups"`
+	CustomRulesCount   int                  `json:"custom_rules_count"`
+	CustomRules        []IntentCustomRule   `json:"custom_rules"`
+	RuleProvidersCount int                  `json:"rule_providers_count"`
+	RuleProviders      []IntentRuleProvider `json:"rule_providers"`
+	PacksCount         int                  `json:"packs_count"`
+	Packs              []IntentPack         `json:"packs"`
+	Truncated          bool                 `json:"truncated,omitempty"`
+	Note               string               `json:"note"`
 }
 
 type IntentProxyGroup struct {
@@ -109,6 +111,19 @@ type IntentCustomRule struct {
 	Reason    string                       `json:"reason,omitempty"`
 	Rules     []localconfig.CustomRuleLine `json:"rules,omitempty"`
 	Status    string                       `json:"status"`
+}
+
+type IntentRuleProvider struct {
+	ID       string `json:"id"`
+	Target   string `json:"target"`
+	Reason   string `json:"reason,omitempty"`
+	Type     string `json:"type"`
+	Behavior string `json:"behavior"`
+	Format   string `json:"format"`
+	Path     string `json:"path"`
+	URL      string `json:"url,omitempty"`
+	Interval int    `json:"interval,omitempty"`
+	Status   string `json:"status"`
 }
 
 type IntentPack struct {
@@ -202,13 +217,14 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	path := defaultIntentConfigPath(opts.ConfigPath)
 	limit := normalizedLimit(opts.Limit)
 	result := IntentResult{
-		Config:      path,
-		Layer:       "intent",
-		Modifiable:  true,
-		ProxyGroups: []IntentProxyGroup{},
-		CustomRules: []IntentCustomRule{},
-		Packs:       []IntentPack{},
-		Note:        "Intent is read from durable localclash.yaml. Use it before creating a patch to preserve existing proxy groups, packs, and custom rules.",
+		Config:        path,
+		Layer:         "intent",
+		Modifiable:    true,
+		ProxyGroups:   []IntentProxyGroup{},
+		CustomRules:   []IntentCustomRule{},
+		RuleProviders: []IntentRuleProvider{},
+		Packs:         []IntentPack{},
+		Note:          "Intent is read from durable localclash.yaml. Use it before creating a patch to preserve existing proxy groups, packs, custom rules, and rule providers.",
 	}
 	config, err := localconfig.Load(path)
 	if err != nil {
@@ -227,13 +243,16 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.Version = config.Version
 	result.ProxyGroupsCount = len(config.ProxyGroups)
 	result.CustomRulesCount = len(config.CustomRules)
+	result.RuleProvidersCount = len(config.RuleProviders)
 	result.PacksCount = len(config.Packs)
 
 	result.ProxyGroups = proxyGroupIntents(config.ProxyGroups, nil, limit)
 	result.CustomRules = customRuleIntents(config.CustomRules, nil, limit)
+	result.RuleProviders = ruleProviderIntents(config.RuleProviders, nil, limit)
 	result.Packs = packIntents(config.Packs, nil, limit)
 	result.Truncated = result.ProxyGroupsCount > len(result.ProxyGroups) ||
 		result.CustomRulesCount > len(result.CustomRules) ||
+		result.RuleProvidersCount > len(result.RuleProviders) ||
 		result.PacksCount > len(result.Packs)
 
 	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
@@ -250,6 +269,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.Resolved = true
 	result.ProxyGroups = proxyGroupIntents(resolved.Config.ProxyGroups, resolved.ProxyGroups, limit)
 	result.CustomRules = customRuleIntents(resolved.Config.CustomRules, resolved.CustomRules, limit)
+	result.RuleProviders = ruleProviderIntents(resolved.Config.RuleProviders, resolved.RuleProviders, limit)
 	result.Packs = packIntents(resolved.Config.Packs, resolved.Packs, limit)
 	return result, nil
 }
@@ -368,6 +388,42 @@ func customRuleIntents(rules []localconfig.CustomRule, resolved []localconfig.Cu
 			Reason:    rule.Reason,
 			Rules:     append([]localconfig.CustomRuleLine{}, rule.Rules...),
 			Status:    status,
+		})
+	}
+	return out
+}
+
+func ruleProviderIntents(providers []localconfig.ExternalRuleProvider, resolved []localconfig.RuleProviderResult, limit int) []IntentRuleProvider {
+	resolvedByID := map[string]localconfig.RuleProviderResult{}
+	for _, provider := range resolved {
+		resolvedByID[provider.ID] = provider
+	}
+	if len(providers) > limit {
+		providers = providers[:limit]
+	}
+	out := make([]IntentRuleProvider, 0, len(providers))
+	for _, provider := range providers {
+		status := "configured"
+		if resolvedProvider, ok := resolvedByID[provider.ID]; ok {
+			status = "resolved"
+			provider.Type = resolvedProvider.Type
+			provider.Behavior = resolvedProvider.Behavior
+			provider.Format = resolvedProvider.Format
+			provider.Path = resolvedProvider.Path
+			provider.URL = resolvedProvider.URL
+			provider.Interval = resolvedProvider.Interval
+		}
+		out = append(out, IntentRuleProvider{
+			ID:       provider.ID,
+			Target:   provider.Target,
+			Reason:   provider.Reason,
+			Type:     provider.Type,
+			Behavior: provider.Behavior,
+			Format:   provider.Format,
+			Path:     provider.Path,
+			URL:      provider.URL,
+			Interval: provider.Interval,
+			Status:   status,
 		})
 	}
 	return out

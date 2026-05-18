@@ -230,14 +230,16 @@ Current code now has:
 - a localClash user config file model
 - renderer support for selected third-party packs
 - renderer support for inline `custom_rules`
-- MCP patch tools for proxy groups, custom rules, reviewed config apply, and
-  atomic generated config rendering
+- renderer support for user-supplied external `rule_providers`
+- MCP patch tools for proxy groups, custom rules, external rule-providers,
+  reviewed config apply, and atomic generated config rendering
 
 Current code does not yet have:
 
 - standalone local rule pack files
 - UI support for base policy and rule pack selection
-- doctor checks for custom rule schema or custom rule target references
+- doctor checks for custom rule or external provider schema and target
+  references
 
 ## Development Sequence
 

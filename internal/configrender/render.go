@@ -207,6 +207,16 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 				usedProxyGroups[enabled.Target] = true
 			}
 		}
+		for _, custom := range selection.CustomRules {
+			if _, ok := selection.ProxyGroups[custom.Target]; ok {
+				usedProxyGroups[custom.Target] = true
+			}
+		}
+		for _, provider := range selection.RuleProviders {
+			if _, ok := selection.ProxyGroups[provider.Target]; ok {
+				usedProxyGroups[provider.Target] = true
+			}
+		}
 		proxyGroupIDs := make([]string, 0, len(usedProxyGroups))
 		for id := range usedProxyGroups {
 			proxyGroupIDs = append(proxyGroupIDs, id)
