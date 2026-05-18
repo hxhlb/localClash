@@ -43,21 +43,21 @@ type ToolsListResult struct {
 
 func Registry() []Tool {
 	tools := []Tool{
-		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash.yaml, generated/mihomo.yaml build artifact, render readiness, and pending patches."},
+		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash.yaml, generated/mihomo.yaml build artifact, render readiness, and pending patches. Use this before claiming what routing is configured; rules_sample fields are truncated samples."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, and localClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},
 		{Name: "pack_rules_query", SafetyLevel: SafeRead, Description: "Search locally cached pack provider rules for a domain or keyword. Does not download provider rules; call pack_rules_prefetch first when cache coverage is incomplete."},
-		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry."},
-		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter generated rule pack cache entries."},
+		{Name: "packs_get", SafetyLevel: SafeRead, Description: "Read details for one generated rule pack cache entry. The target field is a catalog default/recommended target, not proof the pack is active; use config_status for active routing."},
+		{Name: "packs_list", SafetyLevel: SafeRead, Description: "List and filter available rule pack catalog entries. This is discovery only: target is catalog default/recommended target, not current active configuration."},
 		{Name: "subscription_nodes_list", SafetyLevel: SafeRead, Description: "List safe subscription proxy name/type summaries without exposing connection credentials."},
 		{Name: "subscription_nodes_search", SafetyLevel: SafeRead, Description: "Search subscription proxy names and return safe name/type summaries; does not verify network egress location."},
 		{Name: "runtime_profile_status", SafetyLevel: SafeRead, Description: "Inspect the active Mihomo runtime profile and its safe summary without exposing proxy credentials."},
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
-		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config patch by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime."},
-		{Name: "config_patch_create", SafetyLevel: SafeWrite, Description: "Create a reviewable config patch and candidate Mihomo config from proxy groups, packs, and custom rules. It does not modify active localclash.yaml or generated/mihomo.yaml."},
+		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config patch by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime. Use the exact patch_id returned by config_patch_create."},
+		{Name: "config_patch_create", SafetyLevel: SafeWrite, Description: "Create a reviewable config patch and candidate Mihomo config from proxy groups, packs, and custom rules. It does not modify active localclash.yaml or generated/mihomo.yaml; apply the returned patch_id only after review."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated/mihomo.yaml from the current durable localclash.yaml source of truth, subscription, policy, and runtime profile. Does not read patches and does not start runtime."},
 		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config patch."},
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
@@ -493,7 +493,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"source": map[string]any{"type": "string", "description": "Exact pack source, for example sukkaw or blackmatrix7."},
 				"name":   map[string]any{"type": "string", "description": "Case-insensitive substring filter for pack name or id."},
-				"target": map[string]any{"type": "string", "description": "Exact target filter, for example DIRECT, REJECT, or AI."},
+				"target": map[string]any{"type": "string", "description": "Exact catalog default/recommended target filter, for example DIRECT, REJECT, or AI. This is not an active-config filter."},
 				"limit":  map[string]any{"type": "integer", "minimum": 1},
 			},
 		}

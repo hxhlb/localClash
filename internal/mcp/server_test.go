@@ -1232,6 +1232,15 @@ func TestToolsCallPacksListReturnsSerializableResult(t *testing.T) {
 	if content["total"] != float64(1) {
 		t.Fatalf("packs_list total = %v, want 1", content["total"])
 	}
+	guidance := content["guidance"].([]any)
+	if len(guidance) == 0 || !strings.Contains(guidance[0].(string), "available catalog packs") {
+		t.Fatalf("guidance = %+v, want catalog guidance", guidance)
+	}
+	packs := content["packs"].([]any)
+	first := packs[0].(map[string]any)
+	if !strings.Contains(first["target_meaning"].(string), "not active configuration") {
+		t.Fatalf("pack = %+v, want target meaning", first)
+	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("packs_list structured content is not serializable: %v", err)
 	}
@@ -1479,6 +1488,10 @@ func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 	summary := content["generated_summary"].(map[string]any)
 	if int(summary["proxies_count"].(float64)) != 1 {
 		t.Fatalf("summary = %+v, want one proxy", summary)
+	}
+	guidance := content["usage_guidance"].([]any)
+	if len(guidance) == 0 || !strings.Contains(guidance[1].(string), "truncated sample") {
+		t.Fatalf("usage_guidance = %+v, want truncated sample warning", guidance)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("config_status structured content is not serializable: %v", err)

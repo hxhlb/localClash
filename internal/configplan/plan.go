@@ -94,6 +94,7 @@ type Result struct {
 	Overlay     OverlaySummary   `json:"overlay"`
 	Changes     ChangesSummary   `json:"changes"`
 	Warnings    []string         `json:"warnings"`
+	NextActions []string         `json:"next_actions,omitempty"`
 }
 
 type PlanInputs struct {
@@ -119,6 +120,7 @@ type ApplyResult struct {
 	Render        configrender.Result `json:"render"`
 	Backups       []BackupResult      `json:"backups,omitempty"`
 	Warnings      []string            `json:"warnings"`
+	NextActions   []string            `json:"next_actions,omitempty"`
 }
 
 type BackupResult struct {
@@ -250,6 +252,11 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 			RulesAdded:         len(overlayInspection.Rules),
 		},
 		Warnings: warnings,
+		NextActions: []string{
+			"Review this patch output and summary before applying.",
+			"Apply only the exact patch_id returned here; do not invent or reuse a patch_id.",
+			"After config_patch_apply, call config_status to verify durable intent and generated overlay.",
+		},
 	}
 	if opts.Test {
 		result.MihomoTest.Passed, result.MihomoTest.Output = runMihomoTest(ctx, opts, outputPath)
@@ -331,6 +338,11 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		Overlay:       overlaySummary,
 		Render:        renderResult,
 		Warnings:      append([]string{}, plan.Warnings...),
+		NextActions: []string{
+			"Call config_status to verify the applied durable intent and generated overlay.",
+			"Call runtime_status to see whether Mihomo is already running; config changes do not restart runtime automatically.",
+			"Ask for confirmation before run_runtime or stop_runtime.",
+		},
 	}
 	result.Warnings = append(result.Warnings, warnings...)
 	result.Render.OutputPath = opts.OutputPath

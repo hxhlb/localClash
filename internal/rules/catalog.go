@@ -30,8 +30,10 @@ type PackRef struct {
 }
 
 type PackListResult struct {
-	Total int           `json:"total"`
-	Packs []PackSummary `json:"packs"`
+	Total       int           `json:"total"`
+	Packs       []PackSummary `json:"packs"`
+	Guidance    []string      `json:"guidance,omitempty"`
+	NextActions []string      `json:"next_actions,omitempty"`
 }
 
 type PackSummary struct {
@@ -39,6 +41,7 @@ type PackSummary struct {
 	Source        string `json:"source"`
 	Name          string `json:"name"`
 	Target        string `json:"target"`
+	TargetMeaning string `json:"target_meaning,omitempty"`
 	ProviderCount int    `json:"provider_count"`
 	RuleCount     int    `json:"rule_count"`
 }
@@ -58,6 +61,7 @@ type PackDetail struct {
 	Source        string            `json:"source"`
 	Name          string            `json:"name"`
 	Target        string            `json:"target"`
+	TargetMeaning string            `json:"target_meaning,omitempty"`
 	Renderable    bool              `json:"renderable"`
 	Reason        string            `json:"reason,omitempty"`
 	Providers     []ProviderSummary `json:"providers"`
@@ -104,7 +108,7 @@ func ListPacks(opts PackListOptions) (PackListResult, error) {
 	if opts.Limit > 0 && len(packs) > opts.Limit {
 		packs = packs[:opts.Limit]
 	}
-	return PackListResult{Total: len(packs), Packs: packs}, nil
+	return PackListResult{Total: len(packs), Packs: packs, Guidance: PackListGuidance(), NextActions: PackListNextActions()}, nil
 }
 
 func GetPack(opts PackGetOptions) (PackGetResult, error) {
@@ -126,6 +130,22 @@ func packRuleNextActions() []string {
 	return []string{
 		"Use pack_rules_read with this pack id to inspect provider rule contents.",
 		"Use pack_rules_prefetch with candidate pack ids before pack_rules_query when local provider-cache coverage is incomplete.",
+	}
+}
+
+func PackListGuidance() []string {
+	return []string{
+		"packs_list lists available catalog packs, not currently active routing policy.",
+		"The pack target field is the pack's default/recommended render target from the catalog. It is not evidence that the pack is currently configured.",
+		"Use config_status to inspect active localclash.yaml intent and generated/mihomo.yaml overlay before claiming a pack is configured.",
+	}
+}
+
+func PackListNextActions() []string {
+	return []string{
+		"Use packs_get or pack_rules_read on candidate pack ids before choosing packs.",
+		"To change routing, call config_status first, then config_patch_create with the full desired retained config plus new pack targets.",
+		"Apply only the exact patch_id returned by config_patch_create, then call config_status to verify.",
 	}
 }
 
@@ -221,6 +241,7 @@ func packSummary(entry catalogEntry) PackSummary {
 		Source:        entry.Cache.Source,
 		Name:          packDisplayName(entry.Pack),
 		Target:        entry.Pack.Target,
+		TargetMeaning: "catalog default/recommended target; not active configuration",
 		ProviderCount: len(entry.Pack.Components),
 		RuleCount:     len(entry.Pack.Components),
 	}
@@ -259,6 +280,7 @@ func packDetail(entry catalogEntry) PackDetail {
 		Source:        entry.Cache.Source,
 		Name:          packDisplayName(entry.Pack),
 		Target:        entry.Pack.Target,
+		TargetMeaning: "catalog default/recommended target; not active configuration",
 		Renderable:    entry.Pack.Renderable,
 		Reason:        entry.Pack.Reason,
 		Providers:     providers,

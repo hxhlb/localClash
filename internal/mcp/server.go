@@ -940,6 +940,12 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		"intent":  intent,
 		"render":  s.configRenderState(in, intent, generated.Present),
 		"patches": listConfigPatches(in.PatchesDir, limit),
+		"usage_guidance": []string{
+			"config_status is the preferred tool for checking durable localClash routing intent and generated overlay state.",
+			"generated_summary.rules_sample is a truncated sample, not the complete rule list. Do not infer absent rules from the sample.",
+			"Use intent.packs and overlay.rules to verify localClash-managed pack routing. Use nl_file only when explicit line-level file evidence is needed.",
+			"runtime_status only reports whether Mihomo is running; it does not prove that a pending config change is loaded by a running process.",
+		},
 	}
 	if generated.Present {
 		if base, err := configinspect.InspectBase(configinspect.Options{ConfigPath: in.Output, Limit: limit}); err == nil {
@@ -1421,12 +1427,15 @@ func listPacksFromState(state appinit.RuntimeState, source, name, target string,
 		if nameFilter != "" && !strings.Contains(strings.ToLower(pack.Name), nameFilter) && !strings.Contains(strings.ToLower(pack.ID), nameFilter) {
 			continue
 		}
+		if pack.TargetMeaning == "" {
+			pack.TargetMeaning = "catalog default/recommended target; not active configuration"
+		}
 		packs = append(packs, pack)
 	}
 	if limit > 0 && len(packs) > limit {
 		packs = packs[:limit]
 	}
-	return rules.PackListResult{Total: len(packs), Packs: packs}, nil
+	return rules.PackListResult{Total: len(packs), Packs: packs, Guidance: rules.PackListGuidance(), NextActions: rules.PackListNextActions()}, nil
 }
 
 func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {

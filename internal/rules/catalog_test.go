@@ -22,6 +22,12 @@ func TestListPacksReturnsSummaries(t *testing.T) {
 	if result.Packs[0].ProviderCount != 1 || result.Packs[0].RuleCount != 1 {
 		t.Fatalf("counts = %+v, want provider/rule count 1", result.Packs[0])
 	}
+	if len(result.Guidance) == 0 || len(result.NextActions) == 0 {
+		t.Fatalf("result = %+v, want guidance and next actions", result)
+	}
+	if result.Packs[0].TargetMeaning == "" {
+		t.Fatalf("pack summary = %+v, want target meaning", result.Packs[0])
+	}
 }
 
 func TestListPacksFiltersNameCaseInsensitive(t *testing.T) {
@@ -82,6 +88,9 @@ func TestGetPackReturnsDetail(t *testing.T) {
 	pack := result.Pack
 	if pack.ID != "blackmatrix7_OpenAI" || pack.Target != "AI" {
 		t.Fatalf("pack = %+v, want OpenAI target AI", pack)
+	}
+	if pack.TargetMeaning == "" {
+		t.Fatalf("pack = %+v, want target meaning", pack)
 	}
 	if len(pack.Providers) != 1 || pack.Providers[0].Name != "blackmatrix7_OpenAI" {
 		t.Fatalf("providers = %+v, want blackmatrix7_OpenAI", pack.Providers)
