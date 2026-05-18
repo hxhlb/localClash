@@ -70,15 +70,12 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	if policy.Status == statusOK {
 		checkPolicyMode(&policy)
 	}
-	shouldInspectWorkingDir := missingFileCheck(subscription) || missingFileCheck(config) || missingFileCheck(policy)
 
 	report.add(core)
 	report.add(subscription)
 	report.add(config)
 	report.add(policy)
-	if shouldInspectWorkingDir {
-		report.add(checkWorkingDirectory())
-	}
+	report.add(checkWorkingDirectory())
 
 	if config.Status == statusOK {
 		configData, _ := readYAMLMap(opts.ConfigPath)
@@ -200,10 +197,6 @@ func checkYAMLFile(id, title, path string) Check {
 	return check
 }
 
-func missingFileCheck(check Check) bool {
-	return check.Status == statusFail && strings.HasPrefix(check.Summary, "file not found:")
-}
-
 func missingPathContext(path string) []string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -224,9 +217,9 @@ func checkWorkingDirectory() Check {
 		check.Summary = fmt.Sprintf("cannot inspect working directory: %v", err)
 		return check
 	}
-	check.Status = statusWarn
+	check.Status = statusOK
 	check.Path = cwd
-	check.Summary = "required file is missing; inspect process working directory structure"
+	check.Summary = "process working directory structure"
 	tree, err := workingDirectoryTree(cwd, 2, 80)
 	if err != nil {
 		check.Details = []string{fmt.Sprintf("working directory files unavailable: %v", err)}

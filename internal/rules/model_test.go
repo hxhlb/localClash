@@ -1,6 +1,8 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -82,6 +84,53 @@ enabled_packs:
 	}
 	if !selection.ProxyGroups["AI"].Manual || selection.ProxyGroups["AI"].Auto {
 		t.Fatalf("AI proxy group = %+v, want manual only", selection.ProxyGroups["AI"])
+	}
+}
+
+func TestLoadSourcesIgnoresMacOSMetadataFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "blackmatrix7.yaml"), []byte(`
+id: blackmatrix7
+adapter: blackmatrix7
+url: https://example.com/index.yaml
+raw_base_url: https://example.com/raw
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "._blackmatrix7.yaml"), []byte{0, 5, 'b', 'a', 'd'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".hidden.yaml"), []byte("not: a source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := LoadSources(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].ID != "blackmatrix7" {
+		t.Fatalf("sources = %+v, want only blackmatrix7", sources)
+	}
+}
+
+func TestLoadPackCachesIgnoresMacOSMetadataFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := WritePackCache(dir, PackCache{Source: "blackmatrix7", Adapter: "blackmatrix7"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "._blackmatrix7.yaml"), []byte{0, 5, 'b', 'a', 'd'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	caches, err := LoadPackCaches(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(caches) != 1 {
+		t.Fatalf("caches = %+v, want one cache", caches)
+	}
+	if _, ok := caches["blackmatrix7"]; !ok {
+		t.Fatalf("caches = %+v, want blackmatrix7", caches)
 	}
 }
 

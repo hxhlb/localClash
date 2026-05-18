@@ -119,7 +119,7 @@ func TestCheckYAMLFileMissingPathIncludesResolvedPath(t *testing.T) {
 	}
 }
 
-func TestRunIncludesWorkingDirectoryTreeWhenRequiredFileIsMissing(t *testing.T) {
+func TestRunAlwaysIncludesWorkingDirectoryTree(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
@@ -150,8 +150,8 @@ func TestRunIncludesWorkingDirectoryTreeWhenRequiredFileIsMissing(t *testing.T) 
 	if workingDir == nil {
 		t.Fatal("doctor report missing working_directory check")
 	}
-	if workingDir.Status != statusWarn || workingDir.Path != dir {
-		t.Fatalf("working_directory = %+v, want warn at temp dir", *workingDir)
+	if workingDir.Status != statusOK || workingDir.Path != dir {
+		t.Fatalf("working_directory = %+v, want ok at temp dir", *workingDir)
 	}
 	details := strings.Join(workingDir.Details, "\n")
 	for _, want := range []string{"policies/", "subscription.yaml"} {

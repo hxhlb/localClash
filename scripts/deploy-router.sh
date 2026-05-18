@@ -223,7 +223,7 @@ ln -sf "$remote_bin" "$remote_link"
 sha256sum "$remote_bin"
 EOS
 
-assets_archive="$(mktemp "${TMPDIR:-/tmp}/localclash-assets.XXXXXX.tar.gz")"
+assets_archive="$(mktemp "${TMPDIR:-/tmp}/localclash-assets.XXXXXX")"
 init_file="$(mktemp "${TMPDIR:-/tmp}/localclash-mcp.init.XXXXXX")"
 cleanup() {
   rm -f "${init_file}" "${assets_archive}"
@@ -231,7 +231,13 @@ cleanup() {
 trap cleanup EXIT
 
 log "uploading base assets to ${router_ssh}:${remote_assets_tmp}"
-tar -czf "${assets_archive}" policies rule-sources
+COPYFILE_DISABLE=1 tar \
+  --format=ustar \
+  --exclude='._*' \
+  --exclude='*/._*' \
+  --exclude='.DS_Store' \
+  --exclude='*/.DS_Store' \
+  -czf "${assets_archive}" policies rule-sources
 scp "${ssh_opts[@]}" "${assets_archive}" "${router_ssh}:${remote_assets_tmp}"
 
 log "installing missing base assets under ${remote_workdir}"
@@ -249,6 +255,11 @@ trap cleanup EXIT
 rm -rf "$assets_tmp_dir"
 mkdir -p "$assets_tmp_dir" "$remote_workdir"
 tar -xzf "$remote_assets_tmp" -C "$assets_tmp_dir"
+find "$remote_workdir/policies" "$remote_workdir/rule-sources" \
+  \( -name '._*' -o -name '.DS_Store' \) -type f -print 2>/dev/null \
+  | while IFS= read -r polluted_file; do
+      rm -f "$polluted_file"
+    done
 cd "$assets_tmp_dir"
 installed=0
 for file in $(find policies rule-sources -type f | sort); do

@@ -160,7 +160,7 @@ func LoadSources(dir string) ([]Source, error) {
 	}
 	var sources []Source
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+		if shouldSkipYAMLFile(entry.Name(), entry.IsDir()) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
@@ -221,7 +221,7 @@ func LoadPackCaches(dir string) (map[string]PackCache, error) {
 	}
 	caches := map[string]PackCache{}
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+		if shouldSkipYAMLFile(entry.Name(), entry.IsDir()) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
@@ -239,6 +239,13 @@ func LoadPackCaches(dir string) (map[string]PackCache, error) {
 		caches[cache.Source] = cache
 	}
 	return caches, nil
+}
+
+func shouldSkipYAMLFile(name string, isDir bool) bool {
+	if isDir || !strings.HasSuffix(name, ".yaml") {
+		return true
+	}
+	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "._")
 }
 
 func LoadSelection(path string) (Selection, error) {
