@@ -3,9 +3,12 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,17 +33,60 @@ import (
 )
 
 type Server struct {
-	state *appinit.RuntimeState
+	state     *appinit.RuntimeState
+	startedAt time.Time
 }
 
 var routerTakeoverStatus = routertakeover.Status
 
 func NewServer() *Server {
-	return &Server{}
+	return &Server{startedAt: time.Now().UTC()}
 }
 
 func NewServerWithState(state appinit.RuntimeState) *Server {
-	return &Server{state: &state}
+	return &Server{state: &state, startedAt: time.Now().UTC()}
+}
+
+func (s *Server) runtimeInfo() ServerRuntimeInfo {
+	startedAt := s.startedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
+	info := ServerRuntimeInfo{
+		StartedAt: startedAt.Format(time.RFC3339),
+	}
+	if wd, err := os.Getwd(); err == nil {
+		info.WorkingDir = wd
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		info.BinaryError = err.Error()
+		return info
+	}
+	info.Binary = exe
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		info.Binary = resolved
+	}
+	sum, err := sha256File(info.Binary)
+	if err != nil {
+		info.BinaryError = err.Error()
+		return info
+	}
+	info.BinarySHA256 = sum
+	return info
+}
+
+func sha256File(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 type rpcRequest struct {
@@ -397,7 +443,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "tools_list":
-		return jsonToolResult(ToolSummaries())
+		return jsonToolResult(ToolSummaries(s.runtimeInfo()))
 	case "subscriptions_configure":
 		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":

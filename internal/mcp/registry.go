@@ -35,9 +35,18 @@ type ToolSummary struct {
 	SafetyLevel SafetyLevel `json:"safety_level"`
 }
 
+type ServerRuntimeInfo struct {
+	Binary       string `json:"binary,omitempty"`
+	BinarySHA256 string `json:"binary_sha256,omitempty"`
+	BinaryError  string `json:"binary_error,omitempty"`
+	WorkingDir   string `json:"working_dir,omitempty"`
+	StartedAt    string `json:"started_at,omitempty"`
+}
+
 type ToolsListResult struct {
-	Tools []ToolSummary `json:"tools"`
-	Count int           `json:"count"`
+	Server ServerRuntimeInfo `json:"server"`
+	Tools  []ToolSummary     `json:"tools"`
+	Count  int               `json:"count"`
 }
 
 func Registry() []Tool {
@@ -101,7 +110,7 @@ func ListedTools() []ListedTool {
 	return out
 }
 
-func ToolSummaries() ToolsListResult {
+func ToolSummaries(server ServerRuntimeInfo) ToolsListResult {
 	tools := Registry()
 	summaries := make([]ToolSummary, 0, len(tools))
 	for _, tool := range tools {
@@ -112,8 +121,9 @@ func ToolSummaries() ToolsListResult {
 		})
 	}
 	return ToolsListResult{
-		Tools: summaries,
-		Count: len(summaries),
+		Server: server,
+		Tools:  summaries,
+		Count:  len(summaries),
 	}
 }
 

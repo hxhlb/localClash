@@ -199,6 +199,18 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 	if structured.Count != len(structured.Tools) {
 		t.Fatalf("count = %d, tools = %d", structured.Count, len(structured.Tools))
 	}
+	if structured.Server.Binary == "" {
+		t.Fatalf("server binary is empty: %+v", structured.Server)
+	}
+	if structured.Server.BinarySHA256 == "" {
+		t.Fatalf("server binary sha256 is empty: %+v", structured.Server)
+	}
+	if structured.Server.WorkingDir == "" {
+		t.Fatalf("server working dir is empty: %+v", structured.Server)
+	}
+	if structured.Server.StartedAt == "" {
+		t.Fatalf("server started_at is empty: %+v", structured.Server)
+	}
 	byName := map[string]ToolSummary{}
 	for _, tool := range structured.Tools {
 		byName[tool.Name] = tool
