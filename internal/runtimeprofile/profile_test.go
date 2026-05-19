@@ -214,6 +214,53 @@ cores:
 	}
 }
 
+func TestLoadRejectsExistingRuntimeFileWithoutExplicitCorePaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultPath)
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.yaml"), `mihomo:
+  mixed-port: 7890
+`)
+	if err := os.WriteFile(path, []byte(`version: 1
+mode: normal
+core: meta
+profiles:
+  normal:
+    path: profiles/normal.yaml
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), `runtime core "meta" is not defined`) {
+		t.Fatalf("Load error = %v, want missing explicit core definition", err)
+	}
+}
+
+func TestLoadRejectsExistingRuntimeFileWithEmptyActiveCorePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultPath)
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.yaml"), `mihomo:
+  mixed-port: 7890
+`)
+	if err := os.WriteFile(path, []byte(`version: 1
+mode: normal
+core: meta
+profiles:
+  normal:
+    path: profiles/normal.yaml
+cores:
+  meta:
+    path: ""
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), `runtime core "meta" has no path`) {
+		t.Fatalf("Load error = %v, want empty active core path rejection", err)
+	}
+}
+
 func TestApplyToConfigSkipsDynamicKeys(t *testing.T) {
 	config := map[string]any{
 		"mixed-port": 7890,

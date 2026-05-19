@@ -228,13 +228,7 @@ func ActiveCorePath(path string) (string, error) {
 }
 
 func ActiveCorePathFromFile(file File) string {
-	if core, ok := file.Cores[file.Core]; ok && strings.TrimSpace(core.Path) != "" {
-		return core.Path
-	}
-	if file.Core == CoreSmart {
-		return SmartCorePath
-	}
-	return MetaCorePath
+	return file.Cores[file.Core].Path
 }
 
 func ApplyToConfig(config map[string]any, profile Profile) {
@@ -283,12 +277,6 @@ func normalizeDiskFile(file diskFile) diskFile {
 	}
 	if file.Cores == nil {
 		file.Cores = map[string]Core{}
-	}
-	if _, ok := file.Cores[CoreMeta]; !ok {
-		file.Cores[CoreMeta] = Core{Path: MetaCorePath}
-	}
-	if _, ok := file.Cores[CoreSmart]; !ok {
-		file.Cores[CoreSmart] = Core{Path: SmartCorePath}
 	}
 	if !file.Smart.UseLightGBM && !file.Smart.PreferASN && !file.Smart.CollectData && file.Smart.SampleRate == 0 && file.Smart.PolicyPriority == "" {
 		file.Smart = SmartOptions{UseLightGBM: true, PreferASN: true}
@@ -440,6 +428,11 @@ func validate(file File) error {
 	}
 	if _, ok := file.Cores[file.Core]; !ok {
 		return fmt.Errorf("runtime core %q is not defined", file.Core)
+	}
+	for name, core := range file.Cores {
+		if strings.TrimSpace(core.Path) == "" {
+			return fmt.Errorf("runtime core %q has no path", name)
+		}
 	}
 	for name, profile := range file.Profiles {
 		if name != ModeNormal && name != ModeRouter {
