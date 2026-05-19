@@ -31,7 +31,9 @@ type PackRef struct {
 
 type PackListResult struct {
 	Total       int           `json:"total"`
+	Returned    int           `json:"returned"`
 	Packs       []PackSummary `json:"packs"`
+	Truncated   bool          `json:"truncated,omitempty"`
 	Guidance    []string      `json:"guidance,omitempty"`
 	NextActions []string      `json:"next_actions,omitempty"`
 }
@@ -105,10 +107,13 @@ func ListPacks(opts PackListOptions) (PackListResult, error) {
 		packs = append(packs, pack)
 	}
 
+	total := len(packs)
+	truncated := false
 	if opts.Limit > 0 && len(packs) > opts.Limit {
 		packs = packs[:opts.Limit]
+		truncated = true
 	}
-	return PackListResult{Total: len(packs), Packs: packs, Guidance: PackListGuidance(), NextActions: PackListNextActions()}, nil
+	return PackListResult{Total: total, Returned: len(packs), Packs: packs, Truncated: truncated, Guidance: PackListGuidance(), NextActions: PackListNextActions()}, nil
 }
 
 func GetPack(opts PackGetOptions) (PackGetResult, error) {
@@ -273,6 +278,10 @@ func packDetail(entry catalogEntry) PackDetail {
 			URL:      component.URL,
 			Path:     component.Path,
 		})
+		if strings.EqualFold(component.Behavior, "v2fly-dlc") {
+			rules = append(rules, fmt.Sprintf("GEOSITE,%s,%s", entry.Pack.ID, target))
+			continue
+		}
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", name, target))
 	}
 	return PackDetail{

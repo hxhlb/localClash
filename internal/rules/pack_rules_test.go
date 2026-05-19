@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -113,8 +114,8 @@ full:o33249.ingest.sentry.io @ads
 	if err != nil {
 		t.Fatal(err)
 	}
-	if read.Pack.Renderable || read.Summary.RuleCount != 7 || read.Summary.DomainSuffixCount != 2 || read.Summary.DomainCount != 2 || read.Summary.KeywordCount != 1 {
-		t.Fatalf("read = %+v, want queryable non-renderable v2fly rules", read)
+	if !read.Pack.Renderable || read.Summary.RuleCount != 7 || read.Summary.DomainSuffixCount != 2 || read.Summary.DomainCount != 2 || read.Summary.KeywordCount != 1 {
+		t.Fatalf("read = %+v, want queryable renderable v2fly rules", read)
 	}
 	if got := read.Components[0].ID; got != "domain" {
 		t.Fatalf("component id = %q, want domain", got)
@@ -152,6 +153,20 @@ func TestPrefetchPackRulesRequiresExplicitScope(t *testing.T) {
 
 	if _, err := PrefetchPackRules(context.Background(), PackRulesPrefetchOptions{CacheDir: cacheDir, ProviderCache: providerCache}); err == nil {
 		t.Fatal("expected prefetch without ids or filters to fail")
+	}
+}
+
+func TestQueryPackRulesRejectsApproximateSource(t *testing.T) {
+	cacheDir, providerCache := writeV2FlyDLCPackRulesCache(t, "https://example.com")
+
+	_, err := QueryPackRules(context.Background(), PackRulesQueryOptions{
+		CacheDir:      cacheDir,
+		ProviderCache: providerCache,
+		Source:        "v2fly",
+		Query:         "google",
+	})
+	if err == nil || !strings.Contains(err.Error(), `did you mean "v2fly-dlc"`) {
+		t.Fatalf("err = %v, want exact source hint", err)
 	}
 }
 
@@ -207,8 +222,8 @@ func writeV2FlyDLCPackRulesCache(t *testing.T, baseURL string) (string, string) 
 			{
 				ID:         "openai",
 				Name:       "openai",
-				Renderable: false,
-				Reason:     "queryable raw DLC rules but not renderable",
+				Renderable: true,
+				Reason:     "queryable raw DLC rules and renderable as GEOSITE",
 				Components: []Component{
 					{
 						ID:         "domain",

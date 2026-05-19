@@ -374,6 +374,10 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 			usedProxyGroups[target] = true
 		}
 		for _, component := range pack.Components {
+			if strings.EqualFold(component.Behavior, "v2fly-dlc") {
+				fragment.Rules = append(fragment.Rules, fmt.Sprintf("GEOSITE,%s,%s", pack.ID, target))
+				continue
+			}
 			providerName := providerName(enabled.Source, pack.ID, component.ID)
 			fragment.RuleProviders[providerName] = map[string]any{
 				"type":     "http",

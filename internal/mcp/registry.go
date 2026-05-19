@@ -369,6 +369,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
 				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test. Defaults to true."},
+				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
+				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
 				"overlay": map[string]any{
 					"type":                 "object",
 					"description":          "Desired localClash overlay. If packs[].target, custom_rules[].target, or rule_providers[].target references a proxy group that is not already in durable localclash.yaml, include that proxy group in overlay.proxy_groups in this same call.",

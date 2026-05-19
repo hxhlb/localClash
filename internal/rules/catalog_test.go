@@ -13,8 +13,8 @@ func TestListPacksReturnsSummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 3 {
-		t.Fatalf("total = %d, want 3", result.Total)
+	if result.Total != 3 || result.Returned != 3 {
+		t.Fatalf("counts = %d/%d, want 3/3", result.Returned, result.Total)
 	}
 	if result.Packs[0].ID != "blackmatrix7_GitHub" {
 		t.Fatalf("first pack id = %q, want blackmatrix7_GitHub", result.Packs[0].ID)
@@ -73,8 +73,8 @@ func TestListPacksLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Total != 2 || len(result.Packs) != 2 {
-		t.Fatalf("result = %+v, want 2 limited packs", result)
+	if result.Total != 3 || result.Returned != 2 || len(result.Packs) != 2 || !result.Truncated {
+		t.Fatalf("result = %+v, want 2 returned from 3 total truncated packs", result)
 	}
 }
 

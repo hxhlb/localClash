@@ -11,6 +11,7 @@ import (
 
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
+	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
 )
@@ -188,6 +189,40 @@ func TestRenderExternalRuleProviderPlan(t *testing.T) {
 	overlay := metadata["overlay"].(map[string]any)
 	if len(overlay["rule_providers"].([]any)) != 1 {
 		t.Fatalf("metadata rule providers = %+v, want one", overlay["rule_providers"])
+	}
+}
+
+func TestRenderMihomoTestUsesRuntimeProfileCore(t *testing.T) {
+	paths := writePlanFixture(t)
+	profilePath := filepath.Join(paths.dir, runtimeprofile.DefaultPath)
+	if _, err := runtimeprofile.Configure(profilePath, "", runtimeprofile.CoreSmart); err != nil {
+		t.Fatal(err)
+	}
+	corePath := filepath.Join(paths.dir, runtimeprofile.SmartCorePath)
+	argsPath := filepath.Join(paths.dir, "smart-core.args")
+	writeExecutable(t, corePath, "#!/bin/sh\nprintf '%s\\n' \"$0 $*\" > '"+argsPath+"'\nexit 0\n")
+
+	result, err := Render(context.Background(), Options{
+		PlanName:           "smart-core-test",
+		Subscription:       paths.subscription,
+		Policy:             paths.policy,
+		RulesCache:         paths.cacheDir,
+		RuntimeProfilePath: profilePath,
+		OutputDir:          paths.planDir,
+		Test:               true,
+		Now:                fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_Steam", Target: "DIRECT"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Valid || !result.MihomoTest.Passed {
+		t.Fatalf("result = %+v, want passing smart core test", result.MihomoTest)
+	}
+	if got := readFile(t, argsPath); !strings.Contains(got, runtimeprofile.SmartCorePath) || !strings.Contains(got, "-t") {
+		t.Fatalf("smart core args = %q, want smart core config test", got)
 	}
 }
 
@@ -528,6 +563,14 @@ func writeFile(t *testing.T, path string, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeExecutable(t *testing.T, path string, content string) {
+	t.Helper()
+	writeFile(t, path, content)
+	if err := os.Chmod(path, 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -76,6 +76,19 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 	}
 }
 
+func TestDefaultNormalProfileCanResolveV2FlyGeoSitePacks(t *testing.T) {
+	file := DefaultFile()
+	mihomo := file.Profiles[ModeNormal].Mihomo
+
+	if mihomo["geodata-mode"] != true || mihomo["geodata-loader"] != "standard" {
+		t.Fatalf("normal geodata = mode %v loader %v, want enabled standard", mihomo["geodata-mode"], mihomo["geodata-loader"])
+	}
+	geoxURL := mihomo["geox-url"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "v2fly/domain-list-community") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "dlc.dat") {
+		t.Fatalf("normal geox-url = %+v, want v2fly domain-list-community dlc.dat", geoxURL)
+	}
+}
+
 func contains(text, needle string) bool {
 	return strings.Contains(text, needle)
 }
@@ -104,6 +117,10 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		if got := mihomo[key]; got != want {
 			t.Fatalf("router mihomo[%q] = %v, want %v", key, got, want)
 		}
+	}
+	geoxURL := mihomo["geox-url"].(map[string]any)
+	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "v2fly/domain-list-community") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "dlc.dat") {
+		t.Fatalf("router geox-url = %+v, want v2fly domain-list-community dlc.dat", geoxURL)
 	}
 
 	dns := mihomo["dns"].(map[string]any)

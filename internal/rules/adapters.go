@@ -131,8 +131,8 @@ func adaptV2FlyDLC(ctx context.Context, source Source) (PackCache, error) {
 		packs = append(packs, Pack{
 			ID:         entry.Name,
 			Name:       entry.Name,
-			Renderable: false,
-			Reason:     "v2fly domain-list-community source data is queryable as raw DLC rules but not renderable as a Mihomo rule-provider",
+			Renderable: true,
+			Reason:     "v2fly domain-list-community raw data is queryable here and renders as a Mihomo GEOSITE rule; runtime geosite.dat must contain the same tag",
 			Components: []Component{
 				{
 					ID:         "domain",

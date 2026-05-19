@@ -416,7 +416,7 @@ func normalizeOptions(opts Options) Options {
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	if opts.CorePath == "" {
-		opts.CorePath = runtimeprofile.MetaCorePath
+		opts.CorePath = activeRuntimeCorePath(opts.RuntimeProfilePath)
 	}
 	if opts.WorkDir == "" {
 		opts.WorkDir = ".runtime/mihomo"
@@ -459,7 +459,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.OutputPath = "generated/mihomo.yaml"
 	}
 	if opts.CorePath == "" {
-		opts.CorePath = runtimeprofile.MetaCorePath
+		opts.CorePath = activeRuntimeCorePath(opts.RuntimeProfilePath)
 	}
 	if opts.WorkDir == "" {
 		opts.WorkDir = ".runtime/mihomo"
@@ -471,6 +471,14 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.Now = time.Now()
 	}
 	return opts
+}
+
+func activeRuntimeCorePath(runtimeProfilePath string) string {
+	corePath, err := runtimeprofile.ActiveCorePath(runtimeProfilePath)
+	if err == nil && strings.TrimSpace(corePath) != "" {
+		return corePath
+	}
+	return runtimeprofile.MetaCorePath
 }
 
 func normalizeApplyLocatorOptions(opts ApplyOptions) ApplyOptions {

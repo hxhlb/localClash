@@ -281,7 +281,7 @@ func parseOverlayRuleLine(line string) (configmeta.OverlayRule, bool) {
 	switch parts[0] {
 	case "RULE-SET":
 		return configmeta.OverlayRule{Type: parts[0], Provider: parts[1], Target: parts[2]}, true
-	case "DOMAIN", "DOMAIN-SUFFIX", "IP-CIDR", "IP-CIDR6":
+	case "DOMAIN", "DOMAIN-SUFFIX", "GEOSITE", "IP-CIDR", "IP-CIDR6":
 		return configmeta.OverlayRule{Type: parts[0], Value: parts[1], Target: parts[2]}, true
 	default:
 		return configmeta.OverlayRule{}, false

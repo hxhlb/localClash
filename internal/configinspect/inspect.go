@@ -534,7 +534,13 @@ func filterStrings(values []string, excluded map[string]bool) []string {
 }
 
 func formatOverlayRule(rule configmeta.OverlayRule) string {
-	if rule.Type == "" || rule.Provider == "" || rule.Target == "" {
+	if rule.Type == "" || rule.Target == "" {
+		return ""
+	}
+	if rule.Provider == "" && rule.Value != "" {
+		return rule.Type + "," + rule.Value + "," + rule.Target
+	}
+	if rule.Provider == "" {
 		return ""
 	}
 	return rule.Type + "," + rule.Provider + "," + rule.Target

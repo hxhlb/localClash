@@ -47,21 +47,38 @@ func TestRenderFragmentUsesSelectionAndPackCache(t *testing.T) {
 	}
 }
 
-func TestRenderFragmentRejectsNonRenderablePack(t *testing.T) {
+func TestRenderFragmentRendersV2FlyDLCAsGeoSite(t *testing.T) {
 	selection := Selection{EnabledPack: []SelectedPack{
-		{Source: "v2fly-dlc", Pack: "apple", Target: "proxy"},
+		{Source: "v2fly-dlc", Pack: "google", Target: "proxy"},
 	}}
 	caches := map[string]PackCache{
 		"v2fly-dlc": {
 			Source: "v2fly-dlc",
 			Packs: []Pack{
-				{ID: "apple", Renderable: false, Reason: "requires conversion"},
+				{
+					ID:         "google",
+					Renderable: true,
+					Components: []Component{{
+						ID:       "domain",
+						Behavior: "v2fly-dlc",
+						Format:   "text",
+						URL:      "https://example.com/google",
+						Path:     "./rule-packs/v2fly-dlc/google.txt",
+					}},
+				},
 			},
 		},
 	}
 
-	if _, err := RenderFragment(selection, caches); err == nil {
-		t.Fatal("expected non-renderable pack error")
+	fragment, err := RenderFragment(selection, caches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fragment.RuleProviders) != 0 {
+		t.Fatalf("providers = %+v, want none for GEOSITE pack", fragment.RuleProviders)
+	}
+	if got := fragment.Rules[0]; got != "GEOSITE,google,PROXY" {
+		t.Fatalf("rule = %q, want GEOSITE google rule", got)
 	}
 }
 

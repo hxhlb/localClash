@@ -53,6 +53,16 @@ func TestBuildRulesSupportsDomainSuffix(t *testing.T) {
 	}
 }
 
+func TestParseOverlayRuleLineSupportsGeoSite(t *testing.T) {
+	rule, ok := parseOverlayRuleLine("GEOSITE,google,Global")
+	if !ok {
+		t.Fatal("expected GEOSITE overlay rule to parse")
+	}
+	if rule.Type != "GEOSITE" || rule.Value != "google" || rule.Target != "Global" || rule.Provider != "" {
+		t.Fatalf("rule = %+v, want GEOSITE google Global", rule)
+	}
+}
+
 func TestProxyNamesDeduplicates(t *testing.T) {
 	names, err := proxyNames([]any{
 		map[string]any{"name": "HK"},

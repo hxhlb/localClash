@@ -1193,6 +1193,8 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 		SubscriptionConfig   string                   `json:"subscription_config"`
 		SubscriptionRuntime  string                   `json:"subscription_runtime"`
 		Test                 *bool                    `json:"test"`
+		Core                 string                   `json:"core"`
+		RuntimeDir           string                   `json:"runtime_dir"`
 		Overlay              configplan.OverlayIntent `json:"overlay"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
@@ -1221,6 +1223,12 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 		if in.SubscriptionRuntime == "" {
 			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
 		}
+		if in.Core == "" {
+			in.Core = s.state.Paths.CorePath
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -1236,6 +1244,8 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 		SubscriptionConfig:  in.SubscriptionConfig,
 		SubscriptionRuntime: in.SubscriptionRuntime,
 		Test:                test,
+		CorePath:            in.Core,
+		WorkDir:             in.RuntimeDir,
 		Overlay:             in.Overlay,
 	})
 	if err != nil {
@@ -1339,6 +1349,9 @@ func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 		if in.Cache == "" {
 			in.Cache = s.state.Paths.RulesCacheDir
 		}
+	}
+	if in.Limit == 0 {
+		in.Limit = 50
 	}
 	result, err := rules.ListPacks(rules.PackListOptions{
 		CacheDir: in.Cache,

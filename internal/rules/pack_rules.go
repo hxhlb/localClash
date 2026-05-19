@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -318,7 +319,40 @@ func selectPackDetails(catalog PackCatalog, ids []string, source, name, target s
 			break
 		}
 	}
+	if source != "" && len(details) == 0 {
+		return nil, unknownPackSourceError(catalog, source)
+	}
 	return details, nil
+}
+
+func unknownPackSourceError(catalog PackCatalog, source string) error {
+	source = strings.TrimSpace(source)
+	known := knownPackSources(catalog)
+	for _, knownSource := range known {
+		if strings.EqualFold(knownSource, source) {
+			return fmt.Errorf("pack source %q must match exact case %q", source, knownSource)
+		}
+	}
+	for _, knownSource := range known {
+		if strings.Contains(strings.ToLower(knownSource), strings.ToLower(source)) || strings.Contains(strings.ToLower(source), strings.ToLower(knownSource)) {
+			return fmt.Errorf("unknown pack source %q; source is exact, did you mean %q?", source, knownSource)
+		}
+	}
+	return fmt.Errorf("unknown pack source %q; known sources: %s", source, strings.Join(known, ", "))
+}
+
+func knownPackSources(catalog PackCatalog) []string {
+	seen := map[string]bool{}
+	var sources []string
+	for _, summary := range catalog.Packs {
+		if summary.Source == "" || seen[summary.Source] {
+			continue
+		}
+		seen[summary.Source] = true
+		sources = append(sources, summary.Source)
+	}
+	sort.Strings(sources)
+	return sources
 }
 
 func readProviderRules(ctx context.Context, detail PackDetail, provider ProviderSummary, componentID, cacheDir string, limit int, refresh bool) PackRuleComponent {
