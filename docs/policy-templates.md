@@ -1,8 +1,8 @@
 # Policy Templates
 
 `docs/rule-model.md` is the authoritative development contract for rule
-layering, customization, and the Loyalsoldier boundary. This document only
-describes the current starter policy template.
+layering, customization, and the Loyalsoldier boundary. This document describes
+the current base policy and localClash policy templates.
 
 ## Initial Choice
 
@@ -38,6 +38,19 @@ internet routing mode such as whitelist-first or blacklist-first.
 
 The renderer should turn the policy into a generated Mihomo runtime config under `generated/`, which is local data and ignored by git.
 
-## Starter Template
+## localClash Templates
+
+MCP `config_configure` exposes policy templates from disk as base product
+configuration. Template files live under `policy-templates/`, and the tool does
+not render or start runtime.
+
+- `minimal`: records a compact durable intent and leaves routing to the local
+  safety baseline plus the base policy. This is for users who want manual
+  customization.
+- `localclash-default`: ACL4SSR-like default for new users. It uses v2fly-dlc
+  GEOSITE packs for common categories such as AI, media, communication, Google,
+  Apple, Microsoft, developer services, games, ads, and China direct domains.
+
+## Starter Base Policy
 
 See `policies/loyalsoldier.yaml`.

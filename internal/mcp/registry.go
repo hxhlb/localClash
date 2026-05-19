@@ -51,6 +51,7 @@ type ToolsListResult struct {
 
 func Registry() []Tool {
 	tools := []Tool{
+		{Name: "config_configure", SafetyLevel: SafeWrite, Description: "Configure localClash base product state with optional core, runtime_profile, and policy_template. This writes localclash-runtime.yaml and/or localclash.yaml, but does not configure subscriptions, render generated config, start runtime, or apply router takeover."},
 		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash.yaml, generated/mihomo.yaml build artifact, render readiness, and pending patches. Use this before claiming what routing is configured; rules_sample fields are truncated samples."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, and localClash state without exposing credentials."},
@@ -73,7 +74,6 @@ func Registry() []Tool {
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read rules for one pack by id, downloading missing provider-cache entries for that pack only, and return backend metadata such as rule_provider/RULE-SET or geosite/GEOSITE."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_create.overlay.proxy_groups when a patch should use it."},
 		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_create.overlay.rule_providers."},
-		{Name: "runtime_profile_configure", SafetyLevel: SafeWrite, Description: "Switch the active Mihomo runtime mode and/or core by writing localclash-runtime.yaml. Profile contents live in editable profiles/normal.yaml and profiles/router.yaml, copied from .default.yaml files on first use. This does not start or restart Mihomo."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.yaml."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start the Mihomo runtime from generated config, rendering generated/mihomo.yaml first when the effective subscription is available but the generated config is missing. Requires external Agent/MCP client confirmation; starting or restarting the proxy runtime may temporarily interrupt network connectivity, and the Agent itself may be disconnected if it depends on the current network/proxy path."},
@@ -140,6 +140,23 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties":           map[string]any{},
+		}
+	case "config_configure":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"core":                   map[string]any{"type": "string", "enum": []string{"meta", "smart"}, "description": "Optional Mihomo core flavor to activate."},
+				"runtime_profile":        map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Optional runtime profile mode to activate."},
+				"policy_template":        map[string]any{"type": "string", "description": "Optional base policy template id loaded from policy-templates/. Built-ins include minimal and localclash-default."},
+				"policy_templates_dir":   map[string]any{"type": "string", "description": "Directory containing policy template YAML files. Defaults to policy-templates."},
+				"config":                 map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash.yaml."},
+				"runtime_profile_config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
+				"rules_cache":            map[string]any{"type": "string", "description": "Pack cache directory used to validate policy_template pack references. Defaults to .runtime/rules/packs."},
+				"subscription":           map[string]any{"type": "string", "description": "Subscription YAML path for readiness reporting. Defaults to subscription.yaml."},
+				"subscription_config":    map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
+				"subscription_runtime":   map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+			},
 		}
 	case "config_status":
 		return map[string]any{
@@ -416,16 +433,6 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
-			},
-		}
-	case "runtime_profile_configure":
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"mode":   map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Runtime mode to activate."},
-				"core":   map[string]any{"type": "string", "enum": []string{"meta", "smart"}, "description": "Runtime core flavor to activate."},
 				"config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.yaml."},
 			},
 		}

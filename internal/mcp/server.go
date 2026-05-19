@@ -26,6 +26,7 @@ import (
 	"localclash/internal/envinspect"
 	"localclash/internal/fileops"
 	"localclash/internal/localconfig"
+	"localclash/internal/policytemplate"
 	"localclash/internal/routertakeover"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
@@ -408,6 +409,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	switch call.Name {
 	case "config_status":
 		return s.callConfigStatus(args)
+	case "config_configure":
+		return s.callConfigConfigure(args)
 	case "config_render":
 		return s.callConfigRender(args)
 	case "config_patch_apply":
@@ -454,8 +457,6 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return callCustomRulesBuild(args)
 	case "rule_provider_build":
 		return callRuleProviderBuild(args)
-	case "runtime_profile_configure":
-		return s.callRuntimeProfileConfigure(args)
 	case "run_runtime":
 		return s.callRunRuntime(ctx, args)
 	case "restart_runtime":
@@ -1088,7 +1089,7 @@ func configStatusNextActions(render configRenderState) []string {
 				actions = append(actions,
 					"call doctor to inspect localClash base assets and generated config state before choosing a repair path",
 					"localClash base assets are incomplete; policies/loyalsoldier.yaml must exist before rendering",
-					"on router deployments, rerun scripts/deploy-router.sh so missing policies/ and rule-sources/ files are installed under the MCP working directory",
+					"on router deployments, rerun scripts/deploy-router.sh so missing policies/, policy-templates/, and rule-sources/ files are installed under the MCP working directory",
 					"do not create a config patch to fix missing base assets",
 				)
 			}
@@ -2224,6 +2225,166 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+func setDefault(value *string, fallback string) {
+	if strings.TrimSpace(*value) == "" && strings.TrimSpace(fallback) != "" {
+		*value = fallback
+	}
+}
+
+func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config               string `json:"config"`
+		RuntimeProfileConfig string `json:"runtime_profile_config"`
+		RuntimeProfile       string `json:"runtime_profile"`
+		Core                 string `json:"core"`
+		PolicyTemplate       string `json:"policy_template"`
+		PolicyTemplatesDir   string `json:"policy_templates_dir"`
+		RulesCache           string `json:"rules_cache"`
+		SubscriptionConfig   string `json:"subscription_config"`
+		Subscription         string `json:"subscription"`
+		SubscriptionRuntime  string `json:"subscription_runtime"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil {
+		setDefault(&in.Config, "localclash.yaml")
+		setDefault(&in.RuntimeProfileConfig, s.state.Paths.RuntimeProfilePath)
+		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
+		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
+		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
+		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
+	}
+	setDefault(&in.Config, "localclash.yaml")
+	setDefault(&in.RuntimeProfileConfig, runtimeprofile.DefaultPath)
+	setDefault(&in.PolicyTemplatesDir, policytemplate.DefaultDir)
+	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
+	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.yaml")
+	setDefault(&in.Subscription, "subscription.yaml")
+	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
+
+	if strings.TrimSpace(in.RuntimeProfile) == "" && strings.TrimSpace(in.Core) == "" && strings.TrimSpace(in.PolicyTemplate) == "" {
+		return toolResult{}, fmt.Errorf("config_configure requires at least one of core, runtime_profile, or policy_template")
+	}
+
+	changed := []string{}
+	var templateSummary *policytemplate.Summary
+	configUpdated := false
+	if strings.TrimSpace(in.PolicyTemplate) != "" {
+		config, summary, err := policytemplate.Build(in.PolicyTemplatesDir, in.PolicyTemplate)
+		if err != nil {
+			return toolResult{}, err
+		}
+		if err := validatePolicyTemplateConfig(config, in.RulesCache); err != nil {
+			return toolResult{}, err
+		}
+		if err := localconfig.Write(in.Config, config); err != nil {
+			return toolResult{}, err
+		}
+		templateSummary = &summary
+		configUpdated = true
+		changed = append(changed, "policy_template")
+	}
+
+	var status runtimeprofile.Status
+	var err error
+	if strings.TrimSpace(in.RuntimeProfile) != "" || strings.TrimSpace(in.Core) != "" {
+		status, err = runtimeprofile.Configure(in.RuntimeProfileConfig, in.RuntimeProfile, in.Core)
+		if err != nil {
+			return toolResult{}, err
+		}
+		if strings.TrimSpace(in.RuntimeProfile) != "" {
+			changed = append(changed, "runtime_profile")
+		}
+		if strings.TrimSpace(in.Core) != "" {
+			changed = append(changed, "core")
+		}
+	} else {
+		status, err = runtimeprofile.StatusFor(in.RuntimeProfileConfig)
+		if err != nil {
+			return toolResult{}, err
+		}
+	}
+	if s.state != nil {
+		s.state.Paths.RuntimeProfilePath = in.RuntimeProfileConfig
+		s.state.Paths.CorePath = status.CorePath
+		s.state.Core.Path = status.CorePath
+	}
+	subStatus, _ := subscriptions.Status(subscriptions.StatusOptions{
+		ConfigPath: in.SubscriptionConfig,
+		MergedPath: in.Subscription,
+		RuntimeDir: in.SubscriptionRuntime,
+	})
+	result := configConfigureResult{
+		Changed:                   changed,
+		ConfigPath:                in.Config,
+		ConfigUpdated:             configUpdated,
+		RuntimeProfile:            status,
+		PolicyTemplate:            templateSummary,
+		PolicyTemplatesDir:        in.PolicyTemplatesDir,
+		SubscriptionConfigured:    subStatus.Configured,
+		EffectiveSubscriptionPath: in.Subscription,
+		EffectiveSubscription:     subStatus.Merged.Exists && subStatus.Merged.ProxiesCount > 0,
+		NextActions:               configConfigureNextActions(status, subStatus.Merged.Exists && subStatus.Merged.ProxiesCount > 0),
+	}
+	templates, templateErr := policytemplate.List(in.PolicyTemplatesDir)
+	if templateErr != nil {
+		result.Warnings = append(result.Warnings, templateErr.Error())
+	} else {
+		result.AvailablePolicyTemplates = templates
+	}
+	return jsonToolResult(result)
+}
+
+type configConfigureResult struct {
+	Changed                   []string                 `json:"changed"`
+	ConfigPath                string                   `json:"config"`
+	ConfigUpdated             bool                     `json:"config_updated"`
+	RuntimeProfile            runtimeprofile.Status    `json:"runtime_profile_status"`
+	PolicyTemplate            *policytemplate.Summary  `json:"policy_template,omitempty"`
+	AvailablePolicyTemplates  []policytemplate.Summary `json:"available_policy_templates"`
+	PolicyTemplatesDir        string                   `json:"policy_templates_dir"`
+	SubscriptionConfigured    bool                     `json:"subscription_configured"`
+	EffectiveSubscriptionPath string                   `json:"effective_subscription_path"`
+	EffectiveSubscription     bool                     `json:"effective_subscription"`
+	Warnings                  []string                 `json:"warnings,omitempty"`
+	NextActions               []string                 `json:"next_actions"`
+}
+
+func validatePolicyTemplateConfig(config localconfig.Config, rulesCache string) error {
+	for _, pack := range config.Packs {
+		ref, err := rules.ResolvePackRef(rulesCache, pack.ID)
+		if err != nil {
+			return fmt.Errorf("policy_template references unavailable pack %q: %w", pack.ID, err)
+		}
+		if strings.TrimSpace(pack.Type) != "" && ref.Type != pack.Type {
+			return fmt.Errorf("policy_template pack %q is type %q, want %q", pack.ID, ref.Type, pack.Type)
+		}
+	}
+	return nil
+}
+
+func configConfigureNextActions(status runtimeprofile.Status, effectiveSubscription bool) []string {
+	if !effectiveSubscription {
+		return []string{
+			"call subscriptions_status",
+			"call subscriptions_configure if no subscription source is configured",
+			"call subscriptions_refresh to create subscription.yaml",
+			"call config_render after subscription.yaml is available",
+		}
+	}
+	actions := []string{
+		"call config_render to rebuild generated/mihomo.yaml from durable localClash state",
+		"call runtime_status to inspect whether Mihomo is already running",
+		"call restart_runtime after user confirmation if Mihomo is already running and should load the updated generated config",
+		"call run_runtime after user confirmation if Mihomo is not running",
+	}
+	if status.Mode == runtimeprofile.ModeRouter {
+		actions = append(actions, "call router_takeover_apply after user confirmation to capture router traffic")
+	}
+	return actions
+}
+
 func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config string `json:"config"`
@@ -2239,74 +2400,6 @@ func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, err
 		return toolResult{}, err
 	}
 	return jsonToolResult(status)
-}
-
-func (s *Server) callRuntimeProfileConfigure(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config string `json:"config"`
-		Mode   string `json:"mode"`
-		Core   string `json:"core"`
-	}
-	if err := json.Unmarshal(args, &in); err != nil {
-		return toolResult{}, err
-	}
-	if s.state != nil && in.Config == "" {
-		in.Config = s.state.Paths.RuntimeProfilePath
-	}
-	status, err := runtimeprofile.Configure(in.Config, in.Mode, in.Core)
-	if err != nil {
-		return toolResult{}, err
-	}
-	if s.state != nil {
-		s.state.Paths.RuntimeProfilePath = in.Config
-		s.state.Paths.CorePath = status.CorePath
-		s.state.Core.Path = status.CorePath
-	}
-	result := runtimeProfileConfigureResult{
-		Status: status,
-		NextActions: []string{
-			"call runtime_status to inspect whether Mihomo is already running",
-			"call restart_runtime after user confirmation if Mihomo is already running and should load the updated generated config",
-			"call run_runtime after user confirmation if Mihomo is not running and should start with the updated generated config",
-		},
-	}
-	if s.state != nil {
-		renderResult, renderErr := s.renderGeneratedConfigWithRuntimeProfile(in.Config)
-		if renderErr != nil {
-			result.RenderError = renderErr.Error()
-			result.NextActions = []string{
-				"call subscriptions_status",
-				"call subscriptions_refresh if subscription.yaml is unavailable",
-				"call config_patch_apply after routing changes, or rerun runtime_profile_configure after subscription state is ready",
-			}
-		} else if renderResult != nil {
-			result.Rendered = true
-			result.Render = renderResult
-		}
-	}
-	return jsonToolResult(result)
-}
-
-type runtimeProfileConfigureResult struct {
-	runtimeprofile.Status
-	Rendered    bool                 `json:"rendered"`
-	Render      *configrender.Result `json:"render,omitempty"`
-	RenderError string               `json:"render_error,omitempty"`
-	NextActions []string             `json:"next_actions"`
-}
-
-func (s *Server) renderGeneratedConfigWithRuntimeProfile(profilePath string) (*configrender.Result, error) {
-	if s.state == nil || !fileExists(s.state.Paths.SubscriptionPath) {
-		return nil, fmt.Errorf("effective subscription is unavailable; call subscriptions_refresh before rendering generated config")
-	}
-	in := configToolInput{RuntimeProfile: profilePath}
-	s.applyConfigToolDefaults(&in)
-	rendered, err := renderCurrentConfig(in, true)
-	if err != nil {
-		return nil, err
-	}
-	result := rendered["render"].(configrender.Result)
-	return &result, nil
 }
 
 func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {

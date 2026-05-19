@@ -382,7 +382,7 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		if !ok {
 			return Fragment{}, fmt.Errorf("pack %q not found in source %q", enabled.Pack, enabled.Source)
 		}
-		if !pack.Renderable {
+		if !pack.Renderable && !packIsGeoSite(pack) {
 			return Fragment{}, fmt.Errorf("pack %q from source %q is not renderable: %s", enabled.Pack, enabled.Source, pack.Reason)
 		}
 		target, proxyGroup, err := renderTarget(enabled.Target, targets)

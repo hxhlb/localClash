@@ -15,11 +15,12 @@ import (
 )
 
 type Config struct {
-	Version       int                    `json:"version" yaml:"version"`
-	ProxyGroups   map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
-	CustomRules   []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
-	RuleProviders []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
-	Packs         []Pack                 `json:"packs" yaml:"packs,omitempty"`
+	Version        int                    `json:"version" yaml:"version"`
+	PolicyTemplate string                 `json:"policy_template,omitempty" yaml:"policy_template,omitempty"`
+	ProxyGroups    map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
+	CustomRules    []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
+	RuleProviders  []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
+	Packs          []Pack                 `json:"packs" yaml:"packs,omitempty"`
 }
 
 type ProxyGroup struct {

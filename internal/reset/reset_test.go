@@ -47,6 +47,7 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	writeResetFile(t, filepath.Join("generated", "mihomo.yaml"), "config")
 	writeResetFile(t, filepath.Join("bin", "mihomo"), "binary")
 	writeResetFile(t, filepath.Join("policies", "loyalsoldier.yaml"), "policy")
+	writeResetFile(t, filepath.Join("policy-templates", "minimal.yaml"), "template")
 	writeResetFile(t, filepath.Join("rule-sources", "source.yaml"), "source")
 	writeResetFile(t, "localclash.yaml", "version: 1\n")
 	writeResetFile(t, "localclash-packs.yaml", "version: 1\n")
@@ -64,7 +65,7 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 			t.Fatalf("%s should be deleted, err=%v", path, err)
 		}
 	}
-	for _, path := range []string{filepath.Join("bin", "mihomo"), filepath.Join("policies", "loyalsoldier.yaml"), filepath.Join("rule-sources", "source.yaml")} {
+	for _, path := range []string{filepath.Join("bin", "mihomo"), filepath.Join("policies", "loyalsoldier.yaml"), filepath.Join("policy-templates", "minimal.yaml"), filepath.Join("rule-sources", "source.yaml")} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should be kept: %v", path, err)
 		}

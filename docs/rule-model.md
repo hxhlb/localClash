@@ -228,6 +228,13 @@ Current code already has:
 Current code now has:
 
 - a localClash user config file model
+- a `policy_template` field for durable config intent
+- a `config_configure` MCP tool for base product configuration: core,
+  runtime profile, and policy template
+- disk-backed `minimal` and `localclash-default` policy templates under
+  `policy-templates/`, where
+  `localclash-default` is ACL4SSR-like and primarily uses v2fly-dlc GEOSITE
+  packs
 - renderer support for selected third-party packs
 - renderer support for inline `custom_rules`
 - renderer support for user-supplied external `rule_providers`

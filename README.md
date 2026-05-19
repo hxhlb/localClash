@@ -129,8 +129,9 @@ enters `/root/localclash`, installs the OpenWrt procd service
 `/etc/init.d/localclash-mcp`, and runs MCP from the same isolated working
 directory by default. On first deployment to that directory it copies existing
 localClash files from `/root` when the target file is missing, installs missing
-base assets from `policies/` and `rule-sources/` without overwriting existing
-files, and restarts the MCP HTTP server on `http://192.168.6.1:8765/mcp`. After
+base assets from `policies/`, `policy-templates/`, and `rule-sources/` without
+overwriting existing files, and restarts the MCP HTTP server on
+`http://192.168.6.1:8765/mcp`. After
 deployment it follows the router MCP log with `tail -f` until interrupted with
 `Ctrl+C`; use `--no-tail` for non-interactive automation.
 
@@ -231,6 +232,15 @@ MCP config model:
 
 MCP config tools:
 
+- `config_configure`: configure base product state with optional `core`
+  (`meta` or `smart`), `runtime_profile` (`normal` or `router`), and
+  `policy_template` (`minimal` or `localclash-default`). It writes
+  `localclash-runtime.yaml` and/or `localclash.yaml`, but does not configure
+  subscriptions, render generated config, start runtime, or apply router
+  takeover. Templates are disk YAML files under `policy-templates/`;
+  `localclash-default` is the ACL4SSR-like v2fly-dlc/GEOSITE template for
+  open-box use, while `minimal` keeps the compact base policy for advanced
+  manual customization.
 - `config_status`: inspect source-of-truth state, generated config presence,
   render readiness, generated summaries, overlay metadata, and pending patches.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable
@@ -249,10 +259,6 @@ MCP runtime profile tools:
 
 - `runtime_profile_status`: inspect the active mode, core, core path, and safe
   Mihomo summary.
-- `runtime_profile_configure`: switch `mode` (`normal` or `router`) and/or
-  `core` (`meta` or `smart`) in `localclash-runtime.yaml`, then rerender
-  `generated/mihomo.yaml` when the effective subscription is available. It does
-  not start or restart Mihomo and does not edit profile contents.
 
 `normal` is the standalone local proxy profile and matches the original generated
 Mihomo shell. `router` is a transparent-proxy profile based on the local
@@ -357,14 +363,17 @@ localClash-owned rules explicitly.
 Minimal MCP closed loop:
 
 1. `subscriptions_refresh`
-2. `config_status`
-3. `config_render` if `generated/mihomo.yaml` is missing or stale
-4. `run_runtime`, or `restart_runtime` if Mihomo is already running
-5. `runtime_status`
+2. `config_configure` with `policy_template: minimal` when durable base intent
+   should be recorded
+3. `config_status`
+4. `config_render` if `generated/mihomo.yaml` is missing or stale
+5. `run_runtime`, or `restart_runtime` if Mihomo is already running
+6. `runtime_status`
 
 Router MCP closed loop:
 
-1. `runtime_profile_configure` with `mode: router`
+1. `config_configure` with `runtime_profile: router`, optional `core`, and
+   optional `policy_template`
 2. `config_render`
 3. `run_runtime`, or `restart_runtime` if Mihomo is already running
 4. `router_takeover_apply`

@@ -1,0 +1,117 @@
+id: localclash-default
+name: localClash Default
+description: ACL4SSR-like default policy using v2fly-dlc GEOSITE packs for common categories.
+default: true
+config:
+  version: 1
+  policy_template: localclash-default
+  proxy_groups:
+    AI:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route AI service categories through an independent policy group.
+      boundary: template_all_subscription_nodes
+    STREAMING:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route common streaming media categories through an independent policy group.
+      boundary: template_all_subscription_nodes
+    COMMUNICATION:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route communication and social categories through an independent policy group.
+      boundary: template_all_subscription_nodes
+    GOOGLE:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Google services through an independent policy group.
+      boundary: template_all_subscription_nodes
+    APPLE:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Apple services through an independent policy group.
+      boundary: template_all_subscription_nodes
+    MICROSOFT:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Microsoft services through an independent policy group.
+      boundary: template_all_subscription_nodes
+    DEV:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route developer services through an independent policy group.
+      boundary: template_all_subscription_nodes
+    GAME:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route game services through an independent policy group.
+      boundary: template_all_subscription_nodes
+  packs:
+    - id: v2fly_dlc_category_ads_all
+      type: geosite
+      target: REJECT
+      reason: Reject common advertising and tracking domains.
+    - id: v2fly_dlc_cn
+      type: geosite
+      target: DIRECT
+      reason: Keep China domains direct before broader proxy categories.
+    - id: v2fly_dlc_openai
+      type: geosite
+      target: AI
+      reason: Route OpenAI domains through the AI policy group.
+    - id: v2fly_dlc_anthropic
+      type: geosite
+      target: AI
+      reason: Route Anthropic domains through the AI policy group.
+    - id: v2fly_dlc_category_media
+      type: geosite
+      target: STREAMING
+      reason: Route common media services through the streaming policy group.
+    - id: v2fly_dlc_category_communication
+      type: geosite
+      target: COMMUNICATION
+      reason: Route communication services through the communication policy group.
+    - id: v2fly_dlc_google
+      type: geosite
+      target: GOOGLE
+      reason: Route Google services through the Google policy group.
+    - id: v2fly_dlc_apple
+      type: geosite
+      target: APPLE
+      reason: Route Apple services through the Apple policy group.
+    - id: v2fly_dlc_microsoft
+      type: geosite
+      target: MICROSOFT
+      reason: Route Microsoft services through the Microsoft policy group.
+    - id: v2fly_dlc_category_dev
+      type: geosite
+      target: DEV
+      reason: Route developer services through the developer policy group.
+    - id: v2fly_dlc_category_games
+      type: geosite
+      target: GAME
+      reason: Route game services through the game policy group.

@@ -146,7 +146,7 @@ func adaptV2FlyDLC(ctx context.Context, source Source) (PackCache, error) {
 		})
 	}
 	sort.Slice(packs, func(i, j int) bool { return packs[i].ID < packs[j].ID })
-	return PackCache{Version: 1, Source: source.ID, Adapter: source.Adapter, Renderable: false, Packs: packs}, nil
+	return PackCache{Version: 1, Source: source.ID, Adapter: source.Adapter, Renderable: true, Packs: packs}, nil
 }
 
 func adaptSyncnext(source Source) PackCache {

@@ -303,6 +303,11 @@ func packDetail(entry catalogEntry) PackDetail {
 		}
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", name, target))
 	}
+	renderable := entry.Pack.Renderable || packIsGeoSite(entry.Pack)
+	reason := entry.Pack.Reason
+	if packIsGeoSite(entry.Pack) {
+		reason = "v2fly domain-list-community raw data is queryable here and renders as a Mihomo GEOSITE rule; runtime geosite.dat must contain the same tag"
+	}
 	return PackDetail{
 		ID:                 catalogPackID(entry.Cache.Source, entry.Pack.ID),
 		Source:             entry.Cache.Source,
@@ -313,8 +318,8 @@ func packDetail(entry catalogEntry) PackDetail {
 		Backend:            backend,
 		Target:             entry.Pack.Target,
 		TargetMeaning:      "catalog default/recommended target; not active configuration",
-		Renderable:         entry.Pack.Renderable,
-		Reason:             entry.Pack.Reason,
+		Renderable:         renderable,
+		Reason:             reason,
 		Providers:          providers,
 		Rules:              rules,
 		ProviderCount:      len(providers),

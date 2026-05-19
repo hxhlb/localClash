@@ -88,7 +88,7 @@ go run . core download --target router --arch arm64 --force
 
 This downloads Linux router cores to `bin/linux-arm64/mihomo-meta` and
 `bin/linux-arm64/mihomo-smart`. Use MCP `environment_inspect` before router
-changes, then `runtime_profile_configure` to set `mode: router` and
+changes, then `config_configure` with `runtime_profile: router` and
 `core: smart` when that is the intended runtime.
 
 ## Factory Reset

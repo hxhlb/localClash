@@ -101,8 +101,8 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 	opts = mergeProfileDefaults(opts, status)
 	result := baseResult(opts, status)
 	if status.Mode != runtimeprofile.ModeRouter {
-		result.Checks = append(result.Checks, check("profile_router", false, fmt.Sprintf("active profile mode is %s", status.Mode), "call runtime_profile_configure with mode=router before router_takeover_apply"))
-		result.NextActions = []string{"call runtime_profile_configure with mode=router", "call config_render", "call run_runtime", "call router_takeover_apply again"}
+		result.Checks = append(result.Checks, check("profile_router", false, fmt.Sprintf("active profile mode is %s", status.Mode), "call config_configure with runtime_profile=router before router_takeover_apply"))
+		result.NextActions = []string{"call config_configure with runtime_profile=router", "call config_render", "call run_runtime", "call router_takeover_apply again"}
 		return result, nil
 	}
 	runtimeStatus := corerun.Status(corerun.StatusOptions{ConfigPath: opts.ConfigPath, WorkDir: opts.RuntimeDir, LogPath: opts.LogPath})
@@ -293,7 +293,7 @@ func nextActions(result Result) []string {
 		return []string{"router takeover is installed; use router_takeover_status to verify later", "use router_takeover_stop to remove localClash-owned takeover rules"}
 	}
 	if result.ProfileMode != runtimeprofile.ModeRouter {
-		return []string{"call runtime_profile_configure with mode=router", "call config_render", "call run_runtime", "call router_takeover_apply"}
+		return []string{"call config_configure with runtime_profile=router", "call config_render", "call run_runtime", "call router_takeover_apply"}
 	}
 	if !result.RuntimeRunning {
 		return []string{"call run_runtime after user confirmation", "call router_takeover_apply"}

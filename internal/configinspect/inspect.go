@@ -78,6 +78,7 @@ type IntentResult struct {
 	Valid              bool                 `json:"valid"`
 	Resolved           bool                 `json:"resolved"`
 	Version            int                  `json:"version,omitempty"`
+	PolicyTemplate     string               `json:"policy_template,omitempty"`
 	LoadError          string               `json:"load_error,omitempty"`
 	ResolveError       string               `json:"resolve_error,omitempty"`
 	ProxyGroupsCount   int                  `json:"proxy_groups_count"`
@@ -242,6 +243,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.Exists = true
 	result.Valid = true
 	result.Version = config.Version
+	result.PolicyTemplate = config.PolicyTemplate
 	result.ProxyGroupsCount = len(config.ProxyGroups)
 	result.CustomRulesCount = len(config.CustomRules)
 	result.RuleProvidersCount = len(config.RuleProviders)

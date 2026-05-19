@@ -110,7 +110,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "runtime_profile_configure", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -141,6 +141,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"router_takeover_status":    SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
+		"config_configure":          SafeWrite,
 		"config_patch_apply":        SafeWrite,
 		"config_patch_create":       SafeWrite,
 		"config_render":             SafeWrite,
@@ -149,7 +150,6 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"rule_provider_build":       SafeWrite,
 		"pack_rules_prefetch":       SafeWrite,
 		"pack_rules_read":           SafeWrite,
-		"runtime_profile_configure": SafeWrite,
 		"sed_file":                  SafeWrite,
 		"subscriptions_configure":   SafeWrite,
 		"subscriptions_refresh":     SafeWrite,
@@ -223,7 +223,7 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 	}
 }
 
-func TestToolsCallRuntimeProfileConfigureAndStatus(t *testing.T) {
+func TestToolsCallConfigConfigureAndRuntimeProfileStatus(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "localclash-runtime.yaml")
 	server := NewServerWithState(appinit.RuntimeState{
@@ -235,16 +235,17 @@ func TestToolsCallRuntimeProfileConfigureAndStatus(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "runtime_profile_configure",
-			"arguments": map[string]any{"mode": "router", "core": "smart"},
+			"name":      "config_configure",
+			"arguments": map[string]any{"runtime_profile": "router", "core": "smart"},
 		},
 	})
 	if configure.Error != nil {
-		t.Fatalf("runtime_profile_configure returned JSON-RPC error: %+v", configure.Error)
+		t.Fatalf("config_configure returned JSON-RPC error: %+v", configure.Error)
 	}
 	configureResult := marshalToolResult(t, configure.Result)
 	configured := configureResult.StructuredContent.(map[string]any)
-	if configured["mode"] != "router" || configured["core"] != "smart" || configured["exists"] != true {
+	profile := configured["runtime_profile_status"].(map[string]any)
+	if profile["mode"] != "router" || profile["core"] != "smart" || profile["exists"] != true {
 		t.Fatalf("configure content = %+v, want router smart and exists", configured)
 	}
 
@@ -270,7 +271,7 @@ func TestToolsCallRuntimeProfileConfigureAndStatus(t *testing.T) {
 	}
 }
 
-func TestToolsCallRuntimeProfileConfigureRerendersGeneratedConfig(t *testing.T) {
+func TestToolsCallConfigConfigureDoesNotRenderGeneratedConfig(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	profilePath := filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.yaml")
 	outputPath := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
@@ -292,21 +293,61 @@ func TestToolsCallRuntimeProfileConfigureRerendersGeneratedConfig(t *testing.T) 
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "runtime_profile_configure",
-			"arguments": map[string]any{"mode": "router"},
+			"name":      "config_configure",
+			"arguments": map[string]any{"runtime_profile": "router"},
 		},
 	})
 	if resp.Error != nil {
-		t.Fatalf("runtime_profile_configure returned JSON-RPC error: %+v", resp.Error)
+		t.Fatalf("config_configure returned JSON-RPC error: %+v", resp.Error)
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["mode"] != "router" || content["rendered"] != true {
-		t.Fatalf("configure content = %+v, want router mode and rendered", content)
+	profile := content["runtime_profile_status"].(map[string]any)
+	if profile["mode"] != "router" {
+		t.Fatalf("configure content = %+v, want router mode", content)
 	}
-	generated := readMCPFile(t, outputPath)
-	if !strings.Contains(generated, "mixed-port: 7893") || !strings.Contains(generated, "redir-port: 7892") {
-		t.Fatalf("generated config did not apply router preset:\n%s", generated)
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("config_configure should not render generated config, stat err = %v", err)
+	}
+}
+
+func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash.yaml")
+	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
+	templatesDir := filepath.Join(dir, "policy-templates")
+	writeMCPV2FlyTemplateCache(t, cacheDir)
+	writeMCPPolicyTemplateFixture(t, templatesDir)
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir:      cacheDir,
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.yaml"),
+			SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.yaml"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "config_configure",
+			"arguments": map[string]any{"config": configPath, "policy_templates_dir": templatesDir, "policy_template": "localclash-default", "core": "smart", "runtime_profile": "router"},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_configure returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["config_updated"] != true || content["effective_subscription"] != false {
+		t.Fatalf("config_configure content = %+v, want updated config and missing subscription", content)
+	}
+	config := readMCPFile(t, configPath)
+	for _, want := range []string{"policy_template: localclash-default", "v2fly_dlc_openai", "v2fly_dlc_category_media", "template_all_subscription_nodes"} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("localclash.yaml missing %q:\n%s", want, config)
+		}
 	}
 }
 
@@ -2174,6 +2215,72 @@ packs:
 	if err := os.WriteFile(providerPath, []byte("payload:\n  - DOMAIN,openai.com\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeMCPV2FlyTemplateCache(t *testing.T, cacheDir string) {
+	t.Helper()
+	ids := []string{
+		"category-ads-all",
+		"cn",
+		"openai",
+		"anthropic",
+		"category-media",
+		"category-communication",
+		"google",
+		"apple",
+		"microsoft",
+		"category-dev",
+		"category-games",
+	}
+	var b strings.Builder
+	b.WriteString("version: 1\nsource: v2fly-dlc\nadapter: v2fly-dlc\nrenderable: true\npacks:\n")
+	for _, id := range ids {
+		b.WriteString("  - id: " + id + "\n")
+		b.WriteString("    name: " + id + "\n")
+		b.WriteString("    renderable: true\n")
+		b.WriteString("    components:\n")
+		b.WriteString("      - id: domain\n")
+		b.WriteString("        behavior: v2fly-dlc\n")
+		b.WriteString("        format: text\n")
+		b.WriteString("        order_class: domain\n")
+		b.WriteString("        url: https://example.com/" + id + "\n")
+		b.WriteString("        path: ./rule-packs/v2fly-dlc/" + id + ".txt\n")
+	}
+	writeMCPFile(t, filepath.Join(cacheDir, "v2fly-dlc.yaml"), b.String())
+}
+
+func writeMCPPolicyTemplateFixture(t *testing.T, dir string) {
+	t.Helper()
+	writeMCPFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+name: localClash Default
+description: ACL4SSR-like default policy.
+default: true
+config:
+  version: 1
+  policy_template: localclash-default
+  proxy_groups:
+    AI:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      boundary: template_all_subscription_nodes
+    STREAMING:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      boundary: template_all_subscription_nodes
+  packs:
+    - id: v2fly_dlc_openai
+      type: geosite
+      target: AI
+    - id: v2fly_dlc_category_media
+      type: geosite
+      target: STREAMING
+`)
 }
 
 func setupMCPPackRulesFixture(t *testing.T, providerBody string) (string, string, *httptest.Server) {

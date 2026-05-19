@@ -307,6 +307,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	if err != nil {
 		return ApplyResult{}, err
 	}
+	config = preserveExistingPolicyTemplate(opts.ConfigPath, config)
 	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
 		Config:              config,
 		SubscriptionPath:    opts.Subscription,
@@ -544,6 +545,18 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	for _, provider := range overlay.RuleProviders {
 		config.RuleProviders = append(config.RuleProviders, provider)
 	}
+	return config
+}
+
+func preserveExistingPolicyTemplate(path string, config localconfig.Config) localconfig.Config {
+	if strings.TrimSpace(config.PolicyTemplate) != "" {
+		return config
+	}
+	existing, err := localconfig.Load(path)
+	if err != nil {
+		return config
+	}
+	config.PolicyTemplate = existing.PolicyTemplate
 	return config
 }
 
