@@ -84,6 +84,69 @@ func TestPrefetchAndQueryPackRulesUseLocalProviderCache(t *testing.T) {
 	}
 }
 
+func TestV2FlyDLCPackRulesAreQueryableWithoutBeingRenderable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openai" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`
+# Main domain
+openai.com
+chatgpt.com
+full:openaiapi-site.azureedge.net
+keyword:oai
+regexp:^chatgpt-\S+\.example\.com$
+include:category-ai-!cn # comment
+full:o33249.ingest.sentry.io @ads
+`))
+	}))
+	t.Cleanup(server.Close)
+	cacheDir, providerCache := writeV2FlyDLCPackRulesCache(t, server.URL)
+
+	read, err := ReadPackRules(context.Background(), PackRulesReadOptions{
+		CacheDir:      cacheDir,
+		ProviderCache: providerCache,
+		ID:            "v2fly_dlc_openai",
+		Limit:         10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Pack.Renderable || read.Summary.RuleCount != 7 || read.Summary.DomainSuffixCount != 2 || read.Summary.DomainCount != 2 || read.Summary.KeywordCount != 1 {
+		t.Fatalf("read = %+v, want queryable non-renderable v2fly rules", read)
+	}
+	if got := read.Components[0].ID; got != "domain" {
+		t.Fatalf("component id = %q, want domain", got)
+	}
+
+	query, err := QueryPackRules(context.Background(), PackRulesQueryOptions{
+		CacheDir:      cacheDir,
+		ProviderCache: providerCache,
+		Source:        "v2fly-dlc",
+		Query:         "api.openai.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(query.Matches) != 1 || query.Matches[0].PackID != "v2fly_dlc_openai" || query.Matches[0].Kind != "domain_suffix" {
+		t.Fatalf("query = %+v, want openai suffix match", query)
+	}
+
+	regexQuery, err := QueryPackRules(context.Background(), PackRulesQueryOptions{
+		CacheDir:      cacheDir,
+		ProviderCache: providerCache,
+		Source:        "v2fly-dlc",
+		Query:         "chatgpt-web.example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(regexQuery.Matches) != 1 || regexQuery.Matches[0].Kind != "domain_regex" {
+		t.Fatalf("regex query = %+v, want v2fly regexp match", regexQuery)
+	}
+}
+
 func TestPrefetchPackRulesRequiresExplicitScope(t *testing.T) {
 	cacheDir, providerCache := writePackRulesCache(t, "https://example.com")
 
@@ -119,6 +182,41 @@ func writePackRulesCache(t *testing.T, baseURL string) (string, string) {
 						OrderClass: "non_ip",
 						URL:        baseURL + "/ai.yaml",
 						Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+					},
+				},
+			},
+		},
+	})
+	return cacheDir, providerCache
+}
+
+func writeV2FlyDLCPackRulesCache(t *testing.T, baseURL string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	cacheDir := filepath.Join(dir, "packs")
+	providerCache := filepath.Join(dir, "provider-cache")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCatalogTestCache(t, cacheDir, PackCache{
+		Version:    1,
+		Source:     "v2fly-dlc",
+		Adapter:    "v2fly-dlc",
+		Renderable: false,
+		Packs: []Pack{
+			{
+				ID:         "openai",
+				Name:       "openai",
+				Renderable: false,
+				Reason:     "queryable raw DLC rules but not renderable",
+				Components: []Component{
+					{
+						ID:         "domain",
+						Behavior:   "v2fly-dlc",
+						Format:     "text",
+						OrderClass: "domain",
+						URL:        baseURL + "/openai",
+						Path:       "./rule-packs/v2fly-dlc/openai.txt",
 					},
 				},
 			},

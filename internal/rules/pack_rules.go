@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -142,7 +143,7 @@ func ReadPackRules(ctx context.Context, opts PackRulesReadOptions) (PackRulesRea
 	if !ok {
 		return PackRulesReadResult{}, fmt.Errorf("pack %q not found in pack cache", opts.ID)
 	}
-	if !detail.Renderable {
+	if !packRulesQueryable(detail) {
 		return PackRulesReadResult{Pack: packRuleSummary(detail), NextActions: []string{"choose a renderable pack from packs_list"}}, nil
 	}
 	components := make([]PackRuleComponent, 0, len(detail.Providers))
@@ -179,7 +180,7 @@ func PrefetchPackRules(ctx context.Context, opts PackRulesPrefetchOptions) (Pack
 	var result PackRulesPrefetchResult
 	for _, detail := range details {
 		result.SelectedPacks = append(result.SelectedPacks, packRuleSummary(detail))
-		if !detail.Renderable {
+		if !packRulesQueryable(detail) {
 			continue
 		}
 		for _, provider := range detail.Providers {
@@ -216,7 +217,7 @@ func QueryPackRules(ctx context.Context, opts PackRulesQueryOptions) (PackRulesQ
 	}
 	result := PackRulesQueryResult{Query: opts.Query}
 	for _, detail := range details {
-		if !detail.Renderable {
+		if !packRulesQueryable(detail) {
 			continue
 		}
 		packCached := false
@@ -433,6 +434,9 @@ func parseRuleLine(line, behavior string) (parsedRule, bool) {
 	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
 		return parsedRule{}, false
 	}
+	if strings.EqualFold(behavior, "v2fly-dlc") {
+		return parseV2FlyDLCLine(line)
+	}
 	line = strings.TrimPrefix(line, "- ")
 	parts := strings.Split(line, ",")
 	if len(parts) >= 2 {
@@ -450,6 +454,52 @@ func parseRuleLine(line, behavior string) (parsedRule, bool) {
 		kind = "domain_suffix"
 	}
 	return parsedRule{Raw: line, Kind: kind, Value: value}, true
+}
+
+func parseV2FlyDLCLine(line string) (parsedRule, bool) {
+	token := firstV2FlyDLCToken(line)
+	if token == "" {
+		return parsedRule{}, false
+	}
+	key, value, ok := strings.Cut(token, ":")
+	if !ok {
+		return parsedRule{Raw: token, Kind: "domain_suffix", Value: token}, true
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return parsedRule{}, false
+	}
+	switch key {
+	case "domain":
+		return parsedRule{Raw: token, Kind: "domain_suffix", Value: value}, true
+	case "full":
+		return parsedRule{Raw: token, Kind: "domain", Value: value}, true
+	case "keyword":
+		return parsedRule{Raw: token, Kind: "domain_keyword", Value: value}, true
+	case "regexp":
+		return parsedRule{Raw: token, Kind: "domain_regex", Value: value}, true
+	case "include":
+		return parsedRule{Raw: token, Kind: "include", Value: value}, true
+	default:
+		return parsedRule{Raw: token, Kind: "v2fly_" + key, Value: value}, true
+	}
+}
+
+func firstV2FlyDLCToken(line string) string {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+		return ""
+	}
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return ""
+	}
+	token := strings.TrimSpace(fields[0])
+	if token == "" || strings.HasPrefix(token, "#") {
+		return ""
+	}
+	return token
 }
 
 func normalizeRuleKind(kind string) string {
@@ -476,9 +526,19 @@ func ruleMatches(query string, rule parsedRule) bool {
 		return query == value || strings.HasSuffix(query, "."+value)
 	case "domain_keyword":
 		return strings.Contains(query, value)
+	case "domain_regex":
+		return regexpRuleMatches(query, rule.Value)
 	default:
 		return strings.Contains(strings.ToLower(rule.Raw), query)
 	}
+}
+
+func regexpRuleMatches(query, pattern string) bool {
+	matched, err := regexp.MatchString(pattern, query)
+	if err != nil {
+		return strings.Contains(strings.ToLower(pattern), query)
+	}
+	return matched
 }
 
 func summarizeComponents(components []PackRuleComponent) PackRulesSummary {
@@ -510,6 +570,10 @@ func packRuleSummary(detail PackDetail) PackRulePackSummary {
 	}
 }
 
+func packRulesQueryable(detail PackDetail) bool {
+	return detail.Renderable || len(detail.Providers) > 0
+}
+
 func providerCachePath(cacheDir, source, packID, componentID, format string) string {
 	cacheDir = strings.TrimSpace(cacheDir)
 	if cacheDir == "" {
@@ -523,7 +587,12 @@ func providerCachePath(cacheDir, source, packID, componentID, format string) str
 }
 
 func providerComponentID(source, packID, providerNameValue string) string {
-	prefix := source + "_" + packLocalID(PackDetail{ID: packID, Source: source}) + "_"
+	localID := packLocalID(PackDetail{ID: packID, Source: source})
+	prefix := providerName(source, localID, "") + "_"
+	if strings.HasPrefix(providerNameValue, prefix) {
+		return strings.TrimPrefix(providerNameValue, prefix)
+	}
+	prefix = source + "_" + packLocalID(PackDetail{ID: packID, Source: source}) + "_"
 	if strings.HasPrefix(providerNameValue, prefix) {
 		return strings.TrimPrefix(providerNameValue, prefix)
 	}
@@ -535,7 +604,9 @@ func providerComponentID(source, packID, providerNameValue string) string {
 }
 
 func packLocalID(detail PackDetail) string {
-	return strings.TrimPrefix(detail.ID, detail.Source+"_")
+	id := strings.TrimPrefix(detail.ID, detail.Source+"_")
+	safeSource := strings.ReplaceAll(detail.Source, "-", "_")
+	return strings.TrimPrefix(id, safeSource+"_")
 }
 
 func safePathSegment(value string) string {

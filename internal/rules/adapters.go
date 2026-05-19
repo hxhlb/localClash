@@ -132,7 +132,17 @@ func adaptV2FlyDLC(ctx context.Context, source Source) (PackCache, error) {
 			ID:         entry.Name,
 			Name:       entry.Name,
 			Renderable: false,
-			Reason:     "v2fly domain-list-community source data requires geosite conversion before Mihomo rule-provider rendering",
+			Reason:     "v2fly domain-list-community source data is queryable as raw DLC rules but not renderable as a Mihomo rule-provider",
+			Components: []Component{
+				{
+					ID:         "domain",
+					Behavior:   "v2fly-dlc",
+					Format:     "text",
+					OrderClass: "domain",
+					URL:        strings.TrimRight(source.RawBaseURL, "/") + "/" + pathEscape(entry.Name),
+					Path:       "./rule-packs/" + source.ID + "/" + entry.Name + ".txt",
+				},
+			},
 		})
 	}
 	sort.Slice(packs, func(i, j int) bool { return packs[i].ID < packs[j].ID })
