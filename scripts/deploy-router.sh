@@ -325,6 +325,16 @@ done
 printf 'installed missing base assets: %s\n' "$installed"
 EOS
 
+log "refreshing rule pack catalog under ${remote_workdir}"
+ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_bin}" "${remote_workdir}" <<'EOS'
+set -eu
+remote_bin="$1"
+remote_workdir="$2"
+
+cd "$remote_workdir"
+"$remote_bin" rules adapt --sources rule-sources --cache .runtime/rules/packs
+EOS
+
 cat >"${init_file}" <<EOF
 #!/bin/sh /etc/rc.common
 
