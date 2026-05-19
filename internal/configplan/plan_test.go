@@ -50,11 +50,18 @@ func TestRenderBuiltInTargetPlanWritesArtifacts(t *testing.T) {
 	if result.Changes.RuleProvidersAdded != 2 || result.Changes.ProxyGroupsAdded != 0 || result.Changes.RulesAdded != 2 {
 		t.Fatalf("changes = %+v, want 2 providers, 0 groups, 2 rules", result.Changes)
 	}
+	if len(result.Overlay.Packs) != 2 || result.Overlay.Packs[0].Type != rules.PackTypeRuleProvider {
+		t.Fatalf("overlay packs = %+v, want rule-provider type metadata", result.Overlay.Packs)
+	}
 	config := readYAMLMap(t, result.Output)
 	metadata := config["x-localclash"].(map[string]any)
 	overlay := metadata["overlay"].(map[string]any)
 	if len(overlay["packs"].([]any)) != 2 {
 		t.Fatalf("overlay packs = %v, want 2", overlay["packs"])
+	}
+	firstPack := overlay["packs"].([]any)[0].(map[string]any)
+	if firstPack["type"] != rules.PackTypeRuleProvider {
+		t.Fatalf("metadata pack = %+v, want rule-provider type", firstPack)
 	}
 	if len(overlay["proxy_groups"].([]any)) != 0 {
 		t.Fatalf("overlay proxy_groups = %v, want empty", overlay["proxy_groups"])
@@ -350,6 +357,24 @@ func TestRenderUnknownPackIDReturnsError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "missing_pack") {
 		t.Fatalf("error = %v, want missing pack error", err)
+	}
+}
+
+func TestRenderRejectsMismatchedPackType(t *testing.T) {
+	paths := writePlanFixture(t)
+
+	_, err := Render(context.Background(), Options{
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Type: rules.PackTypeGeoSite, Target: "DIRECT"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `is type "rule_provider"`) || !strings.Contains(err.Error(), `declared "geosite"`) {
+		t.Fatalf("error = %v, want pack type mismatch", err)
 	}
 }
 

@@ -42,6 +42,7 @@ type Match struct {
 
 type Pack struct {
 	ID     string `json:"id" yaml:"id"`
+	Type   string `json:"type,omitempty" yaml:"type,omitempty"`
 	Target string `json:"target" yaml:"target"`
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
@@ -101,6 +102,7 @@ type ProxyGroupResult struct {
 
 type PackResult struct {
 	ID     string `json:"id"`
+	Type   string `json:"type"`
 	Target string `json:"target"`
 	Reason string `json:"reason,omitempty"`
 }
@@ -250,6 +252,9 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		if err != nil {
 			return Resolved{}, err
 		}
+		if err := assertPackType(pack.ID, pack.Type, ref.Type); err != nil {
+			return Resolved{}, err
+		}
 		target := strings.TrimSpace(pack.Target)
 		if target == "" {
 			return Resolved{}, fmt.Errorf("pack %q target is required", pack.ID)
@@ -260,8 +265,8 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 			}
 		}
 		selection.EnabledPack = append(selection.EnabledPack, rules.SelectedPack{Source: ref.Source, Pack: ref.Pack, Target: target})
-		resolvedPacks = append(resolvedPacks, Pack{ID: ref.ID, Target: target, Reason: pack.Reason})
-		packResults = append(packResults, PackResult{ID: ref.ID, Target: target, Reason: pack.Reason})
+		resolvedPacks = append(resolvedPacks, Pack{ID: ref.ID, Type: ref.Type, Target: target, Reason: pack.Reason})
+		packResults = append(packResults, PackResult{ID: ref.ID, Type: ref.Type, Target: target, Reason: pack.Reason})
 	}
 	resolvedConfig.Packs = resolvedPacks
 	resolvedCustomRules, customRuleResults, err := resolveCustomRules(resolvedConfig.CustomRules, selection.ProxyGroups)
@@ -277,6 +282,20 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	resolvedConfig.RuleProviders = resolvedRuleProviders
 	selection.RuleProviders = ruleProvidersForSelection(resolvedRuleProviders)
 	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, CustomRules: customRuleResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
+}
+
+func assertPackType(id, declared, actual string) error {
+	declared = strings.TrimSpace(declared)
+	if declared == "" {
+		return nil
+	}
+	if actual == "" {
+		return fmt.Errorf("pack %q has no catalog type; remove type or refresh pack catalog", id)
+	}
+	if declared != actual {
+		return fmt.Errorf("pack %q is type %q, but request declared %q", id, actual, declared)
+	}
+	return nil
 }
 
 type SubscriptionNodeOptions struct {

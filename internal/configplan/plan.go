@@ -69,6 +69,7 @@ type OverlayIntent struct {
 
 type OverlayPackIntent struct {
 	ID     string `json:"id" yaml:"id"`
+	Type   string `json:"type,omitempty" yaml:"type,omitempty"`
 	Target string `json:"target" yaml:"target"`
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
@@ -145,6 +146,7 @@ type OverlaySummary struct {
 
 type OverlayPackSummary struct {
 	ID     string `json:"id"`
+	Type   string `json:"type"`
 	Target string `json:"target"`
 	Reason string `json:"reason,omitempty"`
 }
@@ -534,7 +536,7 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 		}
 	}
 	for _, pack := range overlay.Packs {
-		config.Packs = append(config.Packs, localconfig.Pack{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+		config.Packs = append(config.Packs, localconfig.Pack{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
 	}
 	for _, custom := range overlay.CustomRules {
 		config.CustomRules = append(config.CustomRules, custom)
@@ -553,7 +555,7 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 		ProxyGroups:   make([]OverlayProxyGroupSummary, 0, len(resolved.ProxyGroups)),
 	}
 	for _, pack := range resolved.Packs {
-		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
 	}
 	for _, custom := range resolved.CustomRules {
 		summary.CustomRules = append(summary.CustomRules, OverlayCustomRuleSummary{
@@ -616,12 +618,15 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 		if err != nil {
 			return rules.Selection{}, OverlaySummary{}, nil, err
 		}
+		if err := assertOverlayPackType(pack.ID, pack.Type, ref.Type); err != nil {
+			return rules.Selection{}, OverlaySummary{}, nil, err
+		}
 		target := strings.TrimSpace(pack.Target)
 		if target == "" {
 			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("pack %q target is required", pack.ID)
 		}
 		selected = append(selected, rules.SelectedPack{Source: ref.Source, Pack: ref.Pack, Target: target})
-		overlayPacks = append(overlayPacks, OverlayPackSummary{ID: ref.ID, Target: target})
+		overlayPacks = append(overlayPacks, OverlayPackSummary{ID: ref.ID, Type: ref.Type, Target: target})
 	}
 
 	proxyGroups := map[string]rules.ProxyGroup{}
@@ -674,6 +679,20 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 		ProxyGroups: proxyGroups,
 		EnabledPack: selected,
 	}, OverlaySummary{Packs: overlayPacks, ProxyGroups: proxyGroupSummaries}, nil, nil
+}
+
+func assertOverlayPackType(id, declared, actual string) error {
+	declared = strings.TrimSpace(declared)
+	if declared == "" {
+		return nil
+	}
+	if actual == "" {
+		return fmt.Errorf("pack %q has no catalog type; remove type or refresh pack catalog", id)
+	}
+	if declared != actual {
+		return fmt.Errorf("pack %q is type %q, but request declared %q", id, actual, declared)
+	}
+	return nil
 }
 
 func validateProxyGroupNodes(groupID string, rawNodes []string, proxyNames []string) ([]string, error) {
@@ -777,7 +796,7 @@ func intentFromSummary(summary OverlaySummary) OverlayIntent {
 		ProxyGroups:   make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
 	}
 	for _, pack := range summary.Packs {
-		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Target: pack.Target, Reason: pack.Reason})
+		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
 	}
 	for _, custom := range summary.CustomRules {
 		intent.CustomRules = append(intent.CustomRules, localconfig.CustomRule{

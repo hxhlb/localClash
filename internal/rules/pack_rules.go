@@ -50,6 +50,7 @@ type PackRulesQueryOptions struct {
 
 type PackRulesReadResult struct {
 	Pack        PackRulePackSummary `json:"pack"`
+	Backend     PackBackend         `json:"backend"`
 	Summary     PackRulesSummary    `json:"summary"`
 	Components  []PackRuleComponent `json:"components"`
 	NextActions []string            `json:"next_actions,omitempty"`
@@ -63,6 +64,7 @@ type PackRulesPrefetchResult struct {
 
 type PackRulesQueryResult struct {
 	Query               string          `json:"query"`
+	Backend             PackBackend     `json:"backend,omitempty"`
 	Matches             []PackRuleMatch `json:"matches"`
 	SearchedCachedPacks int             `json:"searched_cached_packs"`
 	UncachedPacks       int             `json:"uncached_packs"`
@@ -72,11 +74,14 @@ type PackRulesQueryResult struct {
 }
 
 type PackRulePackSummary struct {
-	ID         string `json:"id"`
-	Source     string `json:"source"`
-	Name       string `json:"name"`
-	Target     string `json:"target,omitempty"`
-	Renderable bool   `json:"renderable"`
+	ID                 string `json:"id"`
+	Source             string `json:"source"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`
+	RenderStrategy     string `json:"render_strategy"`
+	RenderRuleTemplate string `json:"render_rule_template"`
+	Target             string `json:"target,omitempty"`
+	Renderable         bool   `json:"renderable"`
 }
 
 type PackRulesSummary struct {
@@ -118,14 +123,16 @@ type PackRuleComponent struct {
 }
 
 type PackRuleMatch struct {
-	PackID    string `json:"pack_id"`
-	PackName  string `json:"pack_name"`
-	Source    string `json:"source"`
-	Component string `json:"component"`
-	Rule      string `json:"rule"`
-	Kind      string `json:"kind"`
-	Value     string `json:"value"`
-	SourceURL string `json:"source_url"`
+	PackID         string `json:"pack_id"`
+	PackName       string `json:"pack_name"`
+	Source         string `json:"source"`
+	Type           string `json:"type"`
+	RenderStrategy string `json:"render_strategy"`
+	Component      string `json:"component"`
+	Rule           string `json:"rule"`
+	Kind           string `json:"kind"`
+	Value          string `json:"value"`
+	SourceURL      string `json:"source_url"`
 }
 
 type parsedRule struct {
@@ -145,7 +152,7 @@ func ReadPackRules(ctx context.Context, opts PackRulesReadOptions) (PackRulesRea
 		return PackRulesReadResult{}, fmt.Errorf("pack %q not found in pack cache", opts.ID)
 	}
 	if !packRulesQueryable(detail) {
-		return PackRulesReadResult{Pack: packRuleSummary(detail), NextActions: []string{"choose a renderable pack from packs_list"}}, nil
+		return PackRulesReadResult{Pack: packRuleSummary(detail), Backend: detail.Backend, NextActions: []string{"choose a renderable pack from packs_list"}}, nil
 	}
 	components := make([]PackRuleComponent, 0, len(detail.Providers))
 	for _, provider := range detail.Providers {
@@ -160,6 +167,7 @@ func ReadPackRules(ctx context.Context, opts PackRulesReadOptions) (PackRulesRea
 	}
 	return PackRulesReadResult{
 		Pack:       packRuleSummary(detail),
+		Backend:    detail.Backend,
 		Summary:    summarizeComponents(components),
 		Components: components,
 	}, nil
@@ -216,7 +224,7 @@ func QueryPackRules(ctx context.Context, opts PackRulesQueryOptions) (PackRulesQ
 	if err != nil {
 		return PackRulesQueryResult{}, err
 	}
-	result := PackRulesQueryResult{Query: opts.Query}
+	result := PackRulesQueryResult{Query: opts.Query, Backend: commonBackend(details)}
 	for _, detail := range details {
 		if !packRulesQueryable(detail) {
 			continue
@@ -242,14 +250,16 @@ func QueryPackRules(ctx context.Context, opts PackRulesQueryOptions) (PackRulesQ
 					continue
 				}
 				result.Matches = append(result.Matches, PackRuleMatch{
-					PackID:    detail.ID,
-					PackName:  detail.Name,
-					Source:    detail.Source,
-					Component: componentID,
-					Rule:      rule.Raw,
-					Kind:      rule.Kind,
-					Value:     rule.Value,
-					SourceURL: provider.URL,
+					PackID:         detail.ID,
+					PackName:       detail.Name,
+					Source:         detail.Source,
+					Type:           detail.Type,
+					RenderStrategy: detail.RenderStrategy,
+					Component:      componentID,
+					Rule:           rule.Raw,
+					Kind:           rule.Kind,
+					Value:          rule.Value,
+					SourceURL:      provider.URL,
 				})
 			}
 		}
@@ -596,12 +606,30 @@ func summarizeComponents(components []PackRuleComponent) PackRulesSummary {
 
 func packRuleSummary(detail PackDetail) PackRulePackSummary {
 	return PackRulePackSummary{
-		ID:         detail.ID,
-		Source:     detail.Source,
-		Name:       detail.Name,
-		Target:     detail.Target,
-		Renderable: detail.Renderable,
+		ID:                 detail.ID,
+		Source:             detail.Source,
+		Name:               detail.Name,
+		Type:               detail.Type,
+		RenderStrategy:     detail.RenderStrategy,
+		RenderRuleTemplate: detail.RenderRuleTemplate,
+		Target:             detail.Target,
+		Renderable:         detail.Renderable,
 	}
+}
+
+func commonBackend(details []PackDetail) PackBackend {
+	if len(details) == 0 {
+		return PackBackend{}
+	}
+	backend := details[0].Backend
+	for _, detail := range details[1:] {
+		if detail.Backend.Type != backend.Type ||
+			detail.Backend.QuerySource != backend.QuerySource ||
+			detail.Backend.RenderStrategy != backend.RenderStrategy {
+			return PackBackend{Type: "mixed", Note: "Multiple pack backend types were searched."}
+		}
+	}
+	return backend
 }
 
 func packRulesQueryable(detail PackDetail) bool {

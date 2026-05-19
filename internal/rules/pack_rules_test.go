@@ -117,6 +117,12 @@ full:o33249.ingest.sentry.io @ads
 	if !read.Pack.Renderable || read.Summary.RuleCount != 7 || read.Summary.DomainSuffixCount != 2 || read.Summary.DomainCount != 2 || read.Summary.KeywordCount != 1 {
 		t.Fatalf("read = %+v, want queryable renderable v2fly rules", read)
 	}
+	if read.Pack.Type != PackTypeGeoSite || read.Pack.RenderStrategy != RenderStrategyGeoSite {
+		t.Fatalf("read pack = %+v, want geosite render strategy", read.Pack)
+	}
+	if read.Backend.Type != PackTypeGeoSite || read.Backend.QuerySource != QuerySourceRawDLC {
+		t.Fatalf("read backend = %+v, want raw DLC geosite backend", read.Backend)
+	}
 	if got := read.Components[0].ID; got != "domain" {
 		t.Fatalf("component id = %q, want domain", got)
 	}
@@ -132,6 +138,12 @@ full:o33249.ingest.sentry.io @ads
 	}
 	if len(query.Matches) != 1 || query.Matches[0].PackID != "v2fly_dlc_openai" || query.Matches[0].Kind != "domain_suffix" {
 		t.Fatalf("query = %+v, want openai suffix match", query)
+	}
+	if query.Backend.Type != PackTypeGeoSite || query.Backend.RenderStrategy != RenderStrategyGeoSite {
+		t.Fatalf("query backend = %+v, want geosite backend", query.Backend)
+	}
+	if query.Matches[0].Type != PackTypeGeoSite || query.Matches[0].RenderStrategy != RenderStrategyGeoSite {
+		t.Fatalf("query match = %+v, want geosite match metadata", query.Matches[0])
 	}
 
 	regexQuery, err := QueryPackRules(context.Background(), PackRulesQueryOptions{

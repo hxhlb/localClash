@@ -23,10 +23,13 @@ type PackGetOptions struct {
 }
 
 type PackRef struct {
-	ID     string
-	Source string
-	Pack   string
-	Name   string
+	ID                 string
+	Source             string
+	Pack               string
+	Name               string
+	Type               string
+	RenderStrategy     string
+	RenderRuleTemplate string
 }
 
 type PackListResult struct {
@@ -39,13 +42,16 @@ type PackListResult struct {
 }
 
 type PackSummary struct {
-	ID            string `json:"id"`
-	Source        string `json:"source"`
-	Name          string `json:"name"`
-	Target        string `json:"target"`
-	TargetMeaning string `json:"target_meaning,omitempty"`
-	ProviderCount int    `json:"provider_count"`
-	RuleCount     int    `json:"rule_count"`
+	ID                 string `json:"id"`
+	Source             string `json:"source"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`
+	RenderStrategy     string `json:"render_strategy"`
+	RenderRuleTemplate string `json:"render_rule_template"`
+	Target             string `json:"target"`
+	TargetMeaning      string `json:"target_meaning,omitempty"`
+	ProviderCount      int    `json:"provider_count"`
+	RuleCount          int    `json:"rule_count"`
 }
 
 type PackGetResult struct {
@@ -59,17 +65,21 @@ type PackCatalog struct {
 }
 
 type PackDetail struct {
-	ID            string            `json:"id"`
-	Source        string            `json:"source"`
-	Name          string            `json:"name"`
-	Target        string            `json:"target"`
-	TargetMeaning string            `json:"target_meaning,omitempty"`
-	Renderable    bool              `json:"renderable"`
-	Reason        string            `json:"reason,omitempty"`
-	Providers     []ProviderSummary `json:"providers"`
-	Rules         []string          `json:"rules"`
-	ProviderCount int               `json:"provider_count"`
-	RuleCount     int               `json:"rule_count"`
+	ID                 string            `json:"id"`
+	Source             string            `json:"source"`
+	Name               string            `json:"name"`
+	Type               string            `json:"type"`
+	RenderStrategy     string            `json:"render_strategy"`
+	RenderRuleTemplate string            `json:"render_rule_template"`
+	Backend            PackBackend       `json:"backend"`
+	Target             string            `json:"target"`
+	TargetMeaning      string            `json:"target_meaning,omitempty"`
+	Renderable         bool              `json:"renderable"`
+	Reason             string            `json:"reason,omitempty"`
+	Providers          []ProviderSummary `json:"providers"`
+	Rules              []string          `json:"rules"`
+	ProviderCount      int               `json:"provider_count"`
+	RuleCount          int               `json:"rule_count"`
 }
 
 type ProviderSummary struct {
@@ -241,23 +251,31 @@ func loadCatalogEntries(cacheDir string) ([]catalogEntry, error) {
 }
 
 func packSummary(entry catalogEntry) PackSummary {
+	backend := packBackend(entry.Cache.Source, entry.Pack, "<target>")
 	return PackSummary{
-		ID:            catalogPackID(entry.Cache.Source, entry.Pack.ID),
-		Source:        entry.Cache.Source,
-		Name:          packDisplayName(entry.Pack),
-		Target:        entry.Pack.Target,
-		TargetMeaning: "catalog default/recommended target; not active configuration",
-		ProviderCount: len(entry.Pack.Components),
-		RuleCount:     len(entry.Pack.Components),
+		ID:                 catalogPackID(entry.Cache.Source, entry.Pack.ID),
+		Source:             entry.Cache.Source,
+		Name:               packDisplayName(entry.Pack),
+		Type:               backend.Type,
+		RenderStrategy:     backend.RenderStrategy,
+		RenderRuleTemplate: backend.RenderRuleTemplate,
+		Target:             entry.Pack.Target,
+		TargetMeaning:      "catalog default/recommended target; not active configuration",
+		ProviderCount:      len(entry.Pack.Components),
+		RuleCount:          len(entry.Pack.Components),
 	}
 }
 
 func packRef(entry catalogEntry) PackRef {
+	backend := packBackend(entry.Cache.Source, entry.Pack, "<target>")
 	return PackRef{
-		ID:     catalogPackID(entry.Cache.Source, entry.Pack.ID),
-		Source: entry.Cache.Source,
-		Pack:   entry.Pack.ID,
-		Name:   packDisplayName(entry.Pack),
+		ID:                 catalogPackID(entry.Cache.Source, entry.Pack.ID),
+		Source:             entry.Cache.Source,
+		Pack:               entry.Pack.ID,
+		Name:               packDisplayName(entry.Pack),
+		Type:               backend.Type,
+		RenderStrategy:     backend.RenderStrategy,
+		RenderRuleTemplate: backend.RenderRuleTemplate,
 	}
 }
 
@@ -268,6 +286,7 @@ func packDetail(entry catalogEntry) PackDetail {
 	if target == "" {
 		target = "<target>"
 	}
+	backend := packBackend(entry.Cache.Source, entry.Pack, target)
 	for _, component := range entry.Pack.Components {
 		name := providerName(entry.Cache.Source, entry.Pack.ID, component.ID)
 		providers = append(providers, ProviderSummary{
@@ -285,18 +304,57 @@ func packDetail(entry catalogEntry) PackDetail {
 		rules = append(rules, fmt.Sprintf("RULE-SET,%s,%s", name, target))
 	}
 	return PackDetail{
-		ID:            catalogPackID(entry.Cache.Source, entry.Pack.ID),
-		Source:        entry.Cache.Source,
-		Name:          packDisplayName(entry.Pack),
-		Target:        entry.Pack.Target,
-		TargetMeaning: "catalog default/recommended target; not active configuration",
-		Renderable:    entry.Pack.Renderable,
-		Reason:        entry.Pack.Reason,
-		Providers:     providers,
-		Rules:         rules,
-		ProviderCount: len(providers),
-		RuleCount:     len(rules),
+		ID:                 catalogPackID(entry.Cache.Source, entry.Pack.ID),
+		Source:             entry.Cache.Source,
+		Name:               packDisplayName(entry.Pack),
+		Type:               backend.Type,
+		RenderStrategy:     backend.RenderStrategy,
+		RenderRuleTemplate: backend.RenderRuleTemplate,
+		Backend:            backend,
+		Target:             entry.Pack.Target,
+		TargetMeaning:      "catalog default/recommended target; not active configuration",
+		Renderable:         entry.Pack.Renderable,
+		Reason:             entry.Pack.Reason,
+		Providers:          providers,
+		Rules:              rules,
+		ProviderCount:      len(providers),
+		RuleCount:          len(rules),
 	}
+}
+
+func packBackend(source string, pack Pack, target string) PackBackend {
+	if packIsGeoSite(pack) {
+		return PackBackend{
+			Type:               PackTypeGeoSite,
+			QuerySource:        QuerySourceRawDLC,
+			RenderStrategy:     RenderStrategyGeoSite,
+			RenderRuleTemplate: fmt.Sprintf("GEOSITE,%s,%s", pack.ID, target),
+			DataFile:           GeoSiteDataFileDLC,
+			Note:               "This pack renders as Mihomo GEOSITE. Keep using config_patch_create with this pack id; localClash will render GEOSITE instead of RULE-SET.",
+		}
+	}
+	providerID := "<provider>"
+	if len(pack.Components) > 0 {
+		providerID = providerName(source, pack.ID, pack.Components[0].ID)
+	}
+	return PackBackend{
+		Type:               PackTypeRuleProvider,
+		QuerySource:        QuerySourceProviderCache,
+		RenderStrategy:     RenderStrategyRuleSet,
+		RenderRuleTemplate: fmt.Sprintf("RULE-SET,%s,%s", providerID, target),
+	}
+}
+
+func packIsGeoSite(pack Pack) bool {
+	if len(pack.Components) == 0 {
+		return false
+	}
+	for _, component := range pack.Components {
+		if !strings.EqualFold(component.Behavior, "v2fly-dlc") {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveProviderRuntimePath(runtimeDir, providerPath string) string {

@@ -48,6 +48,25 @@ type Component struct {
 	Path       string `yaml:"path"`
 }
 
+const (
+	PackTypeRuleProvider     = "rule_provider"
+	PackTypeGeoSite          = "geosite"
+	RenderStrategyRuleSet    = "RULE-SET"
+	RenderStrategyGeoSite    = "GEOSITE"
+	QuerySourceProviderCache = "provider_cache"
+	QuerySourceRawDLC        = "raw_dlc_provider_cache"
+	GeoSiteDataFileDLC       = "dlc.dat"
+)
+
+type PackBackend struct {
+	Type               string `json:"type"`
+	QuerySource        string `json:"query_source"`
+	RenderStrategy     string `json:"render_strategy"`
+	RenderRuleTemplate string `json:"render_rule_template"`
+	DataFile           string `json:"data_file,omitempty"`
+	Note               string `json:"note,omitempty"`
+}
+
 type Selection struct {
 	Version       int                    `yaml:"version"`
 	ProxyGroups   map[string]ProxyGroup  `yaml:"proxy_groups,omitempty"`

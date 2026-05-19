@@ -22,6 +22,12 @@ func TestListPacksReturnsSummaries(t *testing.T) {
 	if result.Packs[0].ProviderCount != 1 || result.Packs[0].RuleCount != 1 {
 		t.Fatalf("counts = %+v, want provider/rule count 1", result.Packs[0])
 	}
+	if result.Packs[0].Type != PackTypeRuleProvider || result.Packs[0].RenderStrategy != RenderStrategyRuleSet {
+		t.Fatalf("pack backend = %+v, want rule-provider RULE-SET", result.Packs[0])
+	}
+	if result.Packs[0].RenderRuleTemplate != "RULE-SET,blackmatrix7_GitHub,<target>" {
+		t.Fatalf("render template = %q, want RULE-SET template", result.Packs[0].RenderRuleTemplate)
+	}
 	if len(result.Guidance) == 0 || len(result.NextActions) == 0 {
 		t.Fatalf("result = %+v, want guidance and next actions", result)
 	}
@@ -97,6 +103,58 @@ func TestGetPackReturnsDetail(t *testing.T) {
 	}
 	if len(pack.Rules) != 1 || pack.Rules[0] != "RULE-SET,blackmatrix7_OpenAI,AI" {
 		t.Fatalf("rules = %+v, want RULE-SET target AI", pack.Rules)
+	}
+	if pack.Backend.Type != PackTypeRuleProvider || pack.Backend.QuerySource != QuerySourceProviderCache {
+		t.Fatalf("backend = %+v, want provider cache backend", pack.Backend)
+	}
+}
+
+func TestGetPackReturnsGeoSiteBackend(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "packs")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCatalogTestCache(t, cacheDir, PackCache{
+		Version:    1,
+		Source:     "v2fly-dlc",
+		Adapter:    "v2fly-dlc",
+		Renderable: false,
+		Packs: []Pack{
+			{
+				ID:         "google",
+				Name:       "google",
+				Target:     "PROXY",
+				Renderable: true,
+				Components: []Component{
+					{
+						ID:         "domain",
+						Behavior:   "v2fly-dlc",
+						Format:     "text",
+						OrderClass: "domain",
+						URL:        "https://example.com/google",
+						Path:       "./rule-packs/v2fly-dlc/google.txt",
+					},
+				},
+			},
+		},
+	})
+
+	result, err := GetPack(PackGetOptions{CacheDir: cacheDir, ID: "v2fly_dlc_google"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack := result.Pack
+	if pack.Type != PackTypeGeoSite || pack.RenderStrategy != RenderStrategyGeoSite {
+		t.Fatalf("pack = %+v, want geosite backend fields", pack)
+	}
+	if pack.Backend.Type != PackTypeGeoSite || pack.Backend.QuerySource != QuerySourceRawDLC || pack.Backend.DataFile != GeoSiteDataFileDLC {
+		t.Fatalf("backend = %+v, want raw DLC geosite backend", pack.Backend)
+	}
+	if pack.RenderRuleTemplate != "GEOSITE,google,PROXY" {
+		t.Fatalf("render template = %q, want GEOSITE template", pack.RenderRuleTemplate)
+	}
+	if len(pack.Rules) != 1 || pack.Rules[0] != "GEOSITE,google,PROXY" {
+		t.Fatalf("rules = %+v, want GEOSITE rule", pack.Rules)
 	}
 }
 

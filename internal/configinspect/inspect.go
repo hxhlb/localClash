@@ -128,6 +128,7 @@ type IntentRuleProvider struct {
 
 type IntentPack struct {
 	ID     string `json:"id"`
+	Type   string `json:"type,omitempty"`
 	Target string `json:"target"`
 	Reason string `json:"reason,omitempty"`
 	Status string `json:"status"`
@@ -443,7 +444,7 @@ func packIntents(packs []localconfig.Pack, resolved []localconfig.PackResult, li
 		if _, ok := resolvedByID[pack.ID]; ok {
 			status = "resolved"
 		}
-		out = append(out, IntentPack{ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Status: status})
+		out = append(out, IntentPack{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason, Status: status})
 	}
 	return out
 }

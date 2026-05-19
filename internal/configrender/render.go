@@ -204,6 +204,7 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			metadata.Overlay.Packs = append(metadata.Overlay.Packs, configmeta.OverlayPack{
 				ID:     rulespkg.PackCatalogID(enabled.Source, enabled.Pack),
 				Source: enabled.Source,
+				Type:   packTypeFromFragment(fragment, enabled),
 				Target: enabled.Target,
 			})
 			if _, ok := selection.ProxyGroups[enabled.Target]; ok {
@@ -256,6 +257,19 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 		}
 	}
 	return metadata
+}
+
+func packTypeFromFragment(fragment *rulespkg.Fragment, enabled rulespkg.SelectedPack) string {
+	if fragment == nil {
+		return ""
+	}
+	for _, rule := range fragment.Rules {
+		parts := strings.Split(rule, ",")
+		if len(parts) >= 2 && strings.EqualFold(strings.TrimSpace(parts[0]), "GEOSITE") && strings.TrimSpace(parts[1]) == enabled.Pack {
+			return rulespkg.PackTypeGeoSite
+		}
+	}
+	return rulespkg.PackTypeRuleProvider
 }
 
 func proxyGroupMode(group rulespkg.ProxyGroup) string {
