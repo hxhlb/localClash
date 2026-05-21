@@ -26,16 +26,34 @@ import (
 const usage = `localclash
 
 Usage:
+  localclash status --json
+  localclash subscription status --json
+  localclash subscription set --input subscriptions.json --json
+  localclash subscription refresh --json
+  localclash component status --json
+  localclash component update mihomo --json
+  localclash component update dashboard --json
+  localclash config status --json
+  localclash config apply-template --input config-request.json --json
+  localclash config render --json
+  localclash runtime status --json
+  localclash runtime start --json
+  localclash runtime restart --json
+  localclash runtime stop --json
+  localclash takeover status --json
+  localclash takeover apply --json
+  localclash takeover stop --json
+  localclash apply --input desired-state.json --json
+  localclash reset --json
+  localclash mcp serve [flags]
+
+Legacy/internal commands still available during the CLI rewrite:
   localclash core download [flags]
   localclash subscription download --url <url> [flags]
   localclash dashboard download [flags]
-  localclash config render [flags]
   localclash rules adapt [flags]
   localclash rules render [flags]
   localclash run [flags]
-  localclash status [flags]
-  localclash stop [flags]
-  localclash restart [flags]
   localclash doctor [flags]
   localclash mcp [flags]
   localclash reset [flags]
@@ -156,11 +174,17 @@ func run(args []string) error {
 		return nil
 	}
 	if len(args) >= 1 && args[0] == "reset" {
+		if handled, err := runProductCommand(args, appinit.RuntimeState{}); handled {
+			return err
+		}
 		return runReset(args[1:])
 	}
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer bootstrapCancel()
 	state := appinit.Bootstrap(bootstrapCtx, appinit.Options{})
+	if handled, err := runProductCommand(args, state); handled {
+		return err
+	}
 	if len(args) >= 2 && args[0] == "core" && args[1] == "download" {
 		return runCoreDownload(args[2:])
 	}

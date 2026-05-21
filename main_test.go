@@ -21,35 +21,61 @@ func TestRunResetDoesNotBootstrapRuntimeFirst(t *testing.T) {
 	}
 }
 
-func TestRunStatusPrintsJSON(t *testing.T) {
+func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	workDir := filepath.Join(dir, "runtime")
+	workDir := filepath.Join(dir, ".runtime", "mihomo")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(dir, "mihomo.yaml")
+	config := filepath.Join(dir, "generated", "mihomo.yaml")
+	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	output := captureStdout(t, func() error {
-		return run([]string{"status", "--workdir", workDir, "--config", config, "--json"})
+		return run([]string{"runtime", "status", "--json"})
 	})
 	var result struct {
-		Running       bool   `json:"running"`
-		PID           int    `json:"pid"`
-		ExternalUIURL string `json:"external_ui_url"`
+		OK     bool `json:"ok"`
+		Status struct {
+			Running       bool   `json:"running"`
+			PID           int    `json:"pid"`
+			ExternalUIURL string `json:"external_ui_url"`
+		} `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("status JSON = %q, error = %v", output, err)
 	}
-	if !result.Running || result.PID != os.Getpid() || result.ExternalUIURL != "http://127.0.0.1:9090/ui" {
+	if !result.OK || !result.Status.Running || result.Status.PID != os.Getpid() || result.Status.ExternalUIURL != "http://127.0.0.1:9090/ui" {
 		t.Fatalf("status result = %+v, want current pid and external UI", result)
+	}
+}
+
+func TestRunProductStatusPrintsJSONEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	output := captureStdout(t, func() error {
+		return run([]string{"status", "--json"})
+	})
+	var result struct {
+		OK      bool           `json:"ok"`
+		Changed bool           `json:"changed"`
+		Status  map[string]any `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("product status JSON = %q, error = %v", output, err)
+	}
+	if !result.OK || result.Changed || result.Status["runtime"] == nil || result.Status["components"] == nil {
+		t.Fatalf("product status result = %+v, want product status envelope", result)
 	}
 }
 
