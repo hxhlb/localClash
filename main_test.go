@@ -27,18 +27,18 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	workDir := filepath.Join(dir, ".runtime", "mihomo")
+	workDir := filepath.Join(".runtime", "mihomo")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(dir, "generated", "mihomo.yaml")
+	config := filepath.Join("generated", "mihomo.yaml")
 	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	core := filepath.Join(dir, "bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	core := filepath.Join("bin", "linux-"+runtime.GOARCH, "mihomo-meta")
 	cmd := startFakeRuntime(t, core, workDir, config)
 	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
