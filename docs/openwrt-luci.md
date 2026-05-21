@@ -6,22 +6,49 @@ configuration system.
 
 ## Product Boundary
 
-`luci-app-localclash` is a UI-only OpenWrt package. It owns the router-facing
-LuCI page, rpcd permissions, a small bootstrap helper, and service integration.
-It does not ship the localClash Go core, Mihomo core, dashboard assets, or
-advanced routing configuration.
+`luci-app-localclash` is a UI-only OpenWrt package. It installs the LuCI-facing
+surface and a helper capable of bootstrapping the real runtime pieces. It does
+not ship the localClash Go core, Mihomo core, dashboard assets, OpenWrt init
+script instance, or advanced routing configuration.
+
+There are four roles in the LuCI architecture:
+
+1. **OpenWrt package install layer**: installs static LuCI package files only.
+   It installs the LuCI JavaScript view, menu entry, rpcd ACL, rpcd helper
+   executable, optional static help text, and package metadata. It does not
+   install `/usr/local/bin/localclash`, `/etc/init.d/localclash-mcp`, Mihomo
+   binaries, dashboard assets, subscriptions, generated configs, or runtime
+   state.
+2. **LuCI frontend layer**: renders the browser UI, collects user intent, calls
+   rpcd methods, shows status/errors, and never executes shell commands or edits
+   localClash files directly.
+3. **LuCI helper function layer**: owns all router-side imperative integration
+   that is not the localClash core itself. It downloads and installs
+   `/usr/local/bin/localclash`, creates or repairs `/etc/init.d/localclash-mcp`,
+   starts/stops/inspects the procd service, bridges LuCI requests to product CLI
+   JSON commands, and reports bootstrap/service status.
+4. **Downloaded localClash core**: owns product behavior after installation:
+   subscriptions, config model, config render, product CLI JSON commands, MCP
+   HTTP server, component updates, Mihomo lifecycle, router takeover,
+   diagnostics, and reset. It also owns runtime artifacts created by those
+   operations, including Mihomo cores, dashboard assets, subscription artifacts,
+   generated configs, logs, and runtime state.
 
 The localClash core is installed or updated over the network from a release
-source. After the core is installed, all product behavior should delegate to the
-existing localClash runtime, subscription, render, MCP, and router takeover
-logic.
+source. After the core is installed, product behavior delegates to the existing
+localClash runtime, subscription, render, MCP, and router takeover logic.
 
 ```text
 luci-app-localclash package
 -> LuCI UI
 -> rpcd ACL and helper
--> bootstrap installer
--> procd service template
+-> static package metadata
+
+LuCI helper function layer
+-> bootstrap localClash core
+-> create or repair /etc/init.d/localclash-mcp
+-> start/stop/status procd service
+-> bridge LuCI requests to product CLI JSON
 
 downloaded localClash core
 -> subscriptions
@@ -46,23 +73,44 @@ Advanced edits remain MCP or SSH work. LuCI must not expose a full editor for
 packs, proxy groups, custom rules, external rule providers, runtime profiles, or
 generated Mihomo YAML.
 
-## Package Responsibilities
+## Role Responsibilities
 
-The OpenWrt package should include:
+The OpenWrt package install layer should include:
 
 - LuCI JavaScript views.
 - menu and ACL declarations.
-- a narrow rpcd helper used before the localClash core exists.
-- a procd service file or service template for `localclash mcp`.
+- a narrow rpcd helper executable used before and after the localClash core
+  exists.
 - static text for MCP connection guidance.
 
-The package should not include:
+The OpenWrt package install layer must not include or create:
 
 - `/usr/local/bin/localclash`.
+- `/etc/init.d/localclash-mcp`.
 - Mihomo binaries.
 - downloaded dashboard assets.
 - subscription URLs or generated runtime artifacts.
 - a parallel localClash configuration schema.
+
+The LuCI helper function layer should provide:
+
+- `bootstrap_core`: download, verify, and install `/usr/local/bin/localclash`.
+- `service_ensure`: create or repair `/etc/init.d/localclash-mcp`.
+- `service_start`, `service_stop`, and `service_status`.
+- JSON request bridging from LuCI/rpcd to localClash product CLI commands.
+- bootstrap and service logs with secrets redacted.
+
+The downloaded localClash core should provide:
+
+- subscription source configuration and refresh.
+- component status/update for Mihomo cores and dashboard assets.
+- config template application, render, and status.
+- runtime start, restart, stop, and status.
+- router takeover apply, stop, and status.
+- product CLI JSON commands and MCP server behavior.
+- ownership of generated/runtime artifacts such as `bin/linux-*`,
+  `.runtime/mihomo/ui/`, `subscription.yaml`, `.runtime/subscriptions/`,
+  `generated/`, and `.runtime/mihomo/`.
 
 Core installation must be an explicit LuCI action, not an automatic `postinst`
 network download. Installing the OpenWrt package should be transparent and
@@ -685,7 +733,6 @@ openwrt/luci-app-localclash/
   root/usr/share/luci/menu.d/luci-app-localclash.json
   root/usr/share/rpcd/acl.d/luci-app-localclash.json
   root/usr/libexec/rpcd/localclash
-  root/etc/init.d/localclash-mcp
 ```
 
 Optional files:
@@ -700,11 +747,15 @@ openwrt/luci-app-localclash/
 Package rules:
 
 - The package is architecture-independent because it contains UI, scripts, ACLs,
-  and service files only. Use `PKGARCH:=all`.
+  helper code, and static help/config files only. Use `PKGARCH:=all`.
 - The package must not install `/usr/local/bin/localclash`.
+- The package install step should not directly install
+  `/etc/init.d/localclash-mcp`; that service file is managed by helper function
+  calls.
 - The package must not install Mihomo cores or dashboard assets.
 - The package should install a bootstrap helper capable of downloading
-  localClash core after explicit user action.
+  localClash core after explicit user action and generating/repairing the MCP
+  service wrapper from helper-owned logic.
 - The package should not run network downloads from `postinst`.
 - The package should depend only on the LuCI/rpcd/runtime tools needed by the UI
   and helper.
@@ -755,6 +806,7 @@ reset
 service_start
 service_stop
 service_status
+service_ensure
 bootstrap_core
 bootstrap_logs
 ```
@@ -764,7 +816,7 @@ Method contracts:
 - `status`: no input. Calls `localclash status --json` when the core exists,
   calls `service_status`, and returns a combined LuCI page status. When the core
   is missing, returns bootstrap-only status with `core.installed=false` plus MCP
-  service status when the service file exists.
+  service status or service repair guidance from the helper layer.
 - `subscription_set`: input `{ "urls": ["https://..."] }`. Writes a temporary
   JSON input file with `{ "version": 1, "urls": [...] }`, calls
   `localclash subscription set --input <file> --json`, then removes the temp
@@ -784,11 +836,14 @@ Method contracts:
 - `takeover_apply`: no input. Calls `localclash takeover apply --json`.
 - `takeover_stop`: no input. Calls `localclash takeover stop --json`.
 - `reset`: no input. Calls `localclash reset --json`.
-- `service_start`: no input. Starts the procd service for MCP.
+- `service_start`: no input. Ensures the procd service wrapper exists, then
+  starts the procd service for MCP.
 - `service_stop`: no input. Stops the procd service for MCP.
 - `service_status`: no input. Reports procd service status and MCP HTTP health
   when reachable. This is the source of truth for the LuCI MCP service status
   row.
+- `service_ensure`: no input. Installs or repairs `/etc/init.d/localclash-mcp`
+  from helper-owned service-generation logic. It does not start the service.
 - `bootstrap_core`: no input. Downloads, verifies, and installs localClash core.
 - `bootstrap_logs`: no input. Returns recent bootstrap/helper logs with secrets
   redacted.
@@ -867,9 +922,15 @@ download to temporary path
 verify sha256 from manifest
 chmod executable
 atomically install to /usr/local/bin/localclash
-ensure /etc/init.d/localclash-mcp exists and is executable
+install or repair /etc/init.d/localclash-mcp through service_ensure
 read back localclash version/status
 ```
+
+The bootstrap helper installs the core binary and then calls the helper's
+service-management function to install or repair the procd service wrapper. This
+keeps service-file generation in the LuCI helper function layer instead of the
+package install layer. A missing core binary is a normal first-run state. A
+missing service file is repairable by `service_ensure`.
 
 Architecture mapping must be explicit. For V1, support at least:
 
@@ -892,11 +953,16 @@ Bootstrap security requirements:
 
 ## procd Service Contract
 
-The package should install a procd service for the MCP server:
+The LuCI helper function layer owns the procd service wrapper for the MCP server:
 
 ```text
 /etc/init.d/localclash-mcp
 ```
+
+The OpenWrt package install layer must not ship or place a service template as a
+package-owned artifact. Service generation is helper function behavior. The
+helper creates or repairs the actual init script when `service_ensure`,
+`bootstrap_core`, or `service_start` runs.
 
 Service behavior:
 
@@ -907,18 +973,29 @@ Service behavior:
 - stdout/stderr: append to a localClash log file under the state directory
 - restart policy: use procd respawn with conservative limits
 
+The service wrapper may exist while `/usr/local/bin/localclash` is still missing.
+That is not a failure. The init script must check for the binary before starting
+and fail with a clear localClash-core-missing message instead of letting procd
+enter a crash loop.
+
 LuCI should show both service state and MCP HTTP health. Service running alone
 does not prove MCP is responding.
 
 MCP service status checks:
 
-- procd service file exists: `/etc/init.d/localclash-mcp`
+- procd service file exists or can be repaired by `service_ensure`:
+  `/etc/init.d/localclash-mcp`
+- localClash core binary exists: `/usr/local/bin/localclash`
 - procd service enabled/running state
 - HTTP health endpoint returns success
 - configured endpoint to copy into Agent instructions
 
-Failure cases should distinguish `service_not_installed`, `service_stopped`, and
-`mcp_health_failed` so LuCI can show the right next action.
+Failure cases should distinguish `service_missing`, `service_repair_failed`,
+`service_stopped`, and `mcp_health_failed` so LuCI can show the right next
+action. It should also distinguish `core_missing` from service errors:
+`core_missing` means the first-run bootstrap action is needed, while
+`service_repair_failed` means the helper could not create or repair the service
+wrapper.
 
 ## Frontend State Model
 
@@ -1038,8 +1115,8 @@ The first implementation is complete only when all of these are true:
 4. Add unit tests for status, subscriptions, component updates, config render,
    runtime controls, takeover controls, apply preview/execution, reset scope,
    and modified config detection.
-5. Add the OpenWrt package skeleton with rpcd ACL, bootstrap helper, and procd
-   service.
+5. Add the OpenWrt package skeleton with rpcd ACL and bootstrap/service helper
+   functions.
 6. Add the LuCI single-page UI using the frontend state model.
 7. Add build/release scripts or docs for standalone artifacts and feed use.
 8. Test on router with missing core, fresh install, configured install, modified
