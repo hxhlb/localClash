@@ -3,7 +3,9 @@ package reset
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,7 +101,8 @@ func TestRunRequiresConfirmation(t *testing.T) {
 func TestRunRefusesWhileRuntimeIsRunning(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	writeResetFile(t, filepath.Join(".runtime", "mihomo", "mihomo.pid"), strconv.Itoa(os.Getpid())+"\n")
+	cmd := startResetFakeRuntime(t, dir)
+	writeResetFile(t, filepath.Join(".runtime", "mihomo", "mihomo.pid"), strconv.Itoa(cmd.Process.Pid)+"\n")
 
 	_, err := Run(Options{Yes: true, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "runtime is running") {
@@ -113,13 +116,14 @@ func TestRunRefusesWhileRuntimeIsRunning(t *testing.T) {
 func TestRunDryRunAllowsRunningRuntime(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	writeResetFile(t, filepath.Join(".runtime", "mihomo", "mihomo.pid"), strconv.Itoa(os.Getpid())+"\n")
+	cmd := startResetFakeRuntime(t, dir)
+	writeResetFile(t, filepath.Join(".runtime", "mihomo", "mihomo.pid"), strconv.Itoa(cmd.Process.Pid)+"\n")
 
 	result, err := Run(Options{DryRun: true, Out: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.DryRun || len(result.Deleted) != 1 {
+	if !result.DryRun || len(result.Deleted) != 2 {
 		t.Fatalf("result = %+v, want dry-run plan for runtime dir", result)
 	}
 	if _, err := os.Stat(filepath.Join(".runtime", "mihomo", "mihomo.pid")); err != nil {
@@ -135,4 +139,25 @@ func writeResetFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func startResetFakeRuntime(t *testing.T, dir string) *exec.Cmd {
+	t.Helper()
+	workDir := filepath.Join(dir, ".runtime", "mihomo")
+	config := filepath.Join(dir, "generated", "mihomo.yaml")
+	core := filepath.Join(dir, "bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	writeResetFile(t, config, "external-controller: 127.0.0.1:9090\n")
+	writeResetFile(t, core, "#!/bin/sh\nsleep 30\n")
+	if err := os.Chmod(core, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(core, "-d", workDir, "-f", config)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	return cmd
 }

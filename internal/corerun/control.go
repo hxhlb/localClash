@@ -277,7 +277,7 @@ func processMatchesRuntime(pid int, opts StartOptions) (bool, string) {
 	if err != nil || !ok || len(args) == 0 {
 		return true, ""
 	}
-	if !processCommandLooksLikeCore(args[0], opts.CorePath) {
+	if !processCommandArgsLookLikeCore(args, opts.CorePath) {
 		return false, "pid file points to a live process, but it is not the configured Mihomo core"
 	}
 	if !processCommandHasArg(args, "-d", opts.WorkDir) {
@@ -312,6 +312,19 @@ func processCommandLooksLikeCore(command, corePath string) bool {
 	}
 	lower := strings.ToLower(commandBase)
 	return strings.Contains(lower, "mihomo")
+}
+
+func processCommandArgsLookLikeCore(args []string, corePath string) bool {
+	limit := len(args)
+	if limit > 2 {
+		limit = 2
+	}
+	for i := 0; i < limit; i++ {
+		if processCommandLooksLikeCore(args[i], corePath) {
+			return true
+		}
+	}
+	return false
 }
 
 func processCommandHasArg(args []string, flag, expected string) bool {

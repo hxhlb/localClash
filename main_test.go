@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 )
@@ -29,14 +31,16 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	config := filepath.Join(dir, "generated", "mihomo.yaml")
 	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	core := filepath.Join(dir, "bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	cmd := startFakeRuntime(t, core, workDir, config)
+	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,7 +58,7 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("status JSON = %q, error = %v", output, err)
 	}
-	if !result.OK || !result.Status.Running || result.Status.PID != os.Getpid() || result.Status.ExternalUIURL != "http://127.0.0.1:9090/ui" {
+	if !result.OK || !result.Status.Running || result.Status.PID != cmd.Process.Pid || result.Status.ExternalUIURL != "http://127.0.0.1:9090/ui" {
 		t.Fatalf("status result = %+v, want current pid and external UI", result)
 	}
 }
@@ -77,6 +81,25 @@ func TestRunProductStatusPrintsJSONEnvelope(t *testing.T) {
 	if !result.OK || result.Changed || result.Status["runtime"] == nil || result.Status["components"] == nil {
 		t.Fatalf("product status result = %+v, want product status envelope", result)
 	}
+}
+
+func startFakeRuntime(t *testing.T, core, workDir, config string) *exec.Cmd {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(core), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(core, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(core, "-d", workDir, "-f", config)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	return cmd
 }
 
 func TestRunStopRemovesStalePIDFile(t *testing.T) {
