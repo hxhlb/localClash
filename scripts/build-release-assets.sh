@@ -11,6 +11,27 @@ repo="${RELEASE_REPO:-qoli/localClash}"
 dist="${DIST_DIR:-dist}"
 mkdir -p "$dist"
 
+fetch_asset() {
+	output="$1"
+	shift
+	for url in "$@"; do
+		if command -v curl >/dev/null 2>&1; then
+			if curl -fsSL --connect-timeout 10 --max-time 45 --retry 2 --retry-delay 2 --retry-all-errors "$url" -o "$output"; then
+				return 0
+			fi
+		elif command -v wget >/dev/null 2>&1; then
+			if wget -q -T 45 -O "$output" "$url"; then
+				return 0
+			fi
+		else
+			echo "curl or wget is required to download release runtime assets" >&2
+			exit 1
+		fi
+	done
+	echo "failed to download release runtime asset: $output" >&2
+	exit 1
+}
+
 build_asset() {
 	goarch="$1"
 	output="$dist/localclash-linux-$goarch"
@@ -27,7 +48,25 @@ build_asset arm64
 
 base_assets="localclash-base-assets.tar.gz"
 rm -f "$dist/$base_assets" "$dist/$base_assets.sha256"
-COPYFILE_DISABLE=1 tar -czf "$dist/$base_assets" policies policy-templates rule-sources
+geox_tmp="$(mktemp -d "${TMPDIR:-/tmp}/localclash-geox.XXXXXX")"
+cleanup() {
+	rm -rf "$geox_tmp"
+}
+trap cleanup EXIT
+mkdir -p "$geox_tmp/.runtime/mihomo"
+fetch_asset "$geox_tmp/.runtime/mihomo/Country.mmdb" \
+	"https://raw.githubusercontent.com/alecthw/mmdb_china_ip_list/release/Country.mmdb" \
+	"https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb"
+fetch_asset "$geox_tmp/.runtime/mihomo/geoip.dat" \
+	"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" \
+	"https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+fetch_asset "$geox_tmp/.runtime/mihomo/geosite.dat" \
+	"https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" \
+	"https://testingcf.jsdelivr.net/gh/v2fly/domain-list-community@release/dlc.dat"
+fetch_asset "$geox_tmp/.runtime/mihomo/ASN.mmdb" \
+	"https://github.com/xishang0128/geoip/releases/latest/download/GeoLite2-ASN.mmdb" \
+	"https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb"
+COPYFILE_DISABLE=1 tar -czf "$dist/$base_assets" policies policy-templates rule-sources -C "$geox_tmp" .runtime
 (cd "$dist" && sha256sum "$base_assets" > "$base_assets.sha256")
 
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -74,7 +113,11 @@ cat > "$dist/localclash-release-manifest.json" <<EOF
     "contents": [
       "policies/",
       "policy-templates/",
-      "rule-sources/"
+      "rule-sources/",
+      ".runtime/mihomo/Country.mmdb",
+      ".runtime/mihomo/geoip.dat",
+      ".runtime/mihomo/geosite.dat",
+      ".runtime/mihomo/ASN.mmdb"
     ]
   }
 }
