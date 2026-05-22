@@ -45,6 +45,11 @@ func TestApplyDryRunBuildsLocalClashOwnedScript(t *testing.T) {
 			t.Fatalf("runtime takeover script missing %q:\n%s", want, result.Script)
 		}
 	}
+	for _, want := range []string{"check_fw4_ready()", "firewall table inet fw4 is not active", "firewall chain inet fw4 $chain is missing"} {
+		if !strings.Contains(result.Script, want) {
+			t.Fatalf("runtime takeover script missing firewall preflight %q:\n%s", want, result.Script)
+		}
+	}
 	if strings.Contains(result.Script, "OpenClash") {
 		t.Fatalf("router takeover script should not special-case OpenClash:\n%s", result.Script)
 	}

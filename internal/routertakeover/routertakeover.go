@@ -19,6 +19,7 @@ const (
 	defaultRouteTable = "0x162"
 	defaultRulePref   = "1888"
 	defaultStateDir   = "/tmp/localclash/router-takeover"
+	commandTimeout    = 75 * time.Second
 )
 
 type Options struct {
@@ -80,6 +81,8 @@ func Status(ctx context.Context, opts Options) (Result, error) {
 	result.Checks = append(result.Checks,
 		commandCheck(ctx, runner, "fw4_available", "command -v fw4 >/dev/null 2>&1", "Firewall4/fw4 is available", "fw4 is unavailable"),
 		commandCheck(ctx, runner, "nft_available", "command -v nft >/dev/null 2>&1", "nft is available", "nft is unavailable"),
+		commandCheck(ctx, runner, "fw4_table", "nft list table inet fw4 >/dev/null 2>&1", "Firewall4 nft table inet fw4 is active", "Firewall4 nft table inet fw4 is not active"),
+		commandCheck(ctx, runner, "fw4_base_chains", "for chain in dstnat mangle_prerouting forward input srcnat; do nft list chain inet fw4 \"$chain\" >/dev/null 2>&1 || exit 1; done", "Firewall4 base chains are available", "Firewall4 base chains are missing"),
 		commandCheck(ctx, runner, "tun_interface", fmt.Sprintf("ip link show %s >/dev/null 2>&1", shellQuote(opts.TunDevice)), fmt.Sprintf("TUN device %s exists", opts.TunDevice), fmt.Sprintf("TUN device %s is missing", opts.TunDevice)),
 		commandCheck(ctx, runner, "fwmark_route_v4", fmt.Sprintf("ip rule show | grep -q 'fwmark %s' && ip route show table %s | grep -q %s", defaultFWMark, defaultRouteTable, shellQuote(opts.TunDevice)), "IPv4 fwmark route points to TUN", "IPv4 fwmark route is missing"),
 		commandCheck(ctx, runner, "nft_chains", "nft list chain inet fw4 localclash >/dev/null 2>&1 && nft list chain inet fw4 localclash_mangle >/dev/null 2>&1", "localClash nft takeover chains are installed", "localClash nft takeover chains are missing"),
@@ -302,7 +305,7 @@ func nextActions(result Result) []string {
 }
 
 func defaultRunner(ctx context.Context, command string) (string, error) {
-	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, "/bin/sh", "-c", command)
 	var out bytes.Buffer
@@ -360,6 +363,19 @@ cleanup_localclash_state() {
   rm -f "$STATE_DIR/status" >/dev/null 2>&1 || true
 }
 
+check_fw4_ready() {
+  if ! nft list table inet fw4 >/dev/null 2>&1; then
+    echo "OpenWrt firewall table inet fw4 is not active; start or reload the firewall service, then retry router_takeover_apply" >&2
+    return 1
+  fi
+  for chain in dstnat mangle_prerouting forward input srcnat; do
+    if ! nft list chain inet fw4 "$chain" >/dev/null 2>&1; then
+      echo "OpenWrt firewall chain inet fw4 $chain is missing; start or reload the firewall service, then retry router_takeover_apply" >&2
+      return 1
+    fi
+  done
+}
+
 wait_tun_ready() {
   i=0
   while [ "$i" -lt "$TUN_WAIT_SECONDS" ]; do
@@ -374,6 +390,7 @@ wait_tun_ready() {
   return 1
 }
 
+check_fw4_ready
 trap 'cleanup_localclash_state' ERR
 cleanup_localclash_state
 wait_tun_ready
