@@ -32,6 +32,30 @@ fetch_asset() {
 	exit 1
 }
 
+github_release_mirrors() {
+	url="$1"
+	printf '%s\n' "https://v1.ax/$url"
+	printf '%s\n' "https://ghp.xptvhelper.link/$url"
+	printf '%s\n' "$url"
+}
+
+raw_github_mirrors() {
+	url="$1"
+	rest="${url#https://raw.githubusercontent.com/}"
+	owner="${rest%%/*}"
+	rest="${rest#*/}"
+	repo="${rest%%/*}"
+	rest="${rest#*/}"
+	branch="${rest%%/*}"
+	path="${rest#*/}"
+	printf '%s\n' "https://v1.ax/$url"
+	printf '%s\n' "https://ghp.xptvhelper.link/$url"
+	if [ -n "$owner" ] && [ -n "$repo" ] && [ -n "$branch" ] && [ -n "$path" ]; then
+		printf 'https://fastly.jsdelivr.net/gh/%s/%s@%s/%s\n' "$owner" "$repo" "$branch" "$path"
+	fi
+	printf '%s\n' "$url"
+}
+
 build_asset() {
 	goarch="$1"
 	output="$dist/localclash-linux-$goarch"
@@ -55,16 +79,16 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$geox_tmp/.runtime/mihomo"
 fetch_asset "$geox_tmp/.runtime/mihomo/Country.mmdb" \
-	"https://raw.githubusercontent.com/alecthw/mmdb_china_ip_list/release/Country.mmdb" \
+	$(raw_github_mirrors "https://raw.githubusercontent.com/alecthw/mmdb_china_ip_list/release/Country.mmdb") \
 	"https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb"
 fetch_asset "$geox_tmp/.runtime/mihomo/geoip.dat" \
-	"https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat" \
+	$(github_release_mirrors "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat") \
 	"https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
 fetch_asset "$geox_tmp/.runtime/mihomo/geosite.dat" \
-	"https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" \
-	"https://testingcf.jsdelivr.net/gh/v2fly/domain-list-community@release/dlc.dat"
+	$(github_release_mirrors "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat") \
+	"https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
 fetch_asset "$geox_tmp/.runtime/mihomo/ASN.mmdb" \
-	"https://github.com/xishang0128/geoip/releases/latest/download/GeoLite2-ASN.mmdb" \
+	$(github_release_mirrors "https://github.com/xishang0128/geoip/releases/latest/download/GeoLite2-ASN.mmdb") \
 	"https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb"
 COPYFILE_DISABLE=1 tar -czf "$dist/$base_assets" policies policy-templates rule-sources -C "$geox_tmp" .runtime
 (cd "$dist" && sha256sum "$base_assets" > "$base_assets.sha256")

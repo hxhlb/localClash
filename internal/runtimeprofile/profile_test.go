@@ -84,8 +84,8 @@ func TestDefaultNormalProfileCanResolveV2FlyGeoSitePacks(t *testing.T) {
 		t.Fatalf("normal geodata = mode %v loader %v, want enabled standard", mihomo["geodata-mode"], mihomo["geodata-loader"])
 	}
 	geoxURL := mihomo["geox-url"].(map[string]any)
-	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "v2fly/domain-list-community") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "dlc.dat") {
-		t.Fatalf("normal geox-url = %+v, want v2fly domain-list-community dlc.dat", geoxURL)
+	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
+		t.Fatalf("normal geox-url = %+v, want Loyalsoldier geosite.dat", geoxURL)
 	}
 }
 
@@ -119,8 +119,8 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		}
 	}
 	geoxURL := mihomo["geox-url"].(map[string]any)
-	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "v2fly/domain-list-community") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "dlc.dat") {
-		t.Fatalf("router geox-url = %+v, want v2fly domain-list-community dlc.dat", geoxURL)
+	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
+		t.Fatalf("router geox-url = %+v, want Loyalsoldier geosite.dat", geoxURL)
 	}
 
 	dns := mihomo["dns"].(map[string]any)
