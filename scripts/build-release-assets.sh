@@ -25,11 +25,18 @@ build_asset() {
 build_asset amd64
 build_asset arm64
 
+base_assets="localclash-base-assets.tar.gz"
+rm -f "$dist/$base_assets" "$dist/$base_assets.sha256"
+COPYFILE_DISABLE=1 tar -czf "$dist/$base_assets" policies policy-templates rule-sources
+(cd "$dist" && sha256sum "$base_assets" > "$base_assets.sha256")
+
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 amd64_size="$(wc -c < "$dist/localclash-linux-amd64" | tr -d ' ')"
 arm64_size="$(wc -c < "$dist/localclash-linux-arm64" | tr -d ' ')"
+base_assets_size="$(wc -c < "$dist/$base_assets" | tr -d ' ')"
 amd64_sha="$(cut -d ' ' -f 1 "$dist/localclash-linux-amd64.sha256")"
 arm64_sha="$(cut -d ' ' -f 1 "$dist/localclash-linux-arm64.sha256")"
+base_assets_sha="$(cut -d ' ' -f 1 "$dist/$base_assets.sha256")"
 base_url="https://github.com/$repo/releases/download/$version"
 
 cat > "$dist/localclash-release-manifest.json" <<EOF
@@ -57,6 +64,18 @@ cat > "$dist/localclash-release-manifest.json" <<EOF
       "size": $arm64_size,
       "install_path": "/usr/local/bin/localclash"
     }
-  ]
+  ],
+  "base_assets": {
+    "filename": "$base_assets",
+    "url": "$base_url/$base_assets",
+    "sha256": "$base_assets_sha",
+    "size": $base_assets_size,
+    "install_path": "/root/localclash",
+    "contents": [
+      "policies/",
+      "policy-templates/",
+      "rule-sources/"
+    ]
+  }
 }
 EOF

@@ -15,7 +15,18 @@ localclash-linux-amd64
 localclash-linux-arm64
 localclash-linux-amd64.sha256
 localclash-linux-arm64.sha256
+localclash-base-assets.tar.gz
+localclash-base-assets.tar.gz.sha256
 localclash-release-manifest.json
+```
+
+`localclash-base-assets.tar.gz` contains the disk assets the CLI expects to
+find in its working directory:
+
+```text
+policies/
+policy-templates/
+rule-sources/
 ```
 
 Manifest shape:
@@ -36,7 +47,19 @@ Manifest shape:
       "size": 12345678,
       "install_path": "/usr/local/bin/localclash"
     }
-  ]
+  ],
+  "base_assets": {
+    "filename": "localclash-base-assets.tar.gz",
+    "url": "https://github.com/qoli/localClash/releases/download/v0.1.0/localclash-base-assets.tar.gz",
+    "sha256": "...",
+    "size": 123456,
+    "install_path": "/root/localclash",
+    "contents": [
+      "policies/",
+      "policy-templates/",
+      "rule-sources/"
+    ]
+  }
 }
 ```
 
