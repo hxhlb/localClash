@@ -21,6 +21,22 @@ func TestSelectAssetPrefersDefaultVariant(t *testing.T) {
 	}
 }
 
+func TestSelectAssetPrefersCompatibleLinuxAMD64(t *testing.T) {
+	assets := []asset{
+		{Name: "mihomo-linux-amd64-v3-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v3"},
+		{Name: "mihomo-linux-amd64-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64"},
+		{Name: "mihomo-linux-amd64-compatible-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-compatible"},
+	}
+
+	got, err := selectAsset(assets, "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BrowserDownloadURL != "https://example.test/linux-amd64-compatible" {
+		t.Fatalf("selected %q, want compatible linux amd64 asset", got.Name)
+	}
+}
+
 func TestSelectAssetNormalizesAarch64(t *testing.T) {
 	assets := []asset{
 		{Name: "mihomo-linux-arm64-v1.19.24.gz", BrowserDownloadURL: "https://example.test/linux-arm64"},

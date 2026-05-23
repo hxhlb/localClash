@@ -330,6 +330,15 @@ func openClashCoreAssetName(targetOS, targetArch string) (string, error) {
 func selectAsset(assets []asset, targetOS, targetArch string) (asset, error) {
 	targetArch = normalizeArch(targetArch)
 	exact := fmt.Sprintf("mihomo-%s-%s-", targetOS, targetArch)
+	if targetOS == "linux" && targetArch == "amd64" {
+		compatible := exact + "compatible-"
+		for _, candidate := range assets {
+			name := candidate.Name
+			if strings.HasPrefix(name, compatible) && (strings.HasSuffix(name, ".gz") || strings.HasSuffix(name, ".zip")) {
+				return candidate, nil
+			}
+		}
+	}
 	for _, candidate := range assets {
 		name := candidate.Name
 		if strings.HasPrefix(name, exact) && (strings.HasSuffix(name, ".gz") || strings.HasSuffix(name, ".zip")) {
