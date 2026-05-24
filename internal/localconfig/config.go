@@ -29,6 +29,7 @@ type ProxyGroup struct {
 	Match         *Match   `json:"match,omitempty" yaml:"match,omitempty"`
 	Nodes         []string `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 	SelectedNodes []string `json:"selected_nodes,omitempty" yaml:"selected_nodes,omitempty"`
+	Optional      bool     `json:"optional,omitempty" yaml:"optional,omitempty"`
 	Reason        string   `json:"reason,omitempty" yaml:"reason,omitempty"`
 	Boundary      string   `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 }
@@ -106,6 +107,7 @@ type ProxyGroupResult struct {
 	Match         *Match   `json:"match,omitempty"`
 	SelectedNodes []string `json:"selected_nodes"`
 	NodeCount     int      `json:"node_count"`
+	Optional      bool     `json:"optional,omitempty"`
 	Reason        string   `json:"reason,omitempty"`
 	Boundary      string   `json:"boundary,omitempty"`
 }
@@ -256,7 +258,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		group.Mode = mode
 		group.SelectedNodes = selected
 		resolvedConfig.ProxyGroups[id] = group
-		ruleGroup := rules.ProxyGroup{Nodes: selected}
+		ruleGroup := rules.ProxyGroup{Nodes: selected, Optional: group.Optional}
 		switch mode {
 		case "manual":
 			ruleGroup.Manual = true
@@ -276,6 +278,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 			Match:         group.Match,
 			SelectedNodes: append([]string{}, selected...),
 			NodeCount:     len(selected),
+			Optional:      group.Optional,
 			Reason:        group.Reason,
 			Boundary:      group.Boundary,
 		})
@@ -450,12 +453,12 @@ func resolveProxyGroup(id string, group ProxyGroup, nodes []SubscriptionNode) ([
 		if len(group.Nodes) > 0 {
 			return nil, fmt.Errorf("proxy group %q must use either match or nodes, not both", id)
 		}
-		return resolveMatch(id, *group.Match, nodes)
+		return resolveMatch(id, *group.Match, nodes, group.Optional)
 	}
 	return resolveExactNodes(id, group.Nodes, nodes)
 }
 
-func resolveMatch(id string, match Match, nodes []SubscriptionNode) ([]string, error) {
+func resolveMatch(id string, match Match, nodes []SubscriptionNode, optional bool) ([]string, error) {
 	if strings.TrimSpace(match.Type) == "" {
 		match.Type = "name_regex"
 	}
@@ -496,7 +499,10 @@ func resolveMatch(id string, match Match, nodes []SubscriptionNode) ([]string, e
 		}
 	}
 	min := match.Min
-	if min <= 0 {
+	if min < 0 {
+		return nil, fmt.Errorf("proxy group %q match.min must be >= 0", id)
+	}
+	if min == 0 && !optional {
 		min = 1
 	}
 	if len(selected) < min {

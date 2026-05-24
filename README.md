@@ -239,8 +239,9 @@ MCP config tools:
   subscriptions, render generated config, start runtime, or apply router
   takeover. Templates are disk YAML files under `policy-templates/`;
   `localclash-default` is the ACL4SSR-like v2fly-dlc/GEOSITE template for
-  open-box use, while `minimal` keeps the compact base policy for advanced
-  manual customization.
+  open-box use. It renders a layered Dashboard structure of business group ->
+  exit group -> subscription nodes, while `minimal` keeps the compact base
+  policy for advanced manual customization.
 - `config_status`: inspect source-of-truth state, generated config presence,
   render readiness, generated summaries, overlay metadata, and pending patches.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable

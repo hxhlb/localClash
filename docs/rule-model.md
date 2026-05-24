@@ -236,7 +236,7 @@ Current code now has:
 - disk-backed `minimal` and `localclash-default` policy templates under
   `policy-templates/`, where
   `localclash-default` is ACL4SSR-like and primarily uses v2fly-dlc GEOSITE
-  packs
+  packs with a business -> exit -> node selector structure
 - renderer support for selected third-party packs
 - renderer support for inline `custom_rules`
 - renderer support for user-supplied external `rule_providers`

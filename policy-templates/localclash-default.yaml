@@ -3,201 +3,203 @@ name: localClash Default
 description: Aethersailor-like default policy using v2fly-dlc GEOSITE packs for common categories.
 default: true
 config:
-  version: 1
+  version: 2
   policy_template: localclash-default
   proxy_groups:
-    CHATGPT:
+    手动选择:
+      mode: manual
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: 面向 ACL4SSR 心智的手动出口选择，包含全部订阅节点。
+      boundary: all_subscription_nodes
+    自动选择:
       mode: auto
       match:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route OpenAI domains through an independent policy group.
-      boundary: template_all_subscription_nodes
+      reason: 面向 ACL4SSR 心智的自动出口选择，包含全部订阅节点。
+      boundary: all_subscription_nodes
+    香港节点:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: (香港|HK|Hong.?Kong)
+      optional: true
+      reason: 香港地区出口组，按节点名称自动筛选。
+      boundary: name_based_region_selector
+    台湾节点:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: (台湾|台灣|TW|Taiwan)
+      optional: true
+      reason: 台湾地区出口组，按节点名称自动筛选。
+      boundary: name_based_region_selector
+    新加坡节点:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: (狮城|獅城|新加坡|SG|Singapore)
+      optional: true
+      reason: 新加坡地区出口组，按节点名称自动筛选。
+      boundary: name_based_region_selector
+    日本节点:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: (日本|JP|Japan)
+      optional: true
+      reason: 日本地区出口组，按节点名称自动筛选。
+      boundary: name_based_region_selector
+    美国节点:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: (美国|美國|US|United.?States|America)
+      optional: true
+      reason: 美国地区出口组，按节点名称自动筛选。
+      boundary: name_based_region_selector
+    韩国节点:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: (韩国|韓國|KR|Korea)
+      optional: true
+      reason: 韩国地区出口组，按节点名称自动筛选。
+      boundary: name_based_region_selector
+    全球直连:
+      mode: direct
+      reason: 面向 Dashboard 的 DIRECT 出口选择。
+      boundary: builtin_direct_exit
+  policy_groups:
+    漏网之鱼:
+      mode: manual
+      exits: [自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 台湾节点, 韩国节点, 全球直连]
+      reason: 非中国兜底流量，保留自动、手动、地区和直连出口。
+      boundary: business_to_exit_layer
+    通信服务:
+      mode: manual
+      exits: [自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 全球直连]
+      reason: 通信服务走业务层选择器。
+      boundary: business_to_exit_layer
+    社交媒体:
+      mode: manual
+      exits: [自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 全球直连]
+      reason: 非中国社交媒体走业务层选择器。
+      boundary: business_to_exit_layer
+    ChatGPT:
+      mode: manual
+      exits: [美国节点, 日本节点, 新加坡节点, 香港节点, 自动选择, 手动选择]
+      reason: OpenAI 流量暴露地区出口选择。
+      boundary: business_to_exit_layer
     AI:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route non-China AI service categories through an independent policy group.
-      boundary: template_all_subscription_nodes
-    GITHUB:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route GitHub domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    SPEEDTEST:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route speed test domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    COMMUNICATION:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route communication services through an independent policy group.
-      boundary: template_all_subscription_nodes
-    SOCIAL:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route non-China social media services through an independent policy group.
-      boundary: template_all_subscription_nodes
-    STEAM:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Steam store and community domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    YOUTUBE:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route YouTube domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    APPLE_TV:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Apple TV+ domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    APPLE:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Apple service domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    MICROSOFT:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Microsoft service domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    GOOGLE_FCM:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Google FCM domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    GOOGLE:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Google service domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    TIKTOK:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route TikTok domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    NETFLIX:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Netflix domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    DISNEY:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Disney+ domains through an independent policy group.
-      boundary: template_all_subscription_nodes
+      mode: manual
+      exits: [自动选择, 美国节点, 日本节点, 新加坡节点, 香港节点, 手动选择]
+      reason: AI 服务分类使用分层出口选择。
+      boundary: business_to_exit_layer
+    GitHub:
+      mode: manual
+      exits: [自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 全球直连]
+      reason: GitHub 可根据本地网络质量选择代理或直连。
+      boundary: business_to_exit_layer
+    测速服务:
+      mode: manual
+      exits: [全球直连, 自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点]
+      reason: 测速服务保留直连基准和代理出口。
+      boundary: business_to_exit_layer
+    Steam:
+      mode: manual
+      exits: [香港节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择, 全球直连]
+      reason: Steam 流量暴露地区出口，而不是直接塞入全部节点。
+      boundary: business_to_exit_layer
+    YouTube:
+      mode: manual
+      exits: [自动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 手动选择]
+      reason: YouTube 暴露常用媒体地区出口。
+      boundary: business_to_exit_layer
+    Apple TV:
+      mode: manual
+      exits: [香港节点, 台湾节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择]
+      reason: Apple TV+ 通常依赖媒体地区选择。
+      boundary: business_to_exit_layer
+    Apple:
+      mode: manual
+      exits: [全球直连, 自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点]
+      reason: Apple 服务保留直连作为明显选项。
+      boundary: business_to_exit_layer
+    Microsoft:
+      mode: manual
+      exits: [全球直连, 自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点]
+      reason: Microsoft 服务保留直连作为明显选项。
+      boundary: business_to_exit_layer
+    Google FCM:
+      mode: manual
+      exits: [全球直连, 自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点]
+      reason: FCM 可在直连可达时优先直连，同时保留代理出口。
+      boundary: business_to_exit_layer
+    Google:
+      mode: manual
+      exits: [自动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 手动选择, 全球直连]
+      reason: Google 服务暴露代理和直连选择。
+      boundary: business_to_exit_layer
+    TikTok:
+      mode: manual
+      exits: [新加坡节点, 日本节点, 美国节点, 香港节点, 自动选择, 手动选择]
+      reason: TikTok 路由经常依赖出口地区。
+      boundary: business_to_exit_layer
+    Netflix:
+      mode: manual
+      exits: [香港节点, 台湾节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择]
+      reason: Netflix 暴露常用流媒体地区出口。
+      boundary: business_to_exit_layer
+    Disney:
+      mode: manual
+      exits: [香港节点, 台湾节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择]
+      reason: Disney+ 暴露常用流媒体地区出口。
+      boundary: business_to_exit_layer
     HBO:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route HBO domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    PRIME_VIDEO:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Prime Video domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    EMBY:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Emby domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    SPOTIFY:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Spotify domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    BAHAMUT:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route Bahamut domains through an independent policy group.
-      boundary: template_all_subscription_nodes
-    GAME:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route game service categories through an independent policy group.
-      boundary: template_all_subscription_nodes
-    MEDIA:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route entertainment and media categories through an independent policy group.
-      boundary: template_all_subscription_nodes
-    ECOMMERCE:
-      mode: auto
-      match:
-        type: name_regex
-        pattern: .*
-        min: 1
-      reason: Route non-China ecommerce services through an independent policy group.
-      boundary: template_all_subscription_nodes
+      mode: manual
+      exits: [香港节点, 台湾节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择]
+      reason: HBO 暴露常用流媒体地区出口。
+      boundary: business_to_exit_layer
+    Prime Video:
+      mode: manual
+      exits: [香港节点, 台湾节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择]
+      reason: Prime Video 暴露常用流媒体地区出口。
+      boundary: business_to_exit_layer
+    Emby:
+      mode: manual
+      exits: [自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 全球直连]
+      reason: Emby 可在本地、直连或代理出口之间选择。
+      boundary: business_to_exit_layer
+    Spotify:
+      mode: manual
+      exits: [自动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 手动选择]
+      reason: Spotify 暴露常用媒体出口。
+      boundary: business_to_exit_layer
+    Bahamut:
+      mode: manual
+      exits: [台湾节点, 香港节点, 日本节点, 自动选择, 手动选择]
+      reason: 巴哈姆特优先台湾和临近媒体出口。
+      boundary: business_to_exit_layer
+    游戏:
+      mode: manual
+      exits: [自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点, 全球直连]
+      reason: 游戏流量暴露低延迟地区出口。
+      boundary: business_to_exit_layer
+    媒体:
+      mode: manual
+      exits: [香港节点, 台湾节点, 日本节点, 美国节点, 新加坡节点, 自动选择, 手动选择]
+      reason: 综合媒体流量暴露常用流媒体地区。
+      boundary: business_to_exit_layer
+    电商:
+      mode: manual
+      exits: [全球直连, 自动选择, 手动选择, 香港节点, 日本节点, 美国节点, 新加坡节点]
+      reason: 电商服务允许直连或指定代理出口。
+      boundary: business_to_exit_layer
   packs:
     - id: v2fly_dlc_category_ads_all
       type: geosite
@@ -205,121 +207,121 @@ config:
       reason: Reject common advertising and tracking domains.
     - id: v2fly_dlc_private
       type: geosite
-      target: direct
+      target: DIRECT
       reason: Keep private domains direct before broader proxy categories.
     - id: v2fly_dlc_category_public_tracker
       type: geosite
-      target: direct
+      target: DIRECT
       reason: Keep public tracker domains direct for router-friendly download behavior.
     - id: v2fly_dlc_category_game_platforms_download
       type: geosite
-      target: direct
+      target: DIRECT
       reason: Keep game platform download traffic direct.
     - id: v2fly_dlc_category_games@cn
       type: geosite
-      target: direct
+      target: DIRECT
       reason: Keep China game service attributes direct.
     - id: v2fly_dlc_category_communication
       type: geosite
-      target: COMMUNICATION
-      reason: Route communication services through the communication policy group.
+      target: 通信服务
+      reason: Route communication services through a business-layer selector.
     - id: v2fly_dlc_category_social_media__cn
       type: geosite
-      target: SOCIAL
-      reason: Route non-China social media services through the social policy group.
+      target: 社交媒体
+      reason: Route non-China social media through a business-layer selector.
     - id: v2fly_dlc_openai
       type: geosite
-      target: CHATGPT
-      reason: Route OpenAI domains through the ChatGPT policy group.
+      target: ChatGPT
+      reason: Route OpenAI domains through ChatGPT selector.
     - id: v2fly_dlc_category_ai__cn
       type: geosite
       target: AI
-      reason: Route non-China AI categories through the AI policy group.
+      reason: Route non-China AI service categories through AI selector.
     - id: v2fly_dlc_github
       type: geosite
-      target: GITHUB
-      reason: Route GitHub domains through the GitHub policy group.
+      target: GitHub
+      reason: Route GitHub domains through GitHub selector.
     - id: v2fly_dlc_category_speedtest
       type: geosite
-      target: SPEEDTEST
-      reason: Route speed test domains through the speed test policy group.
+      target: 测速服务
+      reason: Route speed test domains through speed-test selector.
     - id: v2fly_dlc_steam
       type: geosite
-      target: STEAM
-      reason: Route Steam service domains through the Steam policy group.
+      target: Steam
+      reason: Route Steam store and community domains through Steam selector.
     - id: v2fly_dlc_youtube
       type: geosite
-      target: YOUTUBE
-      reason: Route YouTube domains through the YouTube policy group.
+      target: YouTube
+      reason: Route YouTube domains through YouTube selector.
     - id: v2fly_dlc_apple_tvplus
       type: geosite
-      target: APPLE_TV
-      reason: Route Apple TV+ domains through the Apple TV policy group.
+      target: Apple TV
+      reason: Route Apple TV+ domains through Apple TV selector.
     - id: v2fly_dlc_apple
       type: geosite
-      target: APPLE
-      reason: Route Apple service domains through the Apple policy group.
+      target: Apple
+      reason: Route Apple service domains through Apple selector.
     - id: v2fly_dlc_microsoft
       type: geosite
-      target: MICROSOFT
-      reason: Route Microsoft service domains through the Microsoft policy group.
+      target: Microsoft
+      reason: Route Microsoft service domains through Microsoft selector.
     - id: v2fly_dlc_googlefcm
       type: geosite
-      target: GOOGLE_FCM
-      reason: Route Google FCM domains through the Google FCM policy group.
+      target: Google FCM
+      reason: Route Google FCM domains through Google FCM selector.
     - id: v2fly_dlc_google
       type: geosite
-      target: GOOGLE
-      reason: Route Google service domains through the Google policy group.
+      target: Google
+      reason: Route Google service domains through Google selector.
     - id: v2fly_dlc_tiktok
       type: geosite
-      target: TIKTOK
-      reason: Route TikTok domains through the TikTok policy group.
+      target: TikTok
+      reason: Route TikTok domains through TikTok selector.
     - id: v2fly_dlc_netflix
       type: geosite
-      target: NETFLIX
-      reason: Route Netflix domains through the Netflix policy group.
+      target: Netflix
+      reason: Route Netflix domains through Netflix selector.
     - id: v2fly_dlc_disney
       type: geosite
-      target: DISNEY
-      reason: Route Disney+ domains through the Disney policy group.
+      target: Disney
+      reason: Route Disney+ domains through Disney selector.
     - id: v2fly_dlc_hbo
       type: geosite
       target: HBO
-      reason: Route HBO domains through the HBO policy group.
+      reason: Route HBO domains through HBO selector.
     - id: v2fly_dlc_primevideo
       type: geosite
-      target: PRIME_VIDEO
-      reason: Route Prime Video domains through the Prime Video policy group.
+      target: Prime Video
+      reason: Route Prime Video domains through Prime Video selector.
     - id: v2fly_dlc_category_emby
       type: geosite
-      target: EMBY
-      reason: Route Emby domains through the Emby policy group.
+      target: Emby
+      reason: Route Emby domains through Emby selector.
     - id: v2fly_dlc_spotify
       type: geosite
-      target: SPOTIFY
-      reason: Route Spotify domains through the Spotify policy group.
+      target: Spotify
+      reason: Route Spotify domains through Spotify selector.
     - id: v2fly_dlc_bahamut
       type: geosite
-      target: BAHAMUT
-      reason: Route Bahamut domains through the Bahamut policy group.
+      target: Bahamut
+      reason: Route Bahamut domains through Bahamut selector.
     - id: v2fly_dlc_category_games
       type: geosite
-      target: GAME
-      reason: Route game service categories through the game policy group.
+      target: 游戏
+      reason: Route game service categories through game selector.
     - id: v2fly_dlc_category_entertainment
       type: geosite
-      target: MEDIA
-      reason: Route entertainment categories through the media policy group.
+      target: 媒体
+      reason: Route entertainment and media categories through media selector.
     - id: v2fly_dlc_category_ecommerce
       type: geosite
-      target: ECOMMERCE
-      reason: Route ecommerce categories through the ecommerce policy group.
+      target: 电商
+      reason: Route non-China ecommerce services through ecommerce selector.
     - id: v2fly_dlc_geolocation__cn
       type: geosite
-      target: proxy
-      reason: Route non-China geolocation domains through the default proxy group instead of the non-v2fly gfw tag.
+      target: 漏网之鱼
+      reason: Route non-China fallback through default business selector.
     - id: v2fly_dlc_cn
       type: geosite
-      target: direct
+      target: DIRECT
       reason: Keep China domains direct.

@@ -41,6 +41,32 @@ func TestBuildLocalClashDefaultTemplate(t *testing.T) {
 	}
 }
 
+func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
+	config, summary, err := Build(filepath.Join("..", "..", DefaultDir), TemplateLocalClashDefault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.ID != TemplateLocalClashDefault || config.Version != 2 {
+		t.Fatalf("template = %+v config version = %d, want v2 localclash default", summary, config.Version)
+	}
+	if _, exists := config.ProxyGroups["STEAM"]; exists {
+		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
+	}
+	if !config.ProxyGroups["香港节点"].Optional {
+		t.Fatalf("香港节点 group = %+v, want optional region selector", config.ProxyGroups["香港节点"])
+	}
+	steam := config.PolicyGroups["Steam"]
+	if steam.Mode != "manual" || len(steam.Exits) == 0 {
+		t.Fatalf("Steam policy group = %+v, want business-to-exit selector", steam)
+	}
+	if config.Packs[0].ID != "v2fly_dlc_category_ads_all" || config.Packs[0].Target != "REJECT" {
+		t.Fatalf("first pack = %+v, want ads reject first", config.Packs[0])
+	}
+	if got := config.Packs[len(config.Packs)-2].Target; got != "漏网之鱼" {
+		t.Fatalf("geolocation fallback target = %q, want 漏网之鱼", got)
+	}
+}
+
 func TestListTemplatesReadsDiskFiles(t *testing.T) {
 	dir := writeTemplateFixture(t)
 	templates, err := List(dir)

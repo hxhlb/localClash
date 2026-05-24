@@ -206,7 +206,8 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			if _, ok := selection.PolicyGroups[target]; ok {
 				usedPolicyGroups[target] = true
 				for _, exit := range selection.PolicyGroups[target].Exits {
-					if _, ok := selection.ProxyGroups[exit]; ok {
+					group, ok := selection.ProxyGroups[exit]
+					if ok && !(group.Optional && len(group.Nodes) == 0 && !group.Direct) {
 						usedProxyGroups[exit] = true
 					}
 				}

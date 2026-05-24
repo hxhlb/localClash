@@ -211,6 +211,55 @@ packs:
 	}
 }
 
+func TestResolveOptionalProxyGroupCanBeEmpty(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: HK 01
+    type: ss
+`)
+	rulesCache := filepath.Join(dir, "rules")
+	writeTestFile(t, filepath.Join(rulesCache, "v2fly-dlc.yaml"), `version: 1
+source: v2fly-dlc
+adapter: v2fly-dlc
+renderable: true
+packs:
+  - id: steam
+    renderable: true
+    components:
+      - id: domain
+        behavior: v2fly-dlc
+        format: text
+        order_class: domain
+        url: https://example.com/steam
+        path: ./rule-packs/v2fly-dlc/steam.txt
+`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"香港节点": {Mode: "auto", Match: &Match{Type: "name_regex", Pattern: "HK"}},
+				"韩国节点": {Mode: "auto", Match: &Match{Type: "name_regex", Pattern: "KR"}, Optional: true},
+			},
+			PolicyGroups: map[string]PolicyGroup{
+				"Steam": {Mode: "manual", Exits: []string{"香港节点", "韩国节点", "direct"}},
+			},
+			Packs: []Pack{{ID: "v2fly_dlc_steam", Target: "Steam"}},
+		},
+		SubscriptionPath: subscriptionPath,
+		RulesCache:       rulesCache,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if got := resolved.Selection.ProxyGroups["韩国节点"].Nodes; len(got) != 0 {
+		t.Fatalf("optional group nodes = %#v, want empty", got)
+	}
+	if !resolved.Selection.ProxyGroups["韩国节点"].Optional {
+		t.Fatalf("optional flag was not preserved: %+v", resolved.Selection.ProxyGroups["韩国节点"])
+	}
+}
+
 func TestResolveExactNodesReportsMissingNodes(t *testing.T) {
 	dir := t.TempDir()
 	subscriptionPath := filepath.Join(dir, "subscription.yaml")

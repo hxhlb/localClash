@@ -77,11 +77,12 @@ type Selection struct {
 }
 
 type ProxyGroup struct {
-	Nodes  []string `yaml:"nodes"`
-	Auto   bool     `yaml:"auto"`
-	Manual bool     `yaml:"manual"`
-	Smart  bool     `yaml:"smart"`
-	Direct bool     `yaml:"direct"`
+	Nodes    []string `yaml:"nodes"`
+	Auto     bool     `yaml:"auto"`
+	Manual   bool     `yaml:"manual"`
+	Smart    bool     `yaml:"smart"`
+	Direct   bool     `yaml:"direct"`
+	Optional bool     `yaml:"optional,omitempty"`
 }
 
 type PolicyGroup struct {
@@ -527,7 +528,7 @@ func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, 
 		available[name] = true
 	}
 	for groupName, group := range selection.ProxyGroups {
-		if len(group.Nodes) == 0 && !group.Direct {
+		if len(group.Nodes) == 0 && !group.Direct && !group.Optional {
 			return preparedTargets{}, fmt.Errorf("proxy group %q has no nodes", groupName)
 		}
 		enabledModes := 0
@@ -641,6 +642,9 @@ func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]ma
 	for _, name := range names {
 		group := targets.proxyGroups[name]
 		candidates := candidateProxies(group)
+		if len(candidates) == 0 && group.Optional && !group.Direct {
+			continue
+		}
 		if len(candidates) == 0 && !group.Direct {
 			return nil, fmt.Errorf("proxy group %q has no candidate proxies", name)
 		}
@@ -751,6 +755,12 @@ func candidatePolicyExits(group PolicyGroup, targets preparedTargets) ([]string,
 		}
 		if exit == "" || seen[exit] {
 			continue
+		}
+		if kind == targetKindProxyGroup {
+			proxyGroup := targets.proxyGroups[exit]
+			if proxyGroup.Optional && !proxyGroup.Direct && len(candidateProxies(proxyGroup)) == 0 {
+				continue
+			}
 		}
 		seen[exit] = true
 		candidates = append(candidates, exit)

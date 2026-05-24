@@ -297,6 +297,54 @@ func TestRenderFragmentMaterializesPolicyGroupOverProxyGroupExits(t *testing.T) 
 	}
 }
 
+func TestRenderFragmentSkipsEmptyOptionalPolicyExit(t *testing.T) {
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"HK": {
+				Nodes: []string{"HK 01"},
+				Auto:  true,
+			},
+			"KR": {
+				Auto:     true,
+				Optional: true,
+			},
+		},
+		PolicyGroups: map[string]PolicyGroup{
+			"Steam": {
+				Exits:  []string{"HK", "KR", "DIRECT"},
+				Manual: true,
+			},
+		},
+		EnabledPack: []SelectedPack{{Source: "blackmatrix7", Pack: "OpenAI", Target: "Steam"}},
+	}
+
+	fragment, err := RenderFragment(selection, testPackCaches(), []string{"HK 01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := map[string]map[string]any{}
+	for _, group := range fragment.ProxyGroups {
+		groups[group["name"].(string)] = group
+	}
+	if groups["KR"] != nil {
+		t.Fatalf("empty optional KR group should not be materialized: %+v", fragment.ProxyGroups)
+	}
+	steam := groups["Steam"]
+	if steam == nil {
+		t.Fatalf("missing Steam policy group in %+v", fragment.ProxyGroups)
+	}
+	exits := steam["proxies"].([]string)
+	want := []string{"HK", "DIRECT"}
+	if len(exits) != len(want) {
+		t.Fatalf("Steam exits = %+v, want %+v", exits, want)
+	}
+	for i := range want {
+		if exits[i] != want[i] {
+			t.Fatalf("Steam exits = %+v, want %+v", exits, want)
+		}
+	}
+}
+
 func TestRenderFragmentMaterializesSmartProxyGroup(t *testing.T) {
 	selection := Selection{
 		ProxyGroups: map[string]ProxyGroup{
