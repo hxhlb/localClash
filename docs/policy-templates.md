@@ -51,10 +51,11 @@ not render or start runtime.
   GEOSITE packs for common categories such as AI, media, communication, Google,
   Apple, Microsoft, developer services, games, ads, and China direct domains.
   Its Dashboard-facing structure is layered as business group -> exit group ->
-  subscription nodes. For example, `Steam` selects exits like `香港节点`,
-  `日本节点`, `自动选择`, and `全球直连`; region exits then select matching
-  subscription nodes. Region exits are optional so a subscription without, for
-  example, Korean nodes does not make first-time initialization fail.
+  subscription nodes. For example, `🎮 Steam` selects exits in a consistent
+  order like `🎯 手动选择`, `⚡ 自动选择`, `🇭🇰 香港节点`, and `🌐 全球直连`;
+  region exits then select matching subscription nodes. Region exits are
+  optional so a subscription without, for example, Korean nodes does not make
+  first-time initialization fail.
 
 ## Starter Base Policy
 
