@@ -318,14 +318,13 @@ rule-provider URL, call `rule_provider_build`, then create a patch with desired
 `rule_providers`; do not edit `generated/mihomo.yaml` directly.
 
 Patch creation does not overwrite active generated files, start or restart
-Mihomo, or apply router system changes. After user review,
-`config_patch_apply` resolves selectors against the current subscription, backs
-up replaced local artifacts, writes `localclash.yaml`, derives
-`localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`. It still does
-not start or restart Mihomo; use `run_runtime` for that confirmed step. If an
-agent wants to preserve existing local state, it must first call `config_status`
-and submit the full desired config, including retained packs, custom rules,
-external rule-providers, proxy groups, and policy groups.
+Mihomo, or apply router system changes. It loads the current durable
+`localclash.yaml`, layers the requested overlay on top, and writes the merged
+candidate into the patch directory. After user review, `config_patch_apply`
+resolves selectors against the current subscription, backs up replaced local
+artifacts, writes `localclash.yaml`, derives `localclash-packs.yaml`, and
+regenerates `generated/mihomo.yaml`. It still does not start or restart Mihomo;
+use `run_runtime` for that confirmed step.
 The normal reviewed-change loop is:
 `config_status` → `config_patch_create` → `config_patch_apply` →
 `config_status`.

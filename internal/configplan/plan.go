@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"localclash/internal/configinspect"
 	"localclash/internal/configrender"
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
@@ -214,7 +213,10 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, fmt.Errorf("overlay.packs, overlay.custom_rules, or overlay.rule_providers is required")
 	}
 
-	config := configFromOverlay(opts.Overlay)
+	config, err := configWithOverlay(opts.ConfigPath, opts.Overlay)
+	if err != nil {
+		return Result{}, err
+	}
 	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
 		Config:              config,
 		SubscriptionPath:    opts.Subscription,
@@ -225,7 +227,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	overlaySummary := overlaySummaryFromResolved(resolved)
+	overlaySummary := requestedOverlaySummary(resolved, opts.Overlay, opts.RulesCache)
 	warnings := resolved.Warnings
 
 	planID, err := allocatePlanID(opts.OutputDir, opts.PlanName, opts.Now)
@@ -262,10 +264,6 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	overlayInspection, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: outputPath})
-	if err != nil {
-		return Result{}, err
-	}
 	result := Result{
 		PlanID:      planID,
 		Output:      outputPath,
@@ -283,13 +281,8 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		Valid:      true,
 		MihomoTest: MihomoTestResult{Enabled: opts.Test},
 		Overlay:    overlaySummary,
-		Changes: ChangesSummary{
-			RuleProvidersAdded: len(overlayInspection.RuleProviders),
-			ProxyGroupsAdded:   len(overlayInspection.ProxyGroups),
-			PolicyGroupsAdded:  len(overlayInspection.PolicyGroups),
-			RulesAdded:         len(overlayInspection.Rules),
-		},
-		Warnings: warnings,
+		Changes:    changesSummaryFromOverlay(opts.Overlay, overlaySummary),
+		Warnings:   warnings,
 		NextActions: []string{
 			"Review this patch output and summary before applying.",
 			"Apply only the exact patch_id returned here; do not invent or reuse a patch_id.",
@@ -581,6 +574,102 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	return config
 }
 
+func configWithOverlay(path string, overlay OverlayIntent) (localconfig.Config, error) {
+	base, err := localconfig.Load(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return localconfig.Config{}, err
+		}
+		base = localconfig.Config{
+			Version:     1,
+			ProxyGroups: map[string]localconfig.ProxyGroup{},
+		}
+	}
+	return mergeOverlayConfig(base, configFromOverlay(overlay)), nil
+}
+
+func mergeOverlayConfig(base localconfig.Config, overlay localconfig.Config) localconfig.Config {
+	if base.Version == 0 {
+		base.Version = 1
+	}
+	if base.ProxyGroups == nil {
+		base.ProxyGroups = map[string]localconfig.ProxyGroup{}
+	}
+	if base.PolicyGroups == nil {
+		base.PolicyGroups = map[string]localconfig.PolicyGroup{}
+	}
+	for id, group := range overlay.ProxyGroups {
+		base.ProxyGroups[id] = group
+	}
+	for id, group := range overlay.PolicyGroups {
+		base.PolicyGroups[id] = group
+	}
+	base.Packs = mergePacks(base.Packs, overlay.Packs)
+	base.CustomRules = mergeCustomRules(base.CustomRules, overlay.CustomRules)
+	base.RuleProviders = mergeRuleProviders(base.RuleProviders, overlay.RuleProviders)
+	if overlay.Version > base.Version {
+		base.Version = overlay.Version
+	}
+	if len(base.PolicyGroups) > 0 && base.Version < 2 {
+		base.Version = 2
+	}
+	return base
+}
+
+func mergePacks(base []localconfig.Pack, overlay []localconfig.Pack) []localconfig.Pack {
+	merged := append([]localconfig.Pack{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range overlay {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func mergeCustomRules(base []localconfig.CustomRule, overlay []localconfig.CustomRule) []localconfig.CustomRule {
+	merged := append([]localconfig.CustomRule{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range overlay {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func mergeRuleProviders(base []localconfig.ExternalRuleProvider, overlay []localconfig.ExternalRuleProvider) []localconfig.ExternalRuleProvider {
+	merged := append([]localconfig.ExternalRuleProvider{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range overlay {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
 func preserveExistingPolicyTemplate(path string, config localconfig.Config) localconfig.Config {
 	if strings.TrimSpace(config.PolicyTemplate) != "" {
 		return config
@@ -650,6 +739,96 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 		})
 	}
 	return summary
+}
+
+func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayIntent, rulesCache string) OverlaySummary {
+	full := overlaySummaryFromResolved(resolved)
+	summary := OverlaySummary{
+		Packs:         make([]OverlayPackSummary, 0, len(overlay.Packs)),
+		CustomRules:   make([]OverlayCustomRuleSummary, 0, len(overlay.CustomRules)),
+		RuleProviders: make([]OverlayRuleProviderSummary, 0, len(overlay.RuleProviders)),
+		ProxyGroups:   make([]OverlayProxyGroupSummary, 0, len(overlay.ProxyGroups)),
+		PolicyGroups:  make([]OverlayPolicyGroupSummary, 0, len(overlay.PolicyGroups)),
+	}
+	packsByID := map[string]OverlayPackSummary{}
+	for _, item := range full.Packs {
+		packsByID[item.ID] = item
+	}
+	for _, item := range overlay.Packs {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := packsByID[id]; ok {
+			summary.Packs = append(summary.Packs, found)
+			continue
+		}
+		if ref, err := rules.ResolvePackRef(rulesCache, id); err == nil {
+			summary.Packs = append(summary.Packs, OverlayPackSummary{ID: ref.ID, Type: ref.Type, Target: item.Target, Reason: item.Reason})
+			continue
+		}
+		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: item.ID, Type: item.Type, Target: item.Target, Reason: item.Reason})
+	}
+
+	customRulesByID := map[string]OverlayCustomRuleSummary{}
+	for _, item := range full.CustomRules {
+		customRulesByID[item.ID] = item
+	}
+	for _, item := range overlay.CustomRules {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := customRulesByID[id]; ok {
+			summary.CustomRules = append(summary.CustomRules, found)
+		}
+	}
+
+	ruleProvidersByID := map[string]OverlayRuleProviderSummary{}
+	for _, item := range full.RuleProviders {
+		ruleProvidersByID[item.ID] = item
+	}
+	for _, item := range overlay.RuleProviders {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := ruleProvidersByID[id]; ok {
+			summary.RuleProviders = append(summary.RuleProviders, found)
+		}
+	}
+
+	proxyGroupsByID := map[string]OverlayProxyGroupSummary{}
+	for _, item := range full.ProxyGroups {
+		proxyGroupsByID[item.ID] = item
+	}
+	for _, item := range overlay.ProxyGroups {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := proxyGroupsByID[id]; ok {
+			summary.ProxyGroups = append(summary.ProxyGroups, found)
+		}
+	}
+
+	policyGroupsByID := map[string]OverlayPolicyGroupSummary{}
+	for _, item := range full.PolicyGroups {
+		policyGroupsByID[item.ID] = item
+	}
+	for _, item := range overlay.PolicyGroups {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := policyGroupsByID[id]; ok {
+			summary.PolicyGroups = append(summary.PolicyGroups, found)
+		}
+	}
+	return summary
+}
+
+func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) ChangesSummary {
+	changes := ChangesSummary{
+		ProxyGroupsAdded:   len(overlay.ProxyGroups),
+		PolicyGroupsAdded:  len(overlay.PolicyGroups),
+		RuleProvidersAdded: len(overlay.RuleProviders),
+		RulesAdded:         len(summary.Packs) + len(summary.RuleProviders),
+	}
+	for _, pack := range summary.Packs {
+		if pack.Type == rules.PackTypeRuleProvider {
+			changes.RuleProvidersAdded++
+		}
+	}
+	for _, custom := range summary.CustomRules {
+		changes.RulesAdded += custom.RuleCount
+	}
+	return changes
 }
 
 func loadApplyConfig(opts ApplyOptions, plan Result) (localconfig.Config, error) {

@@ -202,6 +202,91 @@ func TestRenderPolicyGroupPlan(t *testing.T) {
 	}
 }
 
+func TestRenderPatchCanReuseExistingProxyGroups(t *testing.T) {
+	paths := writePlanFixture(t)
+	existingConfig := filepath.Join(paths.dir, "localclash.yaml")
+	writeFile(t, existingConfig, `version: 2
+policy_template: localclash-default
+proxy_groups:
+  HK:
+    mode: auto
+    nodes:
+      - SG 01
+  JP:
+    mode: auto
+    nodes:
+      - JP Tokyo 01
+  US:
+    mode: auto
+    nodes:
+      - US 01
+packs:
+  - id: blackmatrix7_Epic
+    target: DIRECT
+`)
+
+	result, err := Render(context.Background(), Options{
+		PlanName:     "steam-existing-exits",
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		ConfigPath:   existingConfig,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			PolicyGroups: []OverlayPolicyGroupIntent{
+				{ID: "Steam", Mode: "manual", Exits: []string{"HK", "JP", "US"}, Reason: "Steam can choose existing regional exits."},
+			},
+			CustomRules: []OverlayCustomRuleIntent{
+				{
+					ID:     "steam_domains",
+					Target: "Steam",
+					Rules: []localconfig.CustomRuleLine{
+						{Type: "domain_suffix", Value: "steampowered.com"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Overlay.ProxyGroups) != 0 {
+		t.Fatalf("requested overlay proxy groups = %+v, want none", result.Overlay.ProxyGroups)
+	}
+	if len(result.Overlay.PolicyGroups) != 1 || result.Overlay.PolicyGroups[0].ID != "Steam" {
+		t.Fatalf("requested overlay policy groups = %+v, want Steam only", result.Overlay.PolicyGroups)
+	}
+	if result.Changes.ProxyGroupsAdded != 0 || result.Changes.PolicyGroupsAdded != 1 || result.Changes.RulesAdded != 1 {
+		t.Fatalf("changes = %+v, want one policy group and one custom rule line", result.Changes)
+	}
+	candidate, err := localconfig.Load(result.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.PolicyTemplate != "localclash-default" {
+		t.Fatalf("policy template = %q, want localclash-default", candidate.PolicyTemplate)
+	}
+	for _, want := range []string{"HK", "JP", "US"} {
+		if _, exists := candidate.ProxyGroups[want]; !exists {
+			t.Fatalf("candidate missing preserved proxy group %q", want)
+		}
+	}
+	if _, exists := candidate.PolicyGroups["Steam"]; !exists {
+		t.Fatalf("candidate policy groups = %+v, want Steam", candidate.PolicyGroups)
+	}
+	if len(candidate.Packs) != 1 || candidate.Packs[0].ID != "blackmatrix7_Epic" {
+		t.Fatalf("candidate packs = %+v, want preserved Epic pack", candidate.Packs)
+	}
+	config := readFile(t, result.Output)
+	for _, want := range []string{"DOMAIN-SUFFIX,steampowered.com,Steam", "name: Steam", "- HK", "- JP", "- US"} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("candidate config missing %q:\n%s", want, config)
+		}
+	}
+}
+
 func TestRenderExternalRuleProviderPlan(t *testing.T) {
 	paths := writePlanFixture(t)
 
