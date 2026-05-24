@@ -16,6 +16,15 @@ type githubEntry struct {
 	DownloadURL string `json:"download_url"`
 }
 
+type githubTreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+}
+
+type githubTreeResponse struct {
+	Tree []githubTreeEntry `json:"tree"`
+}
+
 func adaptSource(ctx context.Context, source Source) (PackCache, error) {
 	switch source.Adapter {
 	case "sukkaw":
@@ -115,17 +124,17 @@ func adaptBlackmatrix7(ctx context.Context, source Source) (PackCache, error) {
 }
 
 func adaptV2FlyDLC(ctx context.Context, source Source) (PackCache, error) {
-	apiURL, err := githubAPIContentsURL(source.URL)
+	apiURL, repoPath, err := githubTreeAPIURL(source.URL)
 	if err != nil {
 		return PackCache{}, err
 	}
-	entries, err := fetchGitHubEntries(ctx, apiURL)
+	entries, err := fetchGitHubTreeEntries(ctx, apiURL, repoPath)
 	if err != nil {
 		return PackCache{}, err
 	}
 	var packs []Pack
 	for _, entry := range entries {
-		if entry.Type != "file" {
+		if entry.Type != "blob" {
 			continue
 		}
 		packs = append(packs, Pack{
@@ -197,6 +206,53 @@ func fetchGitHubEntries(ctx context.Context, apiURL string) ([]githubEntry, erro
 		return nil, err
 	}
 	return entries, nil
+}
+
+func fetchGitHubTreeEntries(ctx context.Context, apiURL, repoPath string) ([]githubEntry, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "localclash-rules-adapter")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("github tree request failed: %s", resp.Status)
+	}
+	var tree githubTreeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		return nil, err
+	}
+	return directTreeChildren(tree.Tree, repoPath), nil
+}
+
+func directTreeChildren(tree []githubTreeEntry, repoPath string) []githubEntry {
+	repoPath = strings.Trim(strings.TrimSpace(repoPath), "/")
+	prefix := repoPath
+	if prefix != "" {
+		prefix += "/"
+	}
+	var entries []githubEntry
+	for _, item := range tree {
+		if item.Type != "blob" && item.Type != "tree" {
+			continue
+		}
+		itemPath := strings.Trim(item.Path, "/")
+		if !strings.HasPrefix(itemPath, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(itemPath, prefix)
+		if name == "" || strings.Contains(name, "/") {
+			continue
+		}
+		entries = append(entries, githubEntry{Name: name, Type: item.Type})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return entries
 }
 
 func sortComponents(components []Component) {

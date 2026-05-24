@@ -158,6 +158,41 @@ func TestGetPackReturnsGeoSiteBackend(t *testing.T) {
 	}
 }
 
+func TestResolvePackRefAcceptsGeoSiteAttribute(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "packs")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCatalogTestCache(t, cacheDir, PackCache{
+		Version:    1,
+		Source:     "v2fly-dlc",
+		Adapter:    "v2fly-dlc",
+		Renderable: false,
+		Packs: []Pack{
+			{
+				ID:         "category-games",
+				Name:       "category-games",
+				Renderable: true,
+				Components: []Component{{
+					ID:       "domain",
+					Behavior: "v2fly-dlc",
+					Format:   "text",
+					URL:      "https://example.com/category-games",
+					Path:     "./rule-packs/v2fly-dlc/category-games.txt",
+				}},
+			},
+		},
+	})
+
+	ref, err := ResolvePackRef(cacheDir, "v2fly_dlc_category_games@cn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Pack != "category-games@cn" || ref.RenderRuleTemplate != "GEOSITE,category-games@cn,<target>" {
+		t.Fatalf("ref = %+v, want geosite attribute ref", ref)
+	}
+}
+
 func TestGetPackUnknownIDReturnsError(t *testing.T) {
 	cacheDir := writeCatalogTestCaches(t)
 

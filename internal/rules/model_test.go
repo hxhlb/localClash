@@ -82,6 +82,38 @@ func TestRenderFragmentRendersV2FlyDLCAsGeoSite(t *testing.T) {
 	}
 }
 
+func TestRenderFragmentRendersV2FlyDLCGeoSiteAttribute(t *testing.T) {
+	selection := Selection{EnabledPack: []SelectedPack{
+		{Source: "v2fly-dlc", Pack: "category-games@cn", Target: "direct"},
+	}}
+	caches := map[string]PackCache{
+		"v2fly-dlc": {
+			Source: "v2fly-dlc",
+			Packs: []Pack{
+				{
+					ID:         "category-games",
+					Renderable: true,
+					Components: []Component{{
+						ID:       "domain",
+						Behavior: "v2fly-dlc",
+						Format:   "text",
+						URL:      "https://example.com/category-games",
+						Path:     "./rule-packs/v2fly-dlc/category-games.txt",
+					}},
+				},
+			},
+		},
+	}
+
+	fragment, err := RenderFragment(selection, caches)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fragment.Rules[0]; got != "GEOSITE,category-games@cn,DIRECT" {
+		t.Fatalf("rule = %q, want GEOSITE attribute rule", got)
+	}
+}
+
 func TestSelectionWithProxyGroupParses(t *testing.T) {
 	raw := []byte(`
 version: 1
@@ -148,6 +180,31 @@ func TestLoadPackCachesIgnoresMacOSMetadataFiles(t *testing.T) {
 	}
 	if _, ok := caches["blackmatrix7"]; !ok {
 		t.Fatalf("caches = %+v, want blackmatrix7", caches)
+	}
+}
+
+func TestDirectTreeChildrenReturnsOnlyRequestedDirectoryFiles(t *testing.T) {
+	entries := directTreeChildren([]githubTreeEntry{
+		{Path: "data/youtube", Type: "blob"},
+		{Path: "data/steam", Type: "blob"},
+		{Path: "data/nested/child", Type: "blob"},
+		{Path: "data/category", Type: "tree"},
+		{Path: "README.md", Type: "blob"},
+	}, "data")
+
+	if len(entries) != 3 {
+		t.Fatalf("entries = %+v, want three direct data children", entries)
+	}
+	for _, want := range []string{"category", "steam", "youtube"} {
+		found := false
+		for _, entry := range entries {
+			if entry.Name == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("entries = %+v, missing %q", entries, want)
+		}
 	}
 }
 

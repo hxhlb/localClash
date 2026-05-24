@@ -196,13 +196,34 @@ func ResolvePackRef(cacheDir, id string) (PackRef, error) {
 	if trimmed == "" {
 		return PackRef{}, fmt.Errorf("pack id is required")
 	}
+	lookupID := trimmed
+	attr := ""
+	if base, suffix, ok := strings.Cut(trimmed, "@"); ok {
+		lookupID = base
+		attr = suffix
+		if err := validateGeoSiteAttr(attr); err != nil {
+			return PackRef{}, err
+		}
+	}
 	entries, err := loadCatalogEntries(cacheDir)
 	if err != nil {
 		return PackRef{}, err
 	}
 	for _, entry := range entries {
-		if catalogPackID(entry.Cache.Source, entry.Pack.ID) == trimmed {
-			return packRef(entry), nil
+		id := catalogPackID(entry.Cache.Source, entry.Pack.ID)
+		if packIDLookupEqual(id, lookupID) {
+			if attr == "" {
+				return packRef(entry), nil
+			}
+			if !packIsGeoSite(entry.Pack) {
+				return PackRef{}, fmt.Errorf("pack %q does not support geosite attribute %q", lookupID, attr)
+			}
+			ref := packRef(entry)
+			ref.ID = trimmed
+			ref.Pack = entry.Pack.ID + "@" + attr
+			ref.Name = ref.Pack
+			ref.RenderRuleTemplate = fmt.Sprintf("GEOSITE,%s,<target>", ref.Pack)
+			return ref, nil
 		}
 		for _, component := range entry.Pack.Components {
 			if providerName(entry.Cache.Source, entry.Pack.ID, component.ID) == trimmed {
@@ -380,6 +401,28 @@ func resolveProviderRuntimePath(runtimeDir, providerPath string) string {
 
 func catalogPackID(source, packID string) string {
 	return providerName(source, packID, "")
+}
+
+func validateGeoSiteAttr(attr string) error {
+	if strings.TrimSpace(attr) == "" || strings.ContainsAny(attr, ", \t\r\n") {
+		return fmt.Errorf("invalid geosite attribute %q", attr)
+	}
+	return nil
+}
+
+func packIDLookupEqual(left, right string) bool {
+	if left == right {
+		return true
+	}
+	return normalizePackLookupID(left) == normalizePackLookupID(right)
+}
+
+func normalizePackLookupID(id string) string {
+	normalized := unsafeProviderChars.ReplaceAllString(strings.ReplaceAll(id, "-", "_"), "_")
+	for strings.Contains(normalized, "__") {
+		normalized = strings.ReplaceAll(normalized, "__", "_")
+	}
+	return strings.Trim(normalized, "_")
 }
 
 func PackCatalogID(source, packID string) string {

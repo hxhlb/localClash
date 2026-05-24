@@ -1,26 +1,42 @@
 id: localclash-default
 name: localClash Default
-description: ACL4SSR-like default policy using v2fly-dlc GEOSITE packs for common categories.
+description: Aethersailor-like default policy using v2fly-dlc GEOSITE packs for common categories.
 default: true
 config:
   version: 1
   policy_template: localclash-default
   proxy_groups:
+    CHATGPT:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route OpenAI domains through an independent policy group.
+      boundary: template_all_subscription_nodes
     AI:
       mode: auto
       match:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route AI service categories through an independent policy group.
+      reason: Route non-China AI service categories through an independent policy group.
       boundary: template_all_subscription_nodes
-    STREAMING:
+    GITHUB:
       mode: auto
       match:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route common streaming media categories through an independent policy group.
+      reason: Route GitHub domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    SPEEDTEST:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route speed test domains through an independent policy group.
       boundary: template_all_subscription_nodes
     COMMUNICATION:
       mode: auto
@@ -28,15 +44,39 @@ config:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route communication and social categories through an independent policy group.
+      reason: Route communication services through an independent policy group.
       boundary: template_all_subscription_nodes
-    GOOGLE:
+    SOCIAL:
       mode: auto
       match:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route Google services through an independent policy group.
+      reason: Route non-China social media services through an independent policy group.
+      boundary: template_all_subscription_nodes
+    STEAM:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Steam store and community domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    YOUTUBE:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route YouTube domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    APPLE_TV:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Apple TV+ domains through an independent policy group.
       boundary: template_all_subscription_nodes
     APPLE:
       mode: auto
@@ -44,7 +84,7 @@ config:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route Apple services through an independent policy group.
+      reason: Route Apple service domains through an independent policy group.
       boundary: template_all_subscription_nodes
     MICROSOFT:
       mode: auto
@@ -52,15 +92,87 @@ config:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route Microsoft services through an independent policy group.
+      reason: Route Microsoft service domains through an independent policy group.
       boundary: template_all_subscription_nodes
-    DEV:
+    GOOGLE_FCM:
       mode: auto
       match:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route developer services through an independent policy group.
+      reason: Route Google FCM domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    GOOGLE:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Google service domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    TIKTOK:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route TikTok domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    NETFLIX:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Netflix domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    DISNEY:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Disney+ domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    HBO:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route HBO domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    PRIME_VIDEO:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Prime Video domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    EMBY:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Emby domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    SPOTIFY:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Spotify domains through an independent policy group.
+      boundary: template_all_subscription_nodes
+    BAHAMUT:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route Bahamut domains through an independent policy group.
       boundary: template_all_subscription_nodes
     GAME:
       mode: auto
@@ -68,50 +180,146 @@ config:
         type: name_regex
         pattern: .*
         min: 1
-      reason: Route game services through an independent policy group.
+      reason: Route game service categories through an independent policy group.
+      boundary: template_all_subscription_nodes
+    MEDIA:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route entertainment and media categories through an independent policy group.
+      boundary: template_all_subscription_nodes
+    ECOMMERCE:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: Route non-China ecommerce services through an independent policy group.
       boundary: template_all_subscription_nodes
   packs:
     - id: v2fly_dlc_category_ads_all
       type: geosite
       target: REJECT
       reason: Reject common advertising and tracking domains.
-    - id: v2fly_dlc_cn
+    - id: v2fly_dlc_private
       type: geosite
-      target: DIRECT
-      reason: Keep China domains direct before broader proxy categories.
-    - id: v2fly_dlc_openai
+      target: direct
+      reason: Keep private domains direct before broader proxy categories.
+    - id: v2fly_dlc_category_public_tracker
       type: geosite
-      target: AI
-      reason: Route OpenAI domains through the AI policy group.
-    - id: v2fly_dlc_anthropic
+      target: direct
+      reason: Keep public tracker domains direct for router-friendly download behavior.
+    - id: v2fly_dlc_category_game_platforms_download
       type: geosite
-      target: AI
-      reason: Route Anthropic domains through the AI policy group.
-    - id: v2fly_dlc_category_media
+      target: direct
+      reason: Keep game platform download traffic direct.
+    - id: v2fly_dlc_category_games@cn
       type: geosite
-      target: STREAMING
-      reason: Route common media services through the streaming policy group.
+      target: direct
+      reason: Keep China game service attributes direct.
     - id: v2fly_dlc_category_communication
       type: geosite
       target: COMMUNICATION
       reason: Route communication services through the communication policy group.
-    - id: v2fly_dlc_google
+    - id: v2fly_dlc_category_social_media__cn
       type: geosite
-      target: GOOGLE
-      reason: Route Google services through the Google policy group.
+      target: SOCIAL
+      reason: Route non-China social media services through the social policy group.
+    - id: v2fly_dlc_openai
+      type: geosite
+      target: CHATGPT
+      reason: Route OpenAI domains through the ChatGPT policy group.
+    - id: v2fly_dlc_category_ai__cn
+      type: geosite
+      target: AI
+      reason: Route non-China AI categories through the AI policy group.
+    - id: v2fly_dlc_github
+      type: geosite
+      target: GITHUB
+      reason: Route GitHub domains through the GitHub policy group.
+    - id: v2fly_dlc_category_speedtest
+      type: geosite
+      target: SPEEDTEST
+      reason: Route speed test domains through the speed test policy group.
+    - id: v2fly_dlc_steam
+      type: geosite
+      target: STEAM
+      reason: Route Steam service domains through the Steam policy group.
+    - id: v2fly_dlc_youtube
+      type: geosite
+      target: YOUTUBE
+      reason: Route YouTube domains through the YouTube policy group.
+    - id: v2fly_dlc_apple_tvplus
+      type: geosite
+      target: APPLE_TV
+      reason: Route Apple TV+ domains through the Apple TV policy group.
     - id: v2fly_dlc_apple
       type: geosite
       target: APPLE
-      reason: Route Apple services through the Apple policy group.
+      reason: Route Apple service domains through the Apple policy group.
     - id: v2fly_dlc_microsoft
       type: geosite
       target: MICROSOFT
-      reason: Route Microsoft services through the Microsoft policy group.
-    - id: v2fly_dlc_category_dev
+      reason: Route Microsoft service domains through the Microsoft policy group.
+    - id: v2fly_dlc_googlefcm
       type: geosite
-      target: DEV
-      reason: Route developer services through the developer policy group.
+      target: GOOGLE_FCM
+      reason: Route Google FCM domains through the Google FCM policy group.
+    - id: v2fly_dlc_google
+      type: geosite
+      target: GOOGLE
+      reason: Route Google service domains through the Google policy group.
+    - id: v2fly_dlc_tiktok
+      type: geosite
+      target: TIKTOK
+      reason: Route TikTok domains through the TikTok policy group.
+    - id: v2fly_dlc_netflix
+      type: geosite
+      target: NETFLIX
+      reason: Route Netflix domains through the Netflix policy group.
+    - id: v2fly_dlc_disney
+      type: geosite
+      target: DISNEY
+      reason: Route Disney+ domains through the Disney policy group.
+    - id: v2fly_dlc_hbo
+      type: geosite
+      target: HBO
+      reason: Route HBO domains through the HBO policy group.
+    - id: v2fly_dlc_primevideo
+      type: geosite
+      target: PRIME_VIDEO
+      reason: Route Prime Video domains through the Prime Video policy group.
+    - id: v2fly_dlc_category_emby
+      type: geosite
+      target: EMBY
+      reason: Route Emby domains through the Emby policy group.
+    - id: v2fly_dlc_spotify
+      type: geosite
+      target: SPOTIFY
+      reason: Route Spotify domains through the Spotify policy group.
+    - id: v2fly_dlc_bahamut
+      type: geosite
+      target: BAHAMUT
+      reason: Route Bahamut domains through the Bahamut policy group.
     - id: v2fly_dlc_category_games
       type: geosite
       target: GAME
-      reason: Route game services through the game policy group.
+      reason: Route game service categories through the game policy group.
+    - id: v2fly_dlc_category_entertainment
+      type: geosite
+      target: MEDIA
+      reason: Route entertainment categories through the media policy group.
+    - id: v2fly_dlc_category_ecommerce
+      type: geosite
+      target: ECOMMERCE
+      reason: Route ecommerce categories through the ecommerce policy group.
+    - id: v2fly_dlc_geolocation__cn
+      type: geosite
+      target: proxy
+      reason: Route non-China geolocation domains through the default proxy group instead of the non-v2fly gfw tag.
+    - id: v2fly_dlc_cn
+      type: geosite
+      target: direct
+      reason: Keep China domains direct.

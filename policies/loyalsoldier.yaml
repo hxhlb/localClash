@@ -1,18 +1,20 @@
-# Loyalsoldier-based initial policy preset.
+# localClash base policy.
 #
-# This file describes localClash policy intent. It is not a complete Mihomo
-# runtime config. Renderers should inject downloaded subscription proxies and
-# generate rule-providers/rules from this policy.
+# Historical localClash builds used Loyalsoldier HTTP rule-providers here.
+# The product default now keeps the high-volume domain classification in
+# policy-templates/localclash-default.yaml through v2fly-dlc GEOSITE packs.
+# This file only provides the base proxy groups and final fallback rules used by
+# the renderer.
 
 version: 1
-name: loyalsoldier
-description: Starter policies using Loyalsoldier clash-rules recommended whitelist and blacklist modes.
+name: localclash-base
+description: Base policy for localClash generated configs; default category routing is supplied by policy templates.
 
 rule_source:
-  name: Loyalsoldier/clash-rules
-  repository: https://github.com/Loyalsoldier/clash-rules
-  base_url: https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release
-  primary_base_url: https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release
+  name: localClash/base
+  repository: https://github.com/qoli/localClash
+  base_url: https://example.invalid/localclash-unused
+  primary_base_url: https://example.invalid/localclash-unused
   update_interval: 86400
 
 groups:
@@ -23,54 +25,6 @@ groups:
   manual: MANUAL
 
 provider_mapping:
-  reject:
-    path: reject.txt
-    behavior: domain
-    target: reject
-  icloud:
-    path: icloud.txt
-    behavior: domain
-    target: direct
-  google:
-    path: google.txt
-    behavior: domain
-    target: proxy
-  proxy:
-    path: proxy.txt
-    behavior: domain
-    target: proxy
-  direct:
-    path: direct.txt
-    behavior: domain
-    target: direct
-  private:
-    path: private.txt
-    behavior: domain
-    target: direct
-  gfw:
-    path: gfw.txt
-    behavior: domain
-    target: proxy
-  greatfire:
-    path: greatfire.txt
-    behavior: domain
-    target: proxy
-  tld-not-cn:
-    path: tld-not-cn.txt
-    behavior: domain
-    target: proxy
-  telegramcidr:
-    path: telegramcidr.txt
-    behavior: ipcidr
-    target: proxy
-  cncidr:
-    path: cncidr.txt
-    behavior: ipcidr
-    target: direct
-  lancidr:
-    path: lancidr.txt
-    behavior: ipcidr
-    target: direct
   applications:
     path: applications.txt
     behavior: classical
@@ -79,63 +33,31 @@ provider_mapping:
 modes:
   default: whitelist
   whitelist:
-    description: Allowlisted direct traffic goes DIRECT; unmatched traffic falls back to PROXY.
-    fallback: proxy
+    description: v2fly-dlc policy templates classify known traffic; unmatched traffic remains DIRECT.
+    fallback: direct
     rules:
-      - provider: applications
-        target: direct
       - domain: clash.razord.top
         target: direct
       - domain: yacd.haishan.me
         target: direct
-      - provider: private
-        target: direct
-      - provider: reject
-        target: reject
-      - provider: icloud
-        target: direct
-      - provider: google
-        target: proxy
-      - provider: proxy
-        target: proxy
-      - provider: direct
-        target: direct
-      - provider: lancidr
-        target: direct
-        no_resolve: true
-      - provider: cncidr
-        target: direct
-        no_resolve: true
-      - provider: telegramcidr
-        target: proxy
-        no_resolve: true
       - geoip: LAN
         target: direct
       - geoip: CN
         target: direct
       - match: true
-        target: proxy
+        target: direct
   blacklist:
-    description: Known blocked traffic goes PROXY; unmatched traffic falls back to DIRECT.
+    description: Compatibility mode with DIRECT fallback; add explicit proxy packs or custom rules for proxy routing.
     fallback: direct
     rules:
-      - provider: applications
-        target: direct
       - domain: clash.razord.top
         target: direct
       - domain: yacd.haishan.me
         target: direct
-      - provider: private
+      - geoip: LAN
         target: direct
-      - provider: reject
-        target: reject
-      - provider: tld-not-cn
-        target: proxy
-      - provider: gfw
-        target: proxy
-      - provider: telegramcidr
-        target: proxy
-        no_resolve: true
+      - geoip: CN
+        target: direct
       - match: true
         target: direct
 
