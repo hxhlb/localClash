@@ -628,6 +628,11 @@ func sortProxyGroupsByDisplay(groups []map[string]any, regionGroups map[string]b
 	sort.SliceStable(groups, func(i, j int) bool {
 		leftName, _ := groups[i]["name"].(string)
 		rightName, _ := groups[j]["name"].(string)
+		leftPinned := proxyGroupPinnedRank(leftName)
+		rightPinned := proxyGroupPinnedRank(rightName)
+		if leftPinned != rightPinned {
+			return leftPinned < rightPinned
+		}
 		leftRegion := regionGroups[leftName]
 		rightRegion := regionGroups[rightName]
 		if leftRegion != rightRegion {
@@ -640,6 +645,17 @@ func sortProxyGroupsByDisplay(groups []map[string]any, regionGroups map[string]b
 		}
 		return leftKey < rightKey
 	})
+}
+
+func proxyGroupPinnedRank(name string) int {
+	switch proxyGroupDisplaySortKey(name) {
+	case "手动选择":
+		return 0
+	case "自动选择":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func proxyGroupDisplaySortKey(name string) string {

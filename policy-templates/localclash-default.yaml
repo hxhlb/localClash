@@ -62,351 +62,334 @@ config:
     "🧠 AI":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: 非中国泛 AI 服务分类；OpenAI/ChatGPT 已由专属业务组先匹配。
       boundary: business_to_exit_layer
     "🍎 Apple":
       mode: manual
       exits:
-      - AUTO
-      - MANUAL
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - MANUAL
+      - AUTO
       - "🇭🇰 香港节点"
-      reason: Apple 服务保留直连作为明显选项。
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      reason: Apple 服务默认优先直连，保留代理和地区出口作为备用。
       boundary: business_to_exit_layer
     "📺 Apple TV":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      - "🌐 全球直连"
       reason: Apple TV+ 通常依赖媒体地区选择。
       boundary: business_to_exit_layer
     "🕹 Bahamut":
       mode: manual
       exits:
-      - AUTO
+      - "🇹🇼 台湾节点"
       - MANUAL
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
-      - "🇭🇰 香港节点"
-      reason: 巴哈姆特优先台湾和临近媒体出口。
+      reason: 巴哈姆特默认优先台湾节点，失败时再回到手动选择或直连。
       boundary: business_to_exit_layer
     "🤖 ChatGPT":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: OpenAI/ChatGPT 专属业务组；在规则顺序上优先于泛 AI 分类。
       boundary: business_to_exit_layer
     "🏰 Disney":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: Disney+ 暴露常用流媒体地区出口。
       boundary: business_to_exit_layer
     "📺 Emby":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
+      - AUTO
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: Emby 可在本地、直连或代理出口之间选择。
       boundary: business_to_exit_layer
     "💻 GitHub":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      - "🌐 全球直连"
       reason: GitHub 可根据本地网络质量选择代理或直连。
       boundary: business_to_exit_layer
     "🔎 Google":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: Google 服务暴露代理和直连选择。
       boundary: business_to_exit_layer
     "📬 Google FCM":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: FCM 可在直连可达时优先直连，同时保留代理出口。
       boundary: business_to_exit_layer
     "🎞 HBO":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: HBO 暴露常用流媒体地区出口。
       boundary: business_to_exit_layer
     "💼 Microsoft":
       mode: manual
       exits:
-      - AUTO
-      - MANUAL
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - MANUAL
+      - AUTO
       - "🇭🇰 香港节点"
-      reason: Microsoft 服务保留直连作为明显选项。
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      reason: Microsoft 服务默认优先直连，保留代理和地区出口作为备用。
       boundary: business_to_exit_layer
     "🎬 Netflix":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: Netflix 暴露常用流媒体地区出口。
       boundary: business_to_exit_layer
     "🎥 Prime Video":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: Prime Video 暴露常用流媒体地区出口。
       boundary: business_to_exit_layer
     "🎧 Spotify":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
+      - AUTO
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: Spotify 暴露常用媒体出口。
       boundary: business_to_exit_layer
     "🎮 Steam":
       mode: manual
       exits:
-      - AUTO
-      - MANUAL
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - MANUAL
+      - AUTO
       - "🇭🇰 香港节点"
-      reason: Steam 流量暴露地区出口，而不是直接塞入全部节点。
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      reason: Steam 默认优先直连，保留代理和地区出口处理商店、社区或网络异常。
       boundary: business_to_exit_layer
     "🎵 TikTok":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: TikTok 路由经常依赖出口地区。
       boundary: business_to_exit_layer
     "📺 YouTube":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
+      - AUTO
       - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: YouTube 暴露常用媒体地区出口。
       boundary: business_to_exit_layer
     "🎞 媒体":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: 综合媒体流量暴露常用流媒体地区。
       boundary: business_to_exit_layer
     "📊 测速服务":
       mode: manual
       exits:
-      - AUTO
-      - MANUAL
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - MANUAL
+      - AUTO
       - "🇭🇰 香港节点"
-      reason: 测速服务保留直连基准和代理出口。
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      reason: 测速服务默认优先直连，便于对比直连和代理出口质量。
       boundary: business_to_exit_layer
-    "🎮 游戏":
+    "🎮 游戏平台":
       mode: manual
       exits:
-      - AUTO
-      - MANUAL
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - MANUAL
+      - AUTO
       - "🇭🇰 香港节点"
-      reason: 游戏流量暴露低延迟地区出口。
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      reason: 游戏平台默认优先直连，保留手动、自动和地区出口作为备用。
       boundary: business_to_exit_layer
     "🧭 漏网之鱼":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
+      - AUTO
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: 非中国兜底流量，保留自动、手动、地区和直连出口。
       boundary: business_to_exit_layer
     "🛒 电商":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
+      - AUTO
       - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
       reason: 电商服务允许直连或指定代理出口。
       boundary: business_to_exit_layer
     "👥 社交媒体":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      - "🌐 全球直连"
       reason: 非中国社交媒体走业务层选择器。
       boundary: business_to_exit_layer
     "💬 通信服务":
       mode: manual
       exits:
-      - AUTO
       - MANUAL
-      - "🌐 全球直连"
-      - "🇹🇼 台湾节点"
-      - "🇸🇬 新加坡节点"
-      - "🇯🇵 日本节点"
-      - "🇺🇸 美国节点"
-      - "🇰🇷 韩国节点"
+      - AUTO
       - "🇭🇰 香港节点"
+      - "🇺🇸 美国节点"
+      - "🇯🇵 日本节点"
+      - "🇸🇬 新加坡节点"
+      - "🇹🇼 台湾节点"
+      - "🇰🇷 韩国节点"
+      - "🌐 全球直连"
       reason: 通信服务走业务层选择器。
       boundary: business_to_exit_layer
   packs:
@@ -516,8 +499,8 @@ config:
     reason: Route Bahamut domains through Bahamut selector.
   - id: v2fly_dlc_category_games
     type: geosite
-    target: "🎮 游戏"
-    reason: Route game service categories through game selector.
+    target: "🎮 游戏平台"
+    reason: Route game service categories through game platform selector.
   - id: v2fly_dlc_category_entertainment
     type: geosite
     target: "🎞 媒体"

@@ -301,6 +301,9 @@ enabled_packs:
 		}
 	}
 	order := proxyGroupOrderFromConfig(config)
+	if len(order) < 2 || order[0] != "🎯 手动选择" || order[1] != "⚡ 自动选择" {
+		t.Fatalf("proxy group order = %+v, want manual and auto selectors first", order)
+	}
 	if indexOf(order, "🇭🇰 香港节点") < indexOf(order, "🎯 手动选择") {
 		t.Fatalf("region group order = %+v, want region groups after non-region groups", order)
 	}

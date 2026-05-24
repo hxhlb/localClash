@@ -53,10 +53,13 @@ not render or start runtime.
   Its Dashboard-facing structure is layered as business group -> exit group ->
   subscription nodes. The base policy provides `⚡ 自动选择` and `🎯 手动选择`;
   the default template adds direct and region exits. For example, `🎮 Steam`
-  selects exits such as `⚡ 自动选择`, `🎯 手动选择`, `🌐 全球直连`, and region
-  groups; `🎯 手动选择` itself exposes `⚡ 自动选择`, then available region groups,
-  then subscription nodes. Region exits are optional so a subscription without,
-  for example, Korean nodes does not make first-time initialization fail.
+  and `🎮 游戏平台` default to `🌐 全球直连`, `🕹 Bahamut` defaults to
+  `🇹🇼 台湾节点`, while ChatGPT and streaming groups default to the Aethersailor
+  region order. The final Dashboard group list pins `🎯 手动选择` first and
+  `⚡ 自动选择` second. `🎯 手动选择` itself exposes `⚡ 自动选择`, then available
+  region groups, then subscription nodes. Region exits are optional so a
+  subscription without, for example, Korean nodes does not make first-time
+  initialization fail.
   `🤖 ChatGPT` is the OpenAI-specific rule target and is rendered before the
   broader `🧠 AI` category.
 

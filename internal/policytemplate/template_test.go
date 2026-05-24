@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"localclash/internal/localconfig"
 )
 
 func TestBuildMinimalTemplate(t *testing.T) {
@@ -66,14 +68,30 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if steam.Mode != "manual" || len(steam.Exits) == 0 {
 		t.Fatalf("Steam policy group = %+v, want business-to-exit selector", steam)
 	}
-	wantExits := []string{"AUTO", "MANUAL", "🌐 全球直连", "🇹🇼 台湾节点", "🇸🇬 新加坡节点", "🇯🇵 日本节点", "🇺🇸 美国节点", "🇰🇷 韩国节点", "🇭🇰 香港节点"}
-	for id, group := range config.PolicyGroups {
+	if _, exists := config.PolicyGroups["🎮 游戏"]; exists {
+		t.Fatalf("default template still has old game policy group name")
+	}
+	wantExitsByGroup := map[string][]string{
+		"🎮 Steam":   {"🌐 全球直连", "MANUAL", "AUTO", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🎮 游戏平台":    {"🌐 全球直连", "MANUAL", "AUTO", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🕹 Bahamut": {"🇹🇼 台湾节点", "MANUAL", "🌐 全球直连"},
+		"🤖 ChatGPT": {"MANUAL", "AUTO", "🇸🇬 新加坡节点", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🍎 Apple":   {"🌐 全球直连", "MANUAL", "AUTO", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+	}
+	for id, wantExits := range wantExitsByGroup {
+		group, exists := config.PolicyGroups[id]
+		if !exists {
+			t.Fatalf("missing policy group %q", id)
+		}
 		if !reflect.DeepEqual(group.Exits, wantExits) {
 			t.Fatalf("policy group %q exits = %#v, want %#v", id, group.Exits, wantExits)
 		}
 	}
 	if config.Packs[0].ID != "v2fly_dlc_category_ads_all" || config.Packs[0].Target != "REJECT" {
 		t.Fatalf("first pack = %+v, want ads reject first", config.Packs[0])
+	}
+	if got := packTarget(config.Packs, "v2fly_dlc_category_games"); got != "🎮 游戏平台" {
+		t.Fatalf("game category target = %q, want 🎮 游戏平台", got)
 	}
 	if got := config.Packs[len(config.Packs)-2].Target; got != "🧭 漏网之鱼" {
 		t.Fatalf("geolocation fallback target = %q, want 🧭 漏网之鱼", got)
@@ -136,4 +154,13 @@ func writePolicyTemplateTestFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func packTarget(packs []localconfig.Pack, id string) string {
+	for _, pack := range packs {
+		if pack.ID == id {
+			return pack.Target
+		}
+	}
+	return ""
 }
