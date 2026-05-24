@@ -211,6 +211,101 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 	assertNoSensitiveConfigMetadata(t, metadata)
 }
 
+func TestRenderDefaultOverlayUsesBaseManualAutoSelectors(t *testing.T) {
+	paths := writeRenderFixture(t)
+	writeFile(t, paths.policy, `rule_source:
+  base_url: https://example.com/rules
+  update_interval: 86400
+groups:
+  direct: DIRECT
+  reject: REJECT
+  proxy: PROXY
+  auto: ⚡ 自动选择
+  manual: 🎯 手动选择
+provider_mapping:
+  applications:
+    path: applications.txt
+    behavior: classical
+    target: direct
+modes:
+  default: whitelist
+  whitelist:
+    rules:
+      - provider: applications
+        target: direct
+      - match: true
+        target: direct
+`)
+	writeFile(t, paths.selection, `version: 1
+proxy_groups:
+  "🌐 全球直连":
+    direct: true
+  "🇭🇰 香港节点":
+    nodes: ["🇯🇵日本01 | JP"]
+    auto: true
+    optional: true
+policy_groups:
+  "🎮 Steam":
+    exits: [AUTO, MANUAL, "🌐 全球直连", "🇭🇰 香港节点"]
+    manual: true
+enabled_packs:
+  - source: blackmatrix7
+    pack: OpenAI
+    target: "🎮 Steam"
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		PolicyPath:         paths.policy,
+		OutputPath:         filepath.Join(paths.dir, "default-overlay.yaml"),
+		PacksSelectionPath: paths.selection,
+		RulesCacheDir:      paths.cacheDir,
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	groups := proxyGroupNamesFromConfig(config)
+	for _, want := range []string{"⚡ 自动选择", "🎯 手动选择", "🎮 Steam", "🇭🇰 香港节点"} {
+		if !groups[want] {
+			t.Fatalf("missing proxy-group %q in %+v", want, groups)
+		}
+	}
+	for _, unwanted := range []string{"AUTO", "MANUAL", "PROXY"} {
+		if groups[unwanted] {
+			t.Fatalf("proxy-group %q should not be emitted for default overlay", unwanted)
+		}
+	}
+	steam := proxyGroupFromConfig(t, config, "🎮 Steam")
+	wantSteam := []string{"⚡ 自动选择", "🎯 手动选择", "🌐 全球直连", "🇭🇰 香港节点"}
+	if got := steam["proxies"].([]any); len(got) != len(wantSteam) {
+		t.Fatalf("Steam proxies = %+v, want %+v", got, wantSteam)
+	} else {
+		for i, want := range wantSteam {
+			if got[i] != want {
+				t.Fatalf("Steam proxies = %+v, want %+v", got, wantSteam)
+			}
+		}
+	}
+	manual := proxyGroupFromConfig(t, config, "🎯 手动选择")
+	wantManualPrefix := []string{"⚡ 自动选择", "🇭🇰 香港节点", "🇯🇵日本01 | JP"}
+	if got := manual["proxies"].([]any); len(got) < len(wantManualPrefix) {
+		t.Fatalf("manual proxies = %+v, want prefix %+v", got, wantManualPrefix)
+	} else {
+		for i, want := range wantManualPrefix {
+			if got[i] != want {
+				t.Fatalf("manual proxies = %+v, want prefix %+v", got, wantManualPrefix)
+			}
+		}
+	}
+	order := proxyGroupOrderFromConfig(config)
+	if indexOf(order, "🇭🇰 香港节点") < indexOf(order, "🎯 手动选择") {
+		t.Fatalf("region group order = %+v, want region groups after non-region groups", order)
+	}
+}
+
 func TestRenderOmitsLegacyAppleGroupWhenPolicyDoesNotDefineIt(t *testing.T) {
 	paths := writeRenderFixture(t)
 	writeFile(t, paths.policy, `rule_source:
@@ -543,6 +638,15 @@ func proxyGroupNamesFromConfig(config map[string]any) map[string]bool {
 	for _, raw := range config["proxy-groups"].([]any) {
 		group := raw.(map[string]any)
 		out[group["name"].(string)] = true
+	}
+	return out
+}
+
+func proxyGroupOrderFromConfig(config map[string]any) []string {
+	var out []string
+	for _, raw := range config["proxy-groups"].([]any) {
+		group := raw.(map[string]any)
+		out = append(out, group["name"].(string))
 	}
 	return out
 }

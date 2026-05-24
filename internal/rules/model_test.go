@@ -297,6 +297,56 @@ func TestRenderFragmentMaterializesPolicyGroupOverProxyGroupExits(t *testing.T) 
 	}
 }
 
+func TestRenderFragmentSortsPolicyGroupsBeforeRegionGroupsByDisplayName(t *testing.T) {
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"🇭🇰 香港节点": {
+				Nodes:    []string{"HK 01"},
+				Auto:     true,
+				Optional: true,
+			},
+			"🌐 全球直连": {
+				Direct: true,
+			},
+		},
+		PolicyGroups: map[string]PolicyGroup{
+			"🎮 Steam": {
+				Exits:  []string{"🌐 全球直连", "🇭🇰 香港节点"},
+				Manual: true,
+			},
+			"🧠 AI": {
+				Exits:  []string{"🌐 全球直连", "🇭🇰 香港节点"},
+				Manual: true,
+			},
+		},
+		EnabledPack: []SelectedPack{
+			{Source: "blackmatrix7", Pack: "OpenAI", Target: "🎮 Steam"},
+			{Source: "sukkaw", Pack: "ai", Target: "🧠 AI"},
+		},
+	}
+
+	fragment, err := RenderFragment(selection, testPackCaches(), []string{"HK 01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, group := range fragment.ProxyGroups {
+		names = append(names, group["name"].(string))
+	}
+	want := []string{"🧠 AI", "🎮 Steam", "🌐 全球直连", "🇭🇰 香港节点"}
+	if len(names) != len(want) {
+		t.Fatalf("proxy group names = %+v, want %+v", names, want)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("proxy group names = %+v, want %+v", names, want)
+		}
+	}
+	if len(fragment.BaseManualChoices) != 1 || fragment.BaseManualChoices[0] != "🇭🇰 香港节点" {
+		t.Fatalf("base manual choices = %+v, want region group", fragment.BaseManualChoices)
+	}
+}
+
 func TestRenderFragmentSkipsEmptyOptionalPolicyExit(t *testing.T) {
 	selection := Selection{
 		ProxyGroups: map[string]ProxyGroup{

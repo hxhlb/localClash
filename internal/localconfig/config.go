@@ -858,7 +858,7 @@ func isBuiltInTarget(target string) bool {
 
 func canonicalBuiltInTarget(target string) string {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "direct", "reject", "proxy", "manual":
+	case "direct", "reject", "proxy", "manual", "auto":
 		return strings.ToUpper(strings.TrimSpace(target))
 	default:
 		return ""

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -124,9 +125,10 @@ type ExternalRuleProvider struct {
 }
 
 type Fragment struct {
-	RuleProviders map[string]map[string]any `yaml:"rule-providers"`
-	ProxyGroups   []map[string]any          `yaml:"proxy-groups,omitempty"`
-	Rules         []string                  `yaml:"rules"`
+	RuleProviders     map[string]map[string]any `yaml:"rule-providers"`
+	ProxyGroups       []map[string]any          `yaml:"proxy-groups,omitempty"`
+	Rules             []string                  `yaml:"rules"`
+	BaseManualChoices []string                  `yaml:"-"`
 }
 
 type Options struct {
@@ -423,11 +425,12 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 	for name := range referencedProxyGroups {
 		usedProxyGroups[name] = true
 	}
-	proxyGroups, err := materializeProxyGroups(usedProxyGroups, targets)
+	proxyGroups, baseManualChoices, err := materializeProxyGroups(usedProxyGroups, targets)
 	if err != nil {
 		return Fragment{}, err
 	}
-	fragment.ProxyGroups = append(proxyGroups, policyGroups...)
+	fragment.ProxyGroups = append(policyGroups, proxyGroups...)
+	fragment.BaseManualChoices = baseManualChoices
 	return fragment, nil
 }
 
@@ -632,13 +635,22 @@ func markUsedTarget(target string, kind targetKind, usedProxyGroups map[string]b
 	}
 }
 
-func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]map[string]any, error) {
-	names := make([]string, 0, len(used))
+func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]map[string]any, []string, error) {
+	standardNames := make([]string, 0, len(used))
+	regionNames := make([]string, 0, len(used))
 	for name := range used {
-		names = append(names, name)
+		group := targets.proxyGroups[name]
+		if group.Optional && !group.Direct {
+			regionNames = append(regionNames, name)
+			continue
+		}
+		standardNames = append(standardNames, name)
 	}
-	sort.Strings(names)
+	sortNamesByDisplay(standardNames)
+	sortNamesByDisplay(regionNames)
+	names := append(standardNames, regionNames...)
 	var groups []map[string]any
+	var baseManualChoices []string
 	for _, name := range names {
 		group := targets.proxyGroups[name]
 		candidates := candidateProxies(group)
@@ -646,7 +658,10 @@ func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]ma
 			continue
 		}
 		if len(candidates) == 0 && !group.Direct {
-			return nil, fmt.Errorf("proxy group %q has no candidate proxies", name)
+			return nil, nil, fmt.Errorf("proxy group %q has no candidate proxies", name)
+		}
+		if group.Optional && !group.Direct {
+			baseManualChoices = append(baseManualChoices, name)
 		}
 		if group.Auto {
 			groups = append(groups, map[string]any{
@@ -678,7 +693,7 @@ func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]ma
 			"proxies": choices,
 		})
 	}
-	return groups, nil
+	return groups, baseManualChoices, nil
 }
 
 func materializePolicyGroups(used map[string]bool, targets preparedTargets) ([]map[string]any, map[string]bool, error) {
@@ -686,7 +701,7 @@ func materializePolicyGroups(used map[string]bool, targets preparedTargets) ([]m
 	for name := range used {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	sortNamesByDisplay(names)
 	referencedProxyGroups := map[string]bool{}
 	var groups []map[string]any
 	for _, name := range names {
@@ -728,6 +743,25 @@ func materializePolicyGroups(used map[string]bool, targets preparedTargets) ([]m
 		})
 	}
 	return groups, referencedProxyGroups, nil
+}
+
+func sortNamesByDisplay(names []string) {
+	sort.Slice(names, func(i, j int) bool {
+		left := displaySortKey(names[i])
+		right := displaySortKey(names[j])
+		if left == right {
+			return names[i] < names[j]
+		}
+		return left < right
+	})
+}
+
+func displaySortKey(name string) string {
+	trimmed := strings.TrimSpace(name)
+	trimmed = strings.TrimLeftFunc(trimmed, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	return strings.TrimSpace(trimmed)
 }
 
 func candidateProxies(group ProxyGroup) []string {
@@ -773,7 +807,7 @@ func candidatePolicyExits(group PolicyGroup, targets preparedTargets) ([]string,
 
 func canonicalBuiltInTarget(target string) string {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "proxy", "direct", "reject", "manual":
+	case "proxy", "direct", "reject", "manual", "auto":
 		return strings.ToUpper(strings.TrimSpace(target))
 	default:
 		return ""

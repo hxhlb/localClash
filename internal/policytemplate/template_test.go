@@ -53,6 +53,12 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
 	}
+	if _, exists := config.ProxyGroups["🎯 手动选择"]; exists {
+		t.Fatalf("default template should use base manual selector, not define its own: %+v", config.ProxyGroups["🎯 手动选择"])
+	}
+	if _, exists := config.ProxyGroups["⚡ 自动选择"]; exists {
+		t.Fatalf("default template should use base auto selector, not define its own: %+v", config.ProxyGroups["⚡ 自动选择"])
+	}
 	if !config.ProxyGroups["🇭🇰 香港节点"].Optional {
 		t.Fatalf("香港节点 group = %+v, want optional region selector", config.ProxyGroups["🇭🇰 香港节点"])
 	}
@@ -60,7 +66,7 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if steam.Mode != "manual" || len(steam.Exits) == 0 {
 		t.Fatalf("Steam policy group = %+v, want business-to-exit selector", steam)
 	}
-	wantExits := []string{"🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点", "🌐 全球直连"}
+	wantExits := []string{"AUTO", "MANUAL", "🌐 全球直连", "🇹🇼 台湾节点", "🇸🇬 新加坡节点", "🇯🇵 日本节点", "🇺🇸 美国节点", "🇰🇷 韩国节点", "🇭🇰 香港节点"}
 	for id, group := range config.PolicyGroups {
 		if !reflect.DeepEqual(group.Exits, wantExits) {
 			t.Fatalf("policy group %q exits = %#v, want %#v", id, group.Exits, wantExits)
