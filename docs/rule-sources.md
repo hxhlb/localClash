@@ -18,17 +18,24 @@ User selection belongs in a separate packs selection YAML:
 
 ```yaml
 proxy_groups:
-  SteamHK:
+  HK:
     nodes:
       - "🇭🇰香港01 | HK"
       - "🇭🇰香港02 | HK"
     manual: true
     direct: false
 
+policy_groups:
+  Steam:
+    exits:
+      - HK
+      - DIRECT
+    manual: true
+
 enabled_packs:
   - source: blackmatrix7
     pack: Steam
-    target: SteamHK
+    target: Steam
 ```
 
 `proxy_groups` materialize to Clash/Mihomo runtime proxy-groups. `nodes` must
@@ -37,6 +44,12 @@ to find candidate names first. localClash does not verify egress regions with
 IP lookup, hostname geolocation, outbound probing, or capability probing.
 Choose either `auto: true` or `manual: true`; enabling both is rejected because
 it would create competing runtime groups for the same target.
+
+`policy_groups` are the optional business layer for ACL4SSR-style UX. Rules and
+packs can target a visible group such as `Steam`; that group then offers exits
+such as `HK`, `JP`, `AUTO`, or `DIRECT` in Dashboard. Non-built-in exits must
+refer to `proxy_groups`; policy groups do not directly select subscription
+nodes.
 
 The first CLI surface is intentionally small:
 

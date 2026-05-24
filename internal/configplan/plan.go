@@ -65,6 +65,7 @@ type OverlayIntent struct {
 	CustomRules   []OverlayCustomRuleIntent   `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
 	RuleProviders []OverlayRuleProviderIntent `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
 	ProxyGroups   []OverlayProxyGroupIntent   `json:"proxy_groups,omitempty" yaml:"proxy_groups,omitempty"`
+	PolicyGroups  []OverlayPolicyGroupIntent  `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
 }
 
 type OverlayPackIntent struct {
@@ -81,6 +82,14 @@ type OverlayProxyGroupIntent struct {
 	Mode     string             `json:"mode" yaml:"mode"`
 	Reason   string             `json:"reason,omitempty" yaml:"reason,omitempty"`
 	Boundary string             `json:"boundary,omitempty" yaml:"boundary,omitempty"`
+}
+
+type OverlayPolicyGroupIntent struct {
+	ID       string   `json:"id" yaml:"id"`
+	Mode     string   `json:"mode" yaml:"mode"`
+	Exits    []string `json:"exits" yaml:"exits"`
+	Reason   string   `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Boundary string   `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 }
 
 type OverlayCustomRuleIntent = localconfig.CustomRule
@@ -142,6 +151,7 @@ type OverlaySummary struct {
 	CustomRules   []OverlayCustomRuleSummary   `json:"custom_rules"`
 	RuleProviders []OverlayRuleProviderSummary `json:"rule_providers"`
 	ProxyGroups   []OverlayProxyGroupSummary   `json:"proxy_groups"`
+	PolicyGroups  []OverlayPolicyGroupSummary  `json:"policy_groups"`
 }
 
 type OverlayPackSummary struct {
@@ -160,6 +170,15 @@ type OverlayProxyGroupSummary struct {
 	NodeCount     int                `json:"node_count"`
 	Reason        string             `json:"reason,omitempty"`
 	Boundary      string             `json:"boundary,omitempty"`
+}
+
+type OverlayPolicyGroupSummary struct {
+	ID        string   `json:"id"`
+	Mode      string   `json:"mode"`
+	Exits     []string `json:"exits"`
+	ExitCount int      `json:"exit_count"`
+	Reason    string   `json:"reason,omitempty"`
+	Boundary  string   `json:"boundary,omitempty"`
 }
 
 type OverlayCustomRuleSummary struct {
@@ -185,6 +204,7 @@ type OverlayRuleProviderSummary struct {
 type ChangesSummary struct {
 	RuleProvidersAdded int `json:"rule_providers_added"`
 	ProxyGroupsAdded   int `json:"proxy_groups_added"`
+	PolicyGroupsAdded  int `json:"policy_groups_added"`
 	RulesAdded         int `json:"rules_added"`
 }
 
@@ -266,6 +286,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		Changes: ChangesSummary{
 			RuleProvidersAdded: len(overlayInspection.RuleProviders),
 			ProxyGroupsAdded:   len(overlayInspection.ProxyGroups),
+			PolicyGroupsAdded:  len(overlayInspection.PolicyGroups),
 			RulesAdded:         len(overlayInspection.Rules),
 		},
 		Warnings: warnings,
@@ -523,15 +544,27 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	config := localconfig.Config{
 		Version:       1,
 		ProxyGroups:   map[string]localconfig.ProxyGroup{},
+		PolicyGroups:  map[string]localconfig.PolicyGroup{},
 		Packs:         make([]localconfig.Pack, 0, len(overlay.Packs)),
 		CustomRules:   make([]localconfig.CustomRule, 0, len(overlay.CustomRules)),
 		RuleProviders: make([]localconfig.ExternalRuleProvider, 0, len(overlay.RuleProviders)),
+	}
+	if len(overlay.PolicyGroups) > 0 {
+		config.Version = 2
 	}
 	for _, group := range overlay.ProxyGroups {
 		config.ProxyGroups[group.ID] = localconfig.ProxyGroup{
 			Mode:     group.Mode,
 			Match:    group.Match,
 			Nodes:    append([]string{}, group.Nodes...),
+			Reason:   group.Reason,
+			Boundary: group.Boundary,
+		}
+	}
+	for _, group := range overlay.PolicyGroups {
+		config.PolicyGroups[group.ID] = localconfig.PolicyGroup{
+			Mode:     group.Mode,
+			Exits:    append([]string{}, group.Exits...),
 			Reason:   group.Reason,
 			Boundary: group.Boundary,
 		}
@@ -566,6 +599,7 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 		CustomRules:   make([]OverlayCustomRuleSummary, 0, len(resolved.CustomRules)),
 		RuleProviders: make([]OverlayRuleProviderSummary, 0, len(resolved.RuleProviders)),
 		ProxyGroups:   make([]OverlayProxyGroupSummary, 0, len(resolved.ProxyGroups)),
+		PolicyGroups:  make([]OverlayPolicyGroupSummary, 0, len(resolved.PolicyGroups)),
 	}
 	for _, pack := range resolved.Packs {
 		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
@@ -603,6 +637,16 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 			NodeCount:     group.NodeCount,
 			Reason:        group.Reason,
 			Boundary:      group.Boundary,
+		})
+	}
+	for _, group := range resolved.PolicyGroups {
+		summary.PolicyGroups = append(summary.PolicyGroups, OverlayPolicyGroupSummary{
+			ID:        group.ID,
+			Mode:      group.Mode,
+			Exits:     append([]string{}, group.Exits...),
+			ExitCount: group.ExitCount,
+			Reason:    group.Reason,
+			Boundary:  group.Boundary,
 		})
 	}
 	return summary
@@ -653,15 +697,22 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q is defined more than once", id)
 		}
 		mode := strings.ToLower(strings.TrimSpace(group.Mode))
-		if mode != "manual" && mode != "auto" && mode != "smart" {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q mode must be manual, auto, or smart", id)
+		if mode != "manual" && mode != "auto" && mode != "smart" && mode != "direct" {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q mode must be manual, auto, smart, or direct", id)
 		}
-		if len(group.Nodes) == 0 {
+		if mode == "direct" && (len(group.Nodes) > 0 || group.Match != nil) {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q direct mode cannot use match or nodes", id)
+		}
+		if mode != "direct" && len(group.Nodes) == 0 {
 			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("proxy group %q nodes is required", id)
 		}
-		nodes, err := validateProxyGroupNodes(id, group.Nodes, proxyNames)
-		if err != nil {
-			return rules.Selection{}, OverlaySummary{}, nil, err
+		var nodes []string
+		var err error
+		if mode != "direct" {
+			nodes, err = validateProxyGroupNodes(id, group.Nodes, proxyNames)
+			if err != nil {
+				return rules.Selection{}, OverlaySummary{}, nil, err
+			}
 		}
 		pg := rules.ProxyGroup{Nodes: nodes}
 		switch mode {
@@ -671,27 +722,107 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 			pg.Auto = true
 		case "smart":
 			pg.Smart = true
+		case "direct":
+			pg.Direct = true
 		}
 		proxyGroups[id] = pg
 		proxyGroupSummaries = append(proxyGroupSummaries, OverlayProxyGroupSummary{ID: id, Nodes: append([]string(nil), nodes...), Mode: mode, NodeCount: len(nodes)})
 	}
 
+	policyGroups, policyGroupSummaries, err := buildPolicyGroupsFromOverlay(opts.Overlay.PolicyGroups, proxyGroups)
+	if err != nil {
+		return rules.Selection{}, OverlaySummary{}, nil, err
+	}
 	for _, pack := range selected {
 		if isBuiltInTarget(pack.Target) {
 			continue
 		}
-		if _, ok := proxyGroups[pack.Target]; !ok {
-			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("pack target %q requires a matching proxy group", pack.Target)
+		if _, ok := proxyGroups[pack.Target]; ok {
+			continue
+		}
+		if _, ok := policyGroups[pack.Target]; !ok {
+			return rules.Selection{}, OverlaySummary{}, nil, fmt.Errorf("pack target %q requires a matching proxy group or policy group", pack.Target)
 		}
 	}
 
 	sort.Slice(proxyGroupSummaries, func(i, j int) bool { return proxyGroupSummaries[i].ID < proxyGroupSummaries[j].ID })
+	sort.Slice(policyGroupSummaries, func(i, j int) bool { return policyGroupSummaries[i].ID < policyGroupSummaries[j].ID })
 
 	return rules.Selection{
-		Version:     1,
-		ProxyGroups: proxyGroups,
-		EnabledPack: selected,
-	}, OverlaySummary{Packs: overlayPacks, ProxyGroups: proxyGroupSummaries}, nil, nil
+		Version:      1,
+		ProxyGroups:  proxyGroups,
+		PolicyGroups: policyGroups,
+		EnabledPack:  selected,
+	}, OverlaySummary{Packs: overlayPacks, ProxyGroups: proxyGroupSummaries, PolicyGroups: policyGroupSummaries}, nil, nil
+}
+
+func buildPolicyGroupsFromOverlay(groups []OverlayPolicyGroupIntent, proxyGroups map[string]rules.ProxyGroup) (map[string]rules.PolicyGroup, []OverlayPolicyGroupSummary, error) {
+	policyGroups := map[string]rules.PolicyGroup{}
+	summaries := make([]OverlayPolicyGroupSummary, 0, len(groups))
+	for _, group := range groups {
+		id := strings.TrimSpace(group.ID)
+		if id == "" {
+			return nil, nil, fmt.Errorf("policy group id is required")
+		}
+		if _, exists := proxyGroups[id]; exists {
+			return nil, nil, fmt.Errorf("policy group %q conflicts with a proxy group id", id)
+		}
+		if _, exists := policyGroups[id]; exists {
+			return nil, nil, fmt.Errorf("policy group %q is defined more than once", id)
+		}
+		mode := strings.ToLower(strings.TrimSpace(group.Mode))
+		if mode != "manual" && mode != "auto" && mode != "smart" {
+			return nil, nil, fmt.Errorf("policy group %q mode must be manual, auto, or smart", id)
+		}
+		exits, err := validatePolicyGroupExits(id, group.Exits, proxyGroups)
+		if err != nil {
+			return nil, nil, err
+		}
+		pg := rules.PolicyGroup{Exits: exits}
+		switch mode {
+		case "manual":
+			pg.Manual = true
+		case "auto":
+			pg.Auto = true
+		case "smart":
+			pg.Smart = true
+		}
+		policyGroups[id] = pg
+		summaries = append(summaries, OverlayPolicyGroupSummary{
+			ID:        id,
+			Mode:      mode,
+			Exits:     append([]string{}, exits...),
+			ExitCount: len(exits),
+			Reason:    group.Reason,
+			Boundary:  group.Boundary,
+		})
+	}
+	return policyGroups, summaries, nil
+}
+
+func validatePolicyGroupExits(groupID string, rawExits []string, proxyGroups map[string]rules.ProxyGroup) ([]string, error) {
+	if len(rawExits) == 0 {
+		return nil, fmt.Errorf("policy group %q exits is required", groupID)
+	}
+	exits := make([]string, 0, len(rawExits))
+	seen := map[string]bool{}
+	for _, rawExit := range rawExits {
+		exit := strings.TrimSpace(rawExit)
+		if exit == "" {
+			return nil, fmt.Errorf("policy group %q has an empty exit", groupID)
+		}
+		if builtIn := canonicalBuiltInTarget(exit); builtIn != "" {
+			exit = builtIn
+		} else if _, ok := proxyGroups[exit]; !ok {
+			return nil, fmt.Errorf("policy group %q exit %q requires a built-in target or matching proxy group", groupID, exit)
+		}
+		if seen[exit] {
+			continue
+		}
+		seen[exit] = true
+		exits = append(exits, exit)
+	}
+	return exits, nil
 }
 
 func assertOverlayPackType(id, declared, actual string) error {
@@ -807,6 +938,7 @@ func intentFromSummary(summary OverlaySummary) OverlayIntent {
 		CustomRules:   make([]OverlayCustomRuleIntent, 0, len(summary.CustomRules)),
 		RuleProviders: make([]OverlayRuleProviderIntent, 0, len(summary.RuleProviders)),
 		ProxyGroups:   make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
+		PolicyGroups:  make([]OverlayPolicyGroupIntent, 0, len(summary.PolicyGroups)),
 	}
 	for _, pack := range summary.Packs {
 		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
@@ -838,6 +970,15 @@ func intentFromSummary(summary OverlaySummary) OverlayIntent {
 			Nodes:    append([]string{}, group.Nodes...),
 			Match:    group.Match,
 			Mode:     group.Mode,
+			Reason:   group.Reason,
+			Boundary: group.Boundary,
+		})
+	}
+	for _, group := range summary.PolicyGroups {
+		intent.PolicyGroups = append(intent.PolicyGroups, OverlayPolicyGroupIntent{
+			ID:       group.ID,
+			Mode:     group.Mode,
+			Exits:    append([]string{}, group.Exits...),
 			Reason:   group.Reason,
 			Boundary: group.Boundary,
 		})
@@ -940,11 +1081,15 @@ func renderMode(mode string) string {
 }
 
 func isBuiltInTarget(target string) bool {
+	return canonicalBuiltInTarget(target) != ""
+}
+
+func canonicalBuiltInTarget(target string) string {
 	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "direct", "reject", "proxy", "manual":
-		return true
+		return strings.ToUpper(strings.TrimSpace(target))
 	default:
-		return false
+		return ""
 	}
 }
 

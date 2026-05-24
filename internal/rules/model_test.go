@@ -243,6 +243,60 @@ func TestRenderFragmentMaterializesProxyGroup(t *testing.T) {
 	}
 }
 
+func TestRenderFragmentMaterializesPolicyGroupOverProxyGroupExits(t *testing.T) {
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"HK": {
+				Nodes:  []string{"HK 01"},
+				Manual: true,
+			},
+			"JP": {
+				Nodes: []string{"JP Tokyo"},
+				Auto:  true,
+			},
+		},
+		PolicyGroups: map[string]PolicyGroup{
+			"Steam": {
+				Exits:  []string{"HK", "JP", "DIRECT"},
+				Manual: true,
+			},
+		},
+		EnabledPack: []SelectedPack{{Source: "blackmatrix7", Pack: "OpenAI", Target: "Steam"}},
+	}
+
+	fragment, err := RenderFragment(selection, testPackCaches(), []string{"HK 01", "JP Tokyo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fragment.Rules[0]; got != "RULE-SET,blackmatrix7_OpenAI,Steam" {
+		t.Fatalf("rule = %q, want policy group target", got)
+	}
+	if len(fragment.ProxyGroups) != 3 {
+		t.Fatalf("proxy groups = %+v, want HK, JP, and Steam", fragment.ProxyGroups)
+	}
+	groups := map[string]map[string]any{}
+	for _, group := range fragment.ProxyGroups {
+		groups[group["name"].(string)] = group
+	}
+	steam := groups["Steam"]
+	if steam["type"] != "select" {
+		t.Fatalf("Steam group = %+v, want select policy group", steam)
+	}
+	exits := steam["proxies"].([]string)
+	want := []string{"HK", "JP", "DIRECT"}
+	if len(exits) != len(want) {
+		t.Fatalf("Steam exits = %+v, want %+v", exits, want)
+	}
+	for i := range want {
+		if exits[i] != want[i] {
+			t.Fatalf("Steam exits = %+v, want %+v", exits, want)
+		}
+	}
+	if groups["HK"] == nil || groups["JP"] == nil {
+		t.Fatalf("leaf exit groups missing from %+v", groups)
+	}
+}
+
 func TestRenderFragmentMaterializesSmartProxyGroup(t *testing.T) {
 	selection := Selection{
 		ProxyGroups: map[string]ProxyGroup{

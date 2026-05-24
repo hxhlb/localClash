@@ -146,6 +146,62 @@ func TestRenderProxyGroupPlan(t *testing.T) {
 	assertMetadataHasNoSensitiveFields(t, metadata)
 }
 
+func TestRenderPolicyGroupPlan(t *testing.T) {
+	paths := writePlanFixture(t)
+
+	result, err := Render(context.Background(), Options{
+		PlanName:     "steam-exits",
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{
+				{ID: "blackmatrix7_Steam", Target: "Steam"},
+			},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "SG", Nodes: []string{"SG 01"}, Mode: "manual"},
+				{ID: "JP", Nodes: []string{"JP Tokyo 01"}, Mode: "auto"},
+				{ID: "全球直连", Mode: "direct"},
+			},
+			PolicyGroups: []OverlayPolicyGroupIntent{
+				{ID: "Steam", Mode: "manual", Exits: []string{"SG", "JP", "全球直连"}, Reason: "Steam traffic should pick an exit group."},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Overlay.PolicyGroups) != 1 || result.Overlay.PolicyGroups[0].ID != "Steam" {
+		t.Fatalf("policy groups = %+v, want Steam", result.Overlay.PolicyGroups)
+	}
+	if result.Changes.ProxyGroupsAdded != 3 || result.Changes.PolicyGroupsAdded != 1 || result.Changes.RulesAdded != 1 {
+		t.Fatalf("changes = %+v, want 3 proxy groups, 1 policy group, 1 rule", result.Changes)
+	}
+	config := readYAMLMap(t, result.Output)
+	names := proxyGroupNames(config)
+	for _, want := range []string{"SG", "JP", "全球直连", "Steam"} {
+		if !names[want] {
+			t.Fatalf("candidate config missing proxy group %q in %+v", want, names)
+		}
+	}
+	metadata := config["x-localclash"].(map[string]any)
+	overlay := metadata["overlay"].(map[string]any)
+	policyGroups := overlay["policy_groups"].([]any)
+	if len(policyGroups) != 1 || policyGroups[0].(map[string]any)["id"] != "Steam" {
+		t.Fatalf("metadata policy_groups = %+v, want Steam", policyGroups)
+	}
+	candidate, err := localconfig.Load(result.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Version != 2 {
+		t.Fatalf("candidate localclash version = %d, want 2", candidate.Version)
+	}
+}
+
 func TestRenderExternalRuleProviderPlan(t *testing.T) {
 	paths := writePlanFixture(t)
 

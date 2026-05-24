@@ -136,6 +136,81 @@ func TestResolveProxyGroupSupportsSmartMode(t *testing.T) {
 	}
 }
 
+func TestResolveProxyGroupSupportsDirectMode(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: SG 01
+    type: ss
+`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"全球直连": {Mode: "direct"},
+			},
+		},
+		SubscriptionPath: subscriptionPath,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !resolved.Selection.ProxyGroups["全球直连"].Direct {
+		t.Fatalf("selection proxy group = %+v, want direct", resolved.Selection.ProxyGroups["全球直连"])
+	}
+	if got := resolved.ProxyGroups[0].NodeCount; got != 0 {
+		t.Fatalf("direct group node count = %d, want 0", got)
+	}
+}
+
+func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: HK 01
+    type: ss
+  - name: JP Tokyo 01
+    type: ss
+`)
+	rulesCache := filepath.Join(dir, "rules")
+	writeTestFile(t, filepath.Join(rulesCache, "blackmatrix7.yaml"), `version: 1
+source: blackmatrix7
+adapter: blackmatrix7
+renderable: true
+packs:
+  - id: Steam
+    name: Steam
+    target: DIRECT
+    renderable: true
+`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"HK": {Mode: "manual", Nodes: []string{"HK 01"}},
+				"JP": {Mode: "auto", Nodes: []string{"JP Tokyo 01"}},
+			},
+			PolicyGroups: map[string]PolicyGroup{
+				"Steam": {Mode: "manual", Exits: []string{"HK", "JP", "direct"}},
+			},
+			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "Steam"}},
+		},
+		SubscriptionPath: subscriptionPath,
+		RulesCache:       rulesCache,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	exits := resolved.Selection.PolicyGroups["Steam"].Exits
+	want := []string{"HK", "JP", "DIRECT"}
+	if !reflect.DeepEqual(exits, want) {
+		t.Fatalf("policy exits = %#v, want %#v", exits, want)
+	}
+	if len(resolved.PolicyGroups) != 1 || resolved.PolicyGroups[0].ExitCount != 3 {
+		t.Fatalf("resolved policy groups = %+v, want one group with three exits", resolved.PolicyGroups)
+	}
+}
+
 func TestResolveExactNodesReportsMissingNodes(t *testing.T) {
 	dir := t.TempDir()
 	subscriptionPath := filepath.Join(dir, "subscription.yaml")

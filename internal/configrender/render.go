@@ -193,6 +193,7 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			Modifiable:    true,
 			Packs:         []configmeta.OverlayPack{},
 			ProxyGroups:   []configmeta.OverlayProxyGroup{},
+			PolicyGroups:  []configmeta.OverlayPolicyGroup{},
 			RuleProviders: []configmeta.OverlayRuleProvider{},
 			Rules:         []configmeta.OverlayRule{},
 			Insertion:     "after local safety baseline, before base rules",
@@ -200,6 +201,21 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 	}
 	if selection != nil {
 		usedProxyGroups := map[string]bool{}
+		usedPolicyGroups := map[string]bool{}
+		markTarget := func(target string) {
+			if _, ok := selection.PolicyGroups[target]; ok {
+				usedPolicyGroups[target] = true
+				for _, exit := range selection.PolicyGroups[target].Exits {
+					if _, ok := selection.ProxyGroups[exit]; ok {
+						usedProxyGroups[exit] = true
+					}
+				}
+				return
+			}
+			if _, ok := selection.ProxyGroups[target]; ok {
+				usedProxyGroups[target] = true
+			}
+		}
 		for _, enabled := range selection.EnabledPack {
 			metadata.Overlay.Packs = append(metadata.Overlay.Packs, configmeta.OverlayPack{
 				ID:     rulespkg.PackCatalogID(enabled.Source, enabled.Pack),
@@ -207,19 +223,13 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 				Type:   packTypeFromFragment(fragment, enabled),
 				Target: enabled.Target,
 			})
-			if _, ok := selection.ProxyGroups[enabled.Target]; ok {
-				usedProxyGroups[enabled.Target] = true
-			}
+			markTarget(enabled.Target)
 		}
 		for _, custom := range selection.CustomRules {
-			if _, ok := selection.ProxyGroups[custom.Target]; ok {
-				usedProxyGroups[custom.Target] = true
-			}
+			markTarget(custom.Target)
 		}
 		for _, provider := range selection.RuleProviders {
-			if _, ok := selection.ProxyGroups[provider.Target]; ok {
-				usedProxyGroups[provider.Target] = true
-			}
+			markTarget(provider.Target)
 		}
 		proxyGroupIDs := make([]string, 0, len(usedProxyGroups))
 		for id := range usedProxyGroups {
@@ -232,6 +242,19 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 				ID:    id,
 				Mode:  proxyGroupMode(group),
 				Nodes: append([]string(nil), group.Nodes...),
+			})
+		}
+		policyGroupIDs := make([]string, 0, len(usedPolicyGroups))
+		for id := range usedPolicyGroups {
+			policyGroupIDs = append(policyGroupIDs, id)
+		}
+		sort.Strings(policyGroupIDs)
+		for _, id := range policyGroupIDs {
+			group := selection.PolicyGroups[id]
+			metadata.Overlay.PolicyGroups = append(metadata.Overlay.PolicyGroups, configmeta.OverlayPolicyGroup{
+				ID:    id,
+				Mode:  policyGroupMode(group),
+				Exits: append([]string(nil), group.Exits...),
 			})
 		}
 	}
@@ -282,6 +305,19 @@ func proxyGroupMode(group rulespkg.ProxyGroup) string {
 		return "manual"
 	case group.Direct:
 		return "direct"
+	default:
+		return ""
+	}
+}
+
+func policyGroupMode(group rulespkg.PolicyGroup) string {
+	switch {
+	case group.Auto:
+		return "auto"
+	case group.Smart:
+		return "smart"
+	case group.Manual:
+		return "manual"
 	default:
 		return ""
 	}

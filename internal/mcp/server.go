@@ -453,6 +453,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callSubscriptionsRefresh(ctx, args)
 	case "proxy_group_build":
 		return s.callProxyGroupBuild(args)
+	case "policy_group_build":
+		return callPolicyGroupBuild(args)
 	case "custom_rules_build":
 		return callCustomRulesBuild(args)
 	case "rule_provider_build":
@@ -868,6 +870,76 @@ func (s *Server) callProxyGroupBuild(args json.RawMessage) (toolResult, error) {
 		"target":         id,
 		"selected_nodes": resolvedGroup.SelectedNodes,
 	})
+}
+
+func callPolicyGroupBuild(args json.RawMessage) (toolResult, error) {
+	var in struct {
+		ID       string   `json:"id"`
+		Mode     string   `json:"mode"`
+		Exits    []string `json:"exits"`
+		Reason   string   `json:"reason"`
+		Boundary string   `json:"boundary"`
+	}
+	if err := json.Unmarshal(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	id := strings.TrimSpace(in.ID)
+	if id == "" {
+		return toolResult{}, fmt.Errorf("id is required")
+	}
+	mode := strings.ToLower(strings.TrimSpace(in.Mode))
+	if mode != "manual" && mode != "auto" && mode != "smart" {
+		return toolResult{}, fmt.Errorf("policy group %q mode must be manual, auto, or smart", id)
+	}
+	exits, err := normalizePolicyGroupBuildExits(id, in.Exits)
+	if err != nil {
+		return toolResult{}, err
+	}
+	policyGroupIntent := configplan.OverlayPolicyGroupIntent{
+		ID:       id,
+		Mode:     mode,
+		Exits:    exits,
+		Reason:   in.Reason,
+		Boundary: in.Boundary,
+	}
+	return jsonToolResult(map[string]any{
+		"policy_group": policyGroupIntent,
+		"id":           id,
+		"target":       id,
+		"exits":        exits,
+	})
+}
+
+func normalizePolicyGroupBuildExits(groupID string, rawExits []string) ([]string, error) {
+	if len(rawExits) == 0 {
+		return nil, fmt.Errorf("policy group %q exits is required", groupID)
+	}
+	exits := make([]string, 0, len(rawExits))
+	seen := map[string]bool{}
+	for _, rawExit := range rawExits {
+		exit := canonicalBuildTarget(rawExit)
+		if exit == "" {
+			exit = strings.TrimSpace(rawExit)
+		}
+		if exit == "" {
+			return nil, fmt.Errorf("policy group %q has an empty exit", groupID)
+		}
+		if seen[exit] {
+			continue
+		}
+		seen[exit] = true
+		exits = append(exits, exit)
+	}
+	return exits, nil
+}
+
+func canonicalBuildTarget(target string) string {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "direct", "reject", "proxy", "manual":
+		return strings.ToUpper(strings.TrimSpace(target))
+	default:
+		return ""
+	}
 }
 
 func callCustomRulesBuild(args json.RawMessage) (toolResult, error) {

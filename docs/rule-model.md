@@ -206,6 +206,8 @@ subscription proxies
 The renderer owns:
 
 - proxy groups
+- optional policy groups that expose business-layer choices before selecting
+  proxy-group exits
 - rule provider definitions
 - rule order
 - local DNS safety policy

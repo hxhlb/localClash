@@ -17,6 +17,7 @@ type OverlayMetadata struct {
 	Modifiable    bool                  `yaml:"modifiable" json:"modifiable"`
 	Packs         []OverlayPack         `yaml:"packs" json:"packs"`
 	ProxyGroups   []OverlayProxyGroup   `yaml:"proxy_groups" json:"proxy_groups"`
+	PolicyGroups  []OverlayPolicyGroup  `yaml:"policy_groups" json:"policy_groups"`
 	RuleProviders []OverlayRuleProvider `yaml:"rule_providers" json:"rule_providers"`
 	Rules         []OverlayRule         `yaml:"rules" json:"rules"`
 	Insertion     string                `yaml:"insertion" json:"insertion"`
@@ -33,6 +34,12 @@ type OverlayProxyGroup struct {
 	ID    string   `yaml:"id" json:"id"`
 	Mode  string   `yaml:"mode" json:"mode"`
 	Nodes []string `yaml:"nodes" json:"nodes"`
+}
+
+type OverlayPolicyGroup struct {
+	ID    string   `yaml:"id" json:"id"`
+	Mode  string   `yaml:"mode" json:"mode"`
+	Exits []string `yaml:"exits" json:"exits"`
 }
 
 type OverlayRuleProvider struct {

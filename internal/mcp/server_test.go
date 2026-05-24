@@ -110,7 +110,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -146,6 +146,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"config_patch_create":       SafeWrite,
 		"config_render":             SafeWrite,
 		"proxy_group_build":         SafeWrite,
+		"policy_group_build":        SafeWrite,
 		"custom_rules_build":        SafeWrite,
 		"rule_provider_build":       SafeWrite,
 		"pack_rules_prefetch":       SafeWrite,
@@ -1047,6 +1048,51 @@ func TestToolsCallConfigPatchCreateReturnsSerializableResult(t *testing.T) {
 	}
 }
 
+func TestToolsCallConfigPatchCreateSupportsPolicyGroups(t *testing.T) {
+	paths := setupMCPPlanFixture(t)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_patch_create",
+			"arguments": map[string]any{
+				"patch_name":   "ai-policy",
+				"subscription": paths.subscription,
+				"policy":       paths.policy,
+				"rules_cache":  paths.cache,
+				"patches_dir":  paths.outputDir,
+				"test":         false,
+				"overlay": map[string]any{
+					"packs": []map[string]any{
+						{"id": "blackmatrix7_OpenAI", "target": "AI"},
+					},
+					"proxy_groups": []map[string]any{
+						{"id": "SG", "nodes": []string{"SG 01"}, "mode": "manual"},
+					},
+					"policy_groups": []map[string]any{
+						{"id": "AI", "mode": "manual", "exits": []string{"SG", "DIRECT"}},
+					},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["valid"] != true {
+		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
+	}
+	config := readMCPFile(t, content["output"].(string))
+	for _, want := range []string{"RULE-SET,blackmatrix7_OpenAI,AI", "name: AI", "- SG", "- DIRECT"} {
+		if !strings.Contains(config, want) {
+			t.Fatalf("candidate config missing %q:\n%s", want, config)
+		}
+	}
+}
+
 func TestToolsCallProxyGroupBuildReturnsReusableIntent(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
@@ -1079,6 +1125,45 @@ func TestToolsCallProxyGroupBuildReturnsReusableIntent(t *testing.T) {
 	nodes := content["selected_nodes"].([]any)
 	if len(nodes) != 1 || nodes[0] != "SG 01" {
 		t.Fatalf("selected_nodes = %+v, want SG 01", nodes)
+	}
+}
+
+func TestToolsCallPolicyGroupBuildReturnsReusableIntent(t *testing.T) {
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "policy_group_build",
+			"arguments": map[string]any{
+				"id":     "Steam",
+				"mode":   "manual",
+				"exits":  []string{"HK", "JP", "direct"},
+				"reason": "Steam traffic should choose from regional exits.",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("policy_group_build returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["target"] != "Steam" {
+		t.Fatalf("target = %v, want Steam", content["target"])
+	}
+	policyGroup := content["policy_group"].(map[string]any)
+	if policyGroup["id"] != "Steam" || policyGroup["mode"] != "manual" {
+		t.Fatalf("policy_group = %+v, want reusable Steam intent", policyGroup)
+	}
+	exits := policyGroup["exits"].([]any)
+	want := []string{"HK", "JP", "DIRECT"}
+	if len(exits) != len(want) {
+		t.Fatalf("policy exits = %+v, want %+v", exits, want)
+	}
+	for i := range want {
+		if exits[i] != want[i] {
+			t.Fatalf("policy exits = %+v, want %+v", exits, want)
+		}
 	}
 }
 

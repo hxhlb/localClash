@@ -65,6 +65,7 @@ type OverlayResult struct {
 	OverlayPresent  bool                             `json:"overlay_present"`
 	Packs           []configmeta.OverlayPack         `json:"packs"`
 	ProxyGroups     []configmeta.OverlayProxyGroup   `json:"proxy_groups"`
+	PolicyGroups    []configmeta.OverlayPolicyGroup  `json:"policy_groups"`
 	RuleProviders   []configmeta.OverlayRuleProvider `json:"rule_providers"`
 	Rules           []configmeta.OverlayRule         `json:"rules"`
 	Insertion       string                           `json:"insertion,omitempty"`
@@ -83,6 +84,8 @@ type IntentResult struct {
 	ResolveError       string               `json:"resolve_error,omitempty"`
 	ProxyGroupsCount   int                  `json:"proxy_groups_count"`
 	ProxyGroups        []IntentProxyGroup   `json:"proxy_groups"`
+	PolicyGroupsCount  int                  `json:"policy_groups_count"`
+	PolicyGroups       []IntentPolicyGroup  `json:"policy_groups"`
 	CustomRulesCount   int                  `json:"custom_rules_count"`
 	CustomRules        []IntentCustomRule   `json:"custom_rules"`
 	RuleProvidersCount int                  `json:"rule_providers_count"`
@@ -103,6 +106,16 @@ type IntentProxyGroup struct {
 	Reason        string             `json:"reason,omitempty"`
 	Boundary      string             `json:"boundary,omitempty"`
 	Status        string             `json:"status"`
+}
+
+type IntentPolicyGroup struct {
+	ID        string   `json:"id"`
+	Mode      string   `json:"mode"`
+	Exits     []string `json:"exits"`
+	ExitCount int      `json:"exit_count"`
+	Reason    string   `json:"reason,omitempty"`
+	Boundary  string   `json:"boundary,omitempty"`
+	Status    string   `json:"status"`
 }
 
 type IntentCustomRule struct {
@@ -156,6 +169,9 @@ func InspectBase(opts Options) (BaseResult, error) {
 		for _, group := range metadata.Overlay.ProxyGroups {
 			overlayProxyGroupNames[group.ID] = true
 		}
+		for _, group := range metadata.Overlay.PolicyGroups {
+			overlayProxyGroupNames[group.ID] = true
+		}
 		for _, rule := range metadata.Overlay.Rules {
 			overlayRuleLines[formatOverlayRule(rule)] = true
 		}
@@ -192,6 +208,7 @@ func InspectOverlay(opts Options) (OverlayResult, error) {
 		Modifiable:    true,
 		Packs:         []configmeta.OverlayPack{},
 		ProxyGroups:   []configmeta.OverlayProxyGroup{},
+		PolicyGroups:  []configmeta.OverlayPolicyGroup{},
 		RuleProviders: []configmeta.OverlayRuleProvider{},
 		Rules:         []configmeta.OverlayRule{},
 	}
@@ -205,11 +222,13 @@ func InspectOverlay(opts Options) (OverlayResult, error) {
 	result.MetadataPresent = true
 	result.Packs = limitOverlayPacks(metadata.Overlay.Packs, limit)
 	result.ProxyGroups = limitOverlayProxyGroups(metadata.Overlay.ProxyGroups, limit)
+	result.PolicyGroups = limitOverlayPolicyGroups(metadata.Overlay.PolicyGroups, limit)
 	result.RuleProviders = limitOverlayRuleProviders(metadata.Overlay.RuleProviders, limit)
 	result.Rules = limitOverlayRules(metadata.Overlay.Rules, limit)
 	result.Insertion = metadata.Overlay.Insertion
 	result.OverlayPresent = len(metadata.Overlay.Packs) > 0 ||
 		len(metadata.Overlay.ProxyGroups) > 0 ||
+		len(metadata.Overlay.PolicyGroups) > 0 ||
 		len(metadata.Overlay.RuleProviders) > 0 ||
 		len(metadata.Overlay.Rules) > 0
 	return result, nil
@@ -223,10 +242,11 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 		Layer:         "intent",
 		Modifiable:    true,
 		ProxyGroups:   []IntentProxyGroup{},
+		PolicyGroups:  []IntentPolicyGroup{},
 		CustomRules:   []IntentCustomRule{},
 		RuleProviders: []IntentRuleProvider{},
 		Packs:         []IntentPack{},
-		Note:          "Intent is read from durable localclash.yaml. Use it before creating a patch to preserve existing proxy groups, packs, custom rules, and rule providers.",
+		Note:          "Intent is read from durable localclash.yaml. Use it before creating a patch to preserve existing proxy groups, policy groups, packs, custom rules, and rule providers.",
 	}
 	config, err := localconfig.Load(path)
 	if err != nil {
@@ -245,15 +265,18 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.Version = config.Version
 	result.PolicyTemplate = config.PolicyTemplate
 	result.ProxyGroupsCount = len(config.ProxyGroups)
+	result.PolicyGroupsCount = len(config.PolicyGroups)
 	result.CustomRulesCount = len(config.CustomRules)
 	result.RuleProvidersCount = len(config.RuleProviders)
 	result.PacksCount = len(config.Packs)
 
 	result.ProxyGroups = proxyGroupIntents(config.ProxyGroups, nil, limit)
+	result.PolicyGroups = policyGroupIntents(config.PolicyGroups, nil, limit)
 	result.CustomRules = customRuleIntents(config.CustomRules, nil, limit)
 	result.RuleProviders = ruleProviderIntents(config.RuleProviders, nil, limit)
 	result.Packs = packIntents(config.Packs, nil, limit)
 	result.Truncated = result.ProxyGroupsCount > len(result.ProxyGroups) ||
+		result.PolicyGroupsCount > len(result.PolicyGroups) ||
 		result.CustomRulesCount > len(result.CustomRules) ||
 		result.RuleProvidersCount > len(result.RuleProviders) ||
 		result.PacksCount > len(result.Packs)
@@ -271,6 +294,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	}
 	result.Resolved = true
 	result.ProxyGroups = proxyGroupIntents(resolved.Config.ProxyGroups, resolved.ProxyGroups, limit)
+	result.PolicyGroups = policyGroupIntents(resolved.Config.PolicyGroups, resolved.PolicyGroups, limit)
 	result.CustomRules = customRuleIntents(resolved.Config.CustomRules, resolved.CustomRules, limit)
 	result.RuleProviders = ruleProviderIntents(resolved.Config.RuleProviders, resolved.RuleProviders, limit)
 	result.Packs = packIntents(resolved.Config.Packs, resolved.Packs, limit)
@@ -365,6 +389,43 @@ func proxyGroupIntents(groups map[string]localconfig.ProxyGroup, resolved []loca
 			Reason:        group.Reason,
 			Boundary:      group.Boundary,
 			Status:        status,
+		})
+	}
+	return out
+}
+
+func policyGroupIntents(groups map[string]localconfig.PolicyGroup, resolved []localconfig.PolicyGroupResult, limit int) []IntentPolicyGroup {
+	resolvedByID := map[string]localconfig.PolicyGroupResult{}
+	for _, group := range resolved {
+		resolvedByID[group.ID] = group
+	}
+	ids := make([]string, 0, len(groups))
+	for id := range groups {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	out := make([]IntentPolicyGroup, 0, len(ids))
+	for _, id := range ids {
+		group := groups[id]
+		exits := append([]string{}, group.Exits...)
+		exitCount := len(exits)
+		status := "configured"
+		if resolvedGroup, ok := resolvedByID[id]; ok {
+			exits = append([]string{}, resolvedGroup.Exits...)
+			exitCount = resolvedGroup.ExitCount
+			status = "resolved"
+		}
+		out = append(out, IntentPolicyGroup{
+			ID:        id,
+			Mode:      strings.ToLower(strings.TrimSpace(group.Mode)),
+			Exits:     exits,
+			ExitCount: exitCount,
+			Reason:    group.Reason,
+			Boundary:  group.Boundary,
+			Status:    status,
 		})
 	}
 	return out
@@ -609,6 +670,13 @@ func limitOverlayProxyGroups(values []configmeta.OverlayProxyGroup, limit int) [
 		values = values[:limit]
 	}
 	return append([]configmeta.OverlayProxyGroup{}, values...)
+}
+
+func limitOverlayPolicyGroups(values []configmeta.OverlayPolicyGroup, limit int) []configmeta.OverlayPolicyGroup {
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return append([]configmeta.OverlayPolicyGroup{}, values...)
 }
 
 func limitOverlayRuleProviders(values []configmeta.OverlayRuleProvider, limit int) []configmeta.OverlayRuleProvider {

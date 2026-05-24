@@ -280,26 +280,34 @@ MCP patch-building tools:
   `name_regex` selector or exact `nodes`. This tool does not persist state; copy
   the returned proxy group into `config_patch_create.overlay.proxy_groups` when a
   patch should use it.
+- `policy_group_build`: build and validate a business-layer policy group such as
+  `Steam` or `AI`. A policy group is a Dashboard-facing rule target whose
+  `exits` point to existing `proxy_groups` such as `HK`, `JP`, `AUTO`, or to
+  built-in targets such as `DIRECT`.
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, or CIDRs that share one target.
 - `rule_provider_build`: build and validate a user-supplied external Mihomo
   rule-provider, such as `US-Proxy` from a raw GitHub URL, before adding it to
   `config_patch_create.overlay.rule_providers`.
-- `config_patch_create`: accepts proxy groups, third-party packs, custom rules,
-  and external rule-providers, then renders candidate `localclash.yaml`, derived
-  `localclash-packs.yaml`, and `mihomo.yaml` into `.runtime/patches/<patch-id>/`.
-  MCP `arguments` must be a JSON object, not a JSON-encoded string. If a pack or
-  custom rule or external provider targets a new proxy group, include that group in
-  `overlay.proxy_groups` in the same call.
+- `config_patch_create`: accepts proxy groups, policy groups, third-party packs,
+  custom rules, and external rule-providers, then renders candidate
+  `localclash.yaml`, derived `localclash-packs.yaml`, and `mihomo.yaml` into
+  `.runtime/patches/<patch-id>/`. MCP `arguments` must be a JSON object, not a
+  JSON-encoded string. If a pack, custom rule, or external provider targets a new
+  proxy group or policy group, include it in `overlay.proxy_groups` or
+  `overlay.policy_groups` in the same call.
 - `config_patch_apply`: applies a reviewed patch by writing durable
   `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
   `generated/mihomo.yaml`.
 
-For pack routing such as "Steam through HK", an agent should first call
+For flat pack routing such as "Steam through HK", an agent should first call
 `config_status` to discover reusable proxy groups and current durable state,
 then call `subscription_nodes_search`, build or reuse the target with
 `proxy_group_build`, inspect the pack with `packs_list` or `packs_get`, and call
-`config_patch_create` with the desired `proxy_groups` and `packs`. For domain
+`config_patch_create` with the desired `proxy_groups` and `packs`. For
+ACL4SSR-style layered routing such as "Steam can choose HK, JP, or US exits",
+build or reuse regional `proxy_groups`, build a `Steam` `policy_group` whose
+`exits` reference those groups, and target the Steam pack at `Steam`. For domain
 routing such as "huggingface.co through temporary line", inspect status,
 search/build or reuse the proxy group, call `custom_rules_build`, then create a
 patch with desired `proxy_groups` and `custom_rules`. For built-in targets such
@@ -316,7 +324,7 @@ up replaced local artifacts, writes `localclash.yaml`, derives
 not start or restart Mihomo; use `run_runtime` for that confirmed step. If an
 agent wants to preserve existing local state, it must first call `config_status`
 and submit the full desired config, including retained packs, custom rules,
-external rule-providers, and proxy groups.
+external rule-providers, proxy groups, and policy groups.
 The normal reviewed-change loop is:
 `config_status` → `config_patch_create` → `config_patch_apply` →
 `config_status`.

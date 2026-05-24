@@ -70,6 +70,7 @@ type PackBackend struct {
 type Selection struct {
 	Version       int                    `yaml:"version"`
 	ProxyGroups   map[string]ProxyGroup  `yaml:"proxy_groups,omitempty"`
+	PolicyGroups  map[string]PolicyGroup `yaml:"policy_groups,omitempty"`
 	CustomRules   []CustomRule           `yaml:"custom_rules,omitempty"`
 	RuleProviders []ExternalRuleProvider `yaml:"rule_providers,omitempty"`
 	EnabledPack   []SelectedPack         `yaml:"enabled_packs"`
@@ -81,6 +82,13 @@ type ProxyGroup struct {
 	Manual bool     `yaml:"manual"`
 	Smart  bool     `yaml:"smart"`
 	Direct bool     `yaml:"direct"`
+}
+
+type PolicyGroup struct {
+	Exits  []string `yaml:"exits"`
+	Auto   bool     `yaml:"auto"`
+	Manual bool     `yaml:"manual"`
+	Smart  bool     `yaml:"smart"`
 }
 
 type SelectedPack struct {
@@ -344,14 +352,13 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		return Fragment{}, err
 	}
 	usedProxyGroups := map[string]bool{}
+	usedPolicyGroups := map[string]bool{}
 	for _, custom := range selection.CustomRules {
-		target, proxyGroup, err := renderTarget(custom.Target, targets)
+		target, kind, err := renderTarget(custom.Target, targets)
 		if err != nil {
 			return Fragment{}, err
 		}
-		if proxyGroup {
-			usedProxyGroups[target] = true
-		}
+		markUsedTarget(target, kind, usedProxyGroups, usedPolicyGroups)
 		lines, err := renderCustomRuleLines(custom, target)
 		if err != nil {
 			return Fragment{}, err
@@ -359,13 +366,11 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		fragment.Rules = append(fragment.Rules, lines...)
 	}
 	for _, provider := range selection.RuleProviders {
-		target, proxyGroup, err := renderTarget(provider.Target, targets)
+		target, kind, err := renderTarget(provider.Target, targets)
 		if err != nil {
 			return Fragment{}, err
 		}
-		if proxyGroup {
-			usedProxyGroups[target] = true
-		}
+		markUsedTarget(target, kind, usedProxyGroups, usedPolicyGroups)
 		rendered, err := renderExternalRuleProvider(provider)
 		if err != nil {
 			return Fragment{}, err
@@ -389,13 +394,11 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		if !pack.Renderable && !packIsGeoSite(pack) {
 			return Fragment{}, fmt.Errorf("pack %q from source %q is not renderable: %s", enabled.Pack, enabled.Source, pack.Reason)
 		}
-		target, proxyGroup, err := renderTarget(enabled.Target, targets)
+		target, kind, err := renderTarget(enabled.Target, targets)
 		if err != nil {
 			return Fragment{}, err
 		}
-		if proxyGroup {
-			usedProxyGroups[target] = true
-		}
+		markUsedTarget(target, kind, usedProxyGroups, usedPolicyGroups)
 		for _, component := range pack.Components {
 			if strings.EqualFold(component.Behavior, "v2fly-dlc") {
 				fragment.Rules = append(fragment.Rules, fmt.Sprintf("GEOSITE,%s,%s", enabled.Pack, target))
@@ -412,11 +415,18 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 			fragment.Rules = append(fragment.Rules, fmt.Sprintf("RULE-SET,%s,%s", providerName, target))
 		}
 	}
+	policyGroups, referencedProxyGroups, err := materializePolicyGroups(usedPolicyGroups, targets)
+	if err != nil {
+		return Fragment{}, err
+	}
+	for name := range referencedProxyGroups {
+		usedProxyGroups[name] = true
+	}
 	proxyGroups, err := materializeProxyGroups(usedProxyGroups, targets)
 	if err != nil {
 		return Fragment{}, err
 	}
-	fragment.ProxyGroups = proxyGroups
+	fragment.ProxyGroups = append(proxyGroups, policyGroups...)
 	return fragment, nil
 }
 
@@ -507,7 +517,8 @@ func findPack(packs []Pack, id string) (Pack, bool) {
 }
 
 type preparedTargets struct {
-	proxyGroups map[string]ProxyGroup
+	proxyGroups  map[string]ProxyGroup
+	policyGroups map[string]PolicyGroup
 }
 
 func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, error) {
@@ -549,25 +560,74 @@ func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, 
 			}
 		}
 	}
-	return preparedTargets{proxyGroups: selection.ProxyGroups}, nil
+	for groupName, group := range selection.PolicyGroups {
+		if _, exists := selection.ProxyGroups[groupName]; exists {
+			return preparedTargets{}, fmt.Errorf("policy group %q conflicts with a proxy group id", groupName)
+		}
+		if len(group.Exits) == 0 {
+			return preparedTargets{}, fmt.Errorf("policy group %q has no exits", groupName)
+		}
+		enabledModes := 0
+		for _, enabled := range []bool{group.Auto, group.Manual, group.Smart} {
+			if enabled {
+				enabledModes++
+			}
+		}
+		if enabledModes > 1 {
+			return preparedTargets{}, fmt.Errorf("policy group %q can enable only one of auto, manual, or smart", groupName)
+		}
+		if enabledModes == 0 {
+			return preparedTargets{}, fmt.Errorf("policy group %q has no enabled choices", groupName)
+		}
+		seen := map[string]bool{}
+		for _, rawExit := range group.Exits {
+			exit := strings.TrimSpace(rawExit)
+			if exit == "" {
+				return preparedTargets{}, fmt.Errorf("policy group %q has an empty exit", groupName)
+			}
+			if seen[exit] {
+				continue
+			}
+			seen[exit] = true
+			if isBuiltInTarget(exit) {
+				continue
+			}
+			if _, ok := selection.ProxyGroups[exit]; !ok {
+				return preparedTargets{}, fmt.Errorf("policy group %q exit %q requires a built-in target or matching proxy group", groupName, exit)
+			}
+		}
+	}
+	return preparedTargets{proxyGroups: selection.ProxyGroups, policyGroups: selection.PolicyGroups}, nil
 }
 
-func renderTarget(target string, targets preparedTargets) (string, bool, error) {
+type targetKind int
+
+const (
+	targetKindBuiltIn targetKind = iota
+	targetKindProxyGroup
+	targetKindPolicyGroup
+)
+
+func renderTarget(target string, targets preparedTargets) (string, targetKind, error) {
 	trimmed := strings.TrimSpace(target)
-	switch strings.ToLower(trimmed) {
-	case "proxy":
-		return "PROXY", false, nil
-	case "direct":
-		return "DIRECT", false, nil
-	case "reject":
-		return "REJECT", false, nil
-	case "manual":
-		return "MANUAL", false, nil
-	default:
-		if _, ok := targets.proxyGroups[trimmed]; ok {
-			return trimmed, true, nil
-		}
-		return "", false, fmt.Errorf("unknown pack target %q", target)
+	if builtIn := canonicalBuiltInTarget(trimmed); builtIn != "" {
+		return builtIn, targetKindBuiltIn, nil
+	}
+	if _, ok := targets.proxyGroups[trimmed]; ok {
+		return trimmed, targetKindProxyGroup, nil
+	}
+	if _, ok := targets.policyGroups[trimmed]; ok {
+		return trimmed, targetKindPolicyGroup, nil
+	}
+	return "", targetKindBuiltIn, fmt.Errorf("unknown pack target %q", target)
+}
+
+func markUsedTarget(target string, kind targetKind, usedProxyGroups map[string]bool, usedPolicyGroups map[string]bool) {
+	switch kind {
+	case targetKindProxyGroup:
+		usedProxyGroups[target] = true
+	case targetKindPolicyGroup:
+		usedPolicyGroups[target] = true
 	}
 }
 
@@ -617,6 +677,55 @@ func materializeProxyGroups(used map[string]bool, targets preparedTargets) ([]ma
 	return groups, nil
 }
 
+func materializePolicyGroups(used map[string]bool, targets preparedTargets) ([]map[string]any, map[string]bool, error) {
+	names := make([]string, 0, len(used))
+	for name := range used {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	referencedProxyGroups := map[string]bool{}
+	var groups []map[string]any
+	for _, name := range names {
+		group := targets.policyGroups[name]
+		candidates, proxies, err := candidatePolicyExits(group, targets)
+		if err != nil {
+			return nil, nil, fmt.Errorf("policy group %q: %w", name, err)
+		}
+		if len(candidates) == 0 {
+			return nil, nil, fmt.Errorf("policy group %q has no candidate exits", name)
+		}
+		for proxy := range proxies {
+			referencedProxyGroups[proxy] = true
+		}
+		if group.Auto {
+			groups = append(groups, map[string]any{
+				"name":     name,
+				"type":     "url-test",
+				"proxies":  candidates,
+				"url":      "http://www.gstatic.com/generate_204",
+				"interval": 300,
+			})
+			continue
+		}
+		if group.Smart {
+			groups = append(groups, map[string]any{
+				"name":        name,
+				"type":        "smart",
+				"proxies":     candidates,
+				"uselightgbm": true,
+				"prefer-asn":  true,
+			})
+			continue
+		}
+		groups = append(groups, map[string]any{
+			"name":    name,
+			"type":    "select",
+			"proxies": candidates,
+		})
+	}
+	return groups, referencedProxyGroups, nil
+}
+
 func candidateProxies(group ProxyGroup) []string {
 	var candidates []string
 	seen := map[string]bool{}
@@ -629,6 +738,40 @@ func candidateProxies(group ProxyGroup) []string {
 		candidates = append(candidates, proxy)
 	}
 	return candidates
+}
+
+func candidatePolicyExits(group PolicyGroup, targets preparedTargets) ([]string, map[string]bool, error) {
+	var candidates []string
+	referencedProxyGroups := map[string]bool{}
+	seen := map[string]bool{}
+	for _, rawExit := range group.Exits {
+		exit, kind, err := renderTarget(rawExit, targets)
+		if err != nil {
+			return nil, nil, err
+		}
+		if exit == "" || seen[exit] {
+			continue
+		}
+		seen[exit] = true
+		candidates = append(candidates, exit)
+		if kind == targetKindProxyGroup {
+			referencedProxyGroups[exit] = true
+		}
+	}
+	return candidates, referencedProxyGroups, nil
+}
+
+func canonicalBuiltInTarget(target string) string {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "proxy", "direct", "reject", "manual":
+		return strings.ToUpper(strings.TrimSpace(target))
+	default:
+		return ""
+	}
+}
+
+func isBuiltInTarget(target string) bool {
+	return canonicalBuiltInTarget(target) != ""
 }
 
 func appendUniqueString(values []string, value string) []string {

@@ -72,6 +72,7 @@ func Registry() []Tool {
 		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config patch."},
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read rules for one pack by id, downloading missing provider-cache entries for that pack only, and return backend metadata such as rule_provider/RULE-SET or geosite/GEOSITE."},
+		{Name: "policy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a business-layer policy group that routes one rule domain, app, or scenario to existing exits such as HK, JP, US, AUTO, or DIRECT. This does not persist state; copy the returned policy_group into config_patch_create.overlay.policy_groups."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_create.overlay.proxy_groups when a patch should use it."},
 		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_create.overlay.rule_providers."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
@@ -279,7 +280,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"id":                   map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
 				"match":                matchIntent,
 				"nodes":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test on meta core and smart on smart core; smart explicitly requires the smart core."},
+				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
 				"reason":               map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
 				"boundary":             map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path. Defaults to subscription.yaml."},
@@ -288,6 +289,8 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "mode"},
 		}
+	case "policy_group_build":
+		return policyGroupInputSchema("Policy group id referenced by packs[].target, custom_rules[].target, or rule_providers[].target, for example Steam.")
 	case "custom_rules_build":
 		ruleIntent := map[string]any{
 			"type":                 "object",
@@ -304,7 +307,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
-				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, or a proxy group id built by proxy_group_build."},
+				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, a proxy group id built by proxy_group_build, or a policy group id built by policy_group_build."},
 				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
 				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
 			},
@@ -352,7 +355,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
-				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, or a proxy group id."},
+				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, a proxy group id, or a policy group id."},
 				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
 				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
 			},
@@ -366,12 +369,13 @@ func inputSchemaForTool(name string) map[string]any {
 				"id":       map[string]any{"type": "string", "description": "Proxy group id referenced by packs[].target, for example SteamHK."},
 				"match":    matchIntent,
 				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test on meta core and smart on smart core; smart explicitly requires the smart core."},
+				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
 				"reason":   map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs Agent involvement."},
 				"boundary": map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
 			},
 			"required": []string{"id", "mode"},
 		}
+		policyGroupIntent := policyGroupInputSchema("Policy group id referenced by packs[].target, custom_rules[].target, or rule_providers[].target, for example Steam.")
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -391,13 +395,14 @@ func inputSchemaForTool(name string) map[string]any {
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
 				"overlay": map[string]any{
 					"type":                 "object",
-					"description":          "Desired localClash overlay. If packs[].target, custom_rules[].target, or rule_providers[].target references a proxy group that is not already in durable localclash.yaml, include that proxy group in overlay.proxy_groups in this same call.",
+					"description":          "Desired localClash overlay. If a target references a proxy group or policy group that is not already in durable localclash.yaml, include it in overlay.proxy_groups or overlay.policy_groups in this same call. policy_groups are business-layer entries whose exits point to proxy_groups or built-in targets.",
 					"additionalProperties": false,
 					"properties": map[string]any{
 						"packs":          map[string]any{"type": "array", "items": packIntent},
 						"custom_rules":   map[string]any{"type": "array", "items": customRuleIntent},
 						"rule_providers": map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},
 						"proxy_groups":   map[string]any{"type": "array", "items": proxyGroupIntent},
+						"policy_groups":  map[string]any{"type": "array", "items": policyGroupIntent},
 					},
 				},
 			},
@@ -633,7 +638,7 @@ func ruleProviderInputSchema(idDescription string) map[string]any {
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"id":       map[string]any{"type": "string", "description": idDescription},
-			"target":   map[string]any{"type": "string", "description": "Rule target such as DIRECT, REJECT, PROXY, or a proxy group id."},
+			"target":   map[string]any{"type": "string", "description": "Rule target such as DIRECT, REJECT, PROXY, a proxy group id, or a policy group id."},
 			"reason":   map[string]any{"type": "string", "description": "Short durable reason for this external provider."},
 			"type":     map[string]any{"type": "string", "enum": []string{"http", "file"}, "description": "Mihomo rule-provider type. Defaults to http."},
 			"behavior": map[string]any{"type": "string", "enum": []string{"classical", "domain", "ipcidr"}, "description": "Mihomo rule-provider behavior. Defaults to classical."},
@@ -643,5 +648,20 @@ func ruleProviderInputSchema(idDescription string) map[string]any {
 			"interval": map[string]any{"type": "integer", "minimum": 0, "description": "Refresh interval in seconds. Defaults to 86400 for http providers."},
 		},
 		"required": []string{"id", "target"},
+	}
+}
+
+func policyGroupInputSchema(idDescription string) map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"id":       map[string]any{"type": "string", "description": idDescription},
+			"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Desired policy-group mode. manual becomes a Dashboard select group over exits; auto becomes url-test over exits; smart becomes a smart group over exits."},
+			"exits":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exit targets for this business layer, for example HK, JP, US, AUTO, DIRECT, or PROXY. Non-built-in exits must be provided by overlay.proxy_groups or existing durable proxy_groups."},
+			"reason":   map[string]any{"type": "string", "description": "Short durable reason for this business routing group."},
+			"boundary": map[string]any{"type": "string", "description": "Boundary note, for example business_layer_selects_exit_groups."},
+		},
+		"required": []string{"id", "mode", "exits"},
 	}
 }

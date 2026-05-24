@@ -18,6 +18,7 @@ type Config struct {
 	Version        int                    `json:"version" yaml:"version"`
 	PolicyTemplate string                 `json:"policy_template,omitempty" yaml:"policy_template,omitempty"`
 	ProxyGroups    map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
+	PolicyGroups   map[string]PolicyGroup `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
 	CustomRules    []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
 	RuleProviders  []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
 	Packs          []Pack                 `json:"packs" yaml:"packs,omitempty"`
@@ -30,6 +31,13 @@ type ProxyGroup struct {
 	SelectedNodes []string `json:"selected_nodes,omitempty" yaml:"selected_nodes,omitempty"`
 	Reason        string   `json:"reason,omitempty" yaml:"reason,omitempty"`
 	Boundary      string   `json:"boundary,omitempty" yaml:"boundary,omitempty"`
+}
+
+type PolicyGroup struct {
+	Mode     string   `json:"mode" yaml:"mode"`
+	Exits    []string `json:"exits" yaml:"exits"`
+	Reason   string   `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Boundary string   `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 }
 
 type Match struct {
@@ -85,6 +93,7 @@ type Resolved struct {
 	Config        Config               `json:"config"`
 	Selection     rules.Selection      `json:"selection"`
 	ProxyGroups   []ProxyGroupResult   `json:"proxy_groups"`
+	PolicyGroups  []PolicyGroupResult  `json:"policy_groups"`
 	CustomRules   []CustomRuleResult   `json:"custom_rules"`
 	RuleProviders []RuleProviderResult `json:"rule_providers"`
 	Packs         []PackResult         `json:"packs"`
@@ -99,6 +108,15 @@ type ProxyGroupResult struct {
 	NodeCount     int      `json:"node_count"`
 	Reason        string   `json:"reason,omitempty"`
 	Boundary      string   `json:"boundary,omitempty"`
+}
+
+type PolicyGroupResult struct {
+	ID        string   `json:"id"`
+	Mode      string   `json:"mode"`
+	Exits     []string `json:"exits"`
+	ExitCount int      `json:"exit_count"`
+	Reason    string   `json:"reason,omitempty"`
+	Boundary  string   `json:"boundary,omitempty"`
 }
 
 type PackResult struct {
@@ -203,12 +221,16 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		return Resolved{}, err
 	}
 	selection := rules.Selection{
-		Version:     1,
-		ProxyGroups: map[string]rules.ProxyGroup{},
+		Version:      1,
+		ProxyGroups:  map[string]rules.ProxyGroup{},
+		PolicyGroups: map[string]rules.PolicyGroup{},
 	}
 	resolvedConfig := opts.Config
 	if resolvedConfig.ProxyGroups == nil {
 		resolvedConfig.ProxyGroups = map[string]ProxyGroup{}
+	}
+	if resolvedConfig.PolicyGroups == nil {
+		resolvedConfig.PolicyGroups = map[string]PolicyGroup{}
 	}
 	groupIDs := make([]string, 0, len(resolvedConfig.ProxyGroups))
 	for id := range resolvedConfig.ProxyGroups {
@@ -218,14 +240,60 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	var groupResults []ProxyGroupResult
 	for _, id := range groupIDs {
 		group := resolvedConfig.ProxyGroups[id]
-		selected, err := resolveProxyGroup(id, group, nodes)
-		if err != nil {
-			return Resolved{}, err
+		mode := strings.ToLower(strings.TrimSpace(group.Mode))
+		var selected []string
+		var err error
+		if mode == "direct" {
+			if group.Match != nil || len(group.Nodes) > 0 {
+				return Resolved{}, fmt.Errorf("proxy group %q direct mode cannot use match or nodes", id)
+			}
+		} else {
+			selected, err = resolveProxyGroup(id, group, nodes)
+			if err != nil {
+				return Resolved{}, err
+			}
 		}
+		group.Mode = mode
 		group.SelectedNodes = selected
 		resolvedConfig.ProxyGroups[id] = group
 		ruleGroup := rules.ProxyGroup{Nodes: selected}
-		switch strings.ToLower(strings.TrimSpace(group.Mode)) {
+		switch mode {
+		case "manual":
+			ruleGroup.Manual = true
+		case "auto":
+			ruleGroup.Auto = true
+		case "smart":
+			ruleGroup.Smart = true
+		case "direct":
+			ruleGroup.Direct = true
+		default:
+			return Resolved{}, fmt.Errorf("proxy group %q mode must be manual, auto, smart, or direct", id)
+		}
+		selection.ProxyGroups[id] = ruleGroup
+		groupResults = append(groupResults, ProxyGroupResult{
+			ID:            id,
+			Mode:          mode,
+			Match:         group.Match,
+			SelectedNodes: append([]string{}, selected...),
+			NodeCount:     len(selected),
+			Reason:        group.Reason,
+			Boundary:      group.Boundary,
+		})
+	}
+	policyIDs := make([]string, 0, len(resolvedConfig.PolicyGroups))
+	for id := range resolvedConfig.PolicyGroups {
+		if _, exists := resolvedConfig.ProxyGroups[id]; exists {
+			return Resolved{}, fmt.Errorf("policy group %q conflicts with a proxy group id", id)
+		}
+		policyIDs = append(policyIDs, id)
+	}
+	sort.Strings(policyIDs)
+	var policyResults []PolicyGroupResult
+	for _, id := range policyIDs {
+		group := resolvedConfig.PolicyGroups[id]
+		mode := strings.ToLower(strings.TrimSpace(group.Mode))
+		ruleGroup := rules.PolicyGroup{Exits: normalizePolicyGroupExits(group.Exits)}
+		switch mode {
 		case "manual":
 			ruleGroup.Manual = true
 		case "auto":
@@ -233,17 +301,22 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		case "smart":
 			ruleGroup.Smart = true
 		default:
-			return Resolved{}, fmt.Errorf("proxy group %q mode must be manual, auto, or smart", id)
+			return Resolved{}, fmt.Errorf("policy group %q mode must be manual, auto, or smart", id)
 		}
-		selection.ProxyGroups[id] = ruleGroup
-		groupResults = append(groupResults, ProxyGroupResult{
-			ID:            id,
-			Mode:          strings.ToLower(strings.TrimSpace(group.Mode)),
-			Match:         group.Match,
-			SelectedNodes: append([]string{}, selected...),
-			NodeCount:     len(selected),
-			Reason:        group.Reason,
-			Boundary:      group.Boundary,
+		if err := validatePolicyGroupExits(id, ruleGroup.Exits, selection.ProxyGroups); err != nil {
+			return Resolved{}, err
+		}
+		group.Mode = mode
+		group.Exits = append([]string{}, ruleGroup.Exits...)
+		resolvedConfig.PolicyGroups[id] = group
+		selection.PolicyGroups[id] = ruleGroup
+		policyResults = append(policyResults, PolicyGroupResult{
+			ID:        id,
+			Mode:      mode,
+			Exits:     append([]string{}, ruleGroup.Exits...),
+			ExitCount: len(ruleGroup.Exits),
+			Reason:    group.Reason,
+			Boundary:  group.Boundary,
 		})
 	}
 	resolvedPacks := make([]Pack, 0, len(resolvedConfig.Packs))
@@ -260,29 +333,27 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		if target == "" {
 			return Resolved{}, fmt.Errorf("pack %q target is required", pack.ID)
 		}
-		if !isBuiltInTarget(target) {
-			if _, ok := selection.ProxyGroups[target]; !ok {
-				return Resolved{}, fmt.Errorf("pack target %q requires a matching proxy group", target)
-			}
+		if !isKnownTarget(target, selection.ProxyGroups, selection.PolicyGroups) {
+			return Resolved{}, fmt.Errorf("pack target %q requires a matching proxy group or policy group", target)
 		}
 		selection.EnabledPack = append(selection.EnabledPack, rules.SelectedPack{Source: ref.Source, Pack: ref.Pack, Target: target})
 		resolvedPacks = append(resolvedPacks, Pack{ID: ref.ID, Type: ref.Type, Target: target, Reason: pack.Reason})
 		packResults = append(packResults, PackResult{ID: ref.ID, Type: ref.Type, Target: target, Reason: pack.Reason})
 	}
 	resolvedConfig.Packs = resolvedPacks
-	resolvedCustomRules, customRuleResults, err := resolveCustomRules(resolvedConfig.CustomRules, selection.ProxyGroups)
+	resolvedCustomRules, customRuleResults, err := resolveCustomRules(resolvedConfig.CustomRules, selection.ProxyGroups, selection.PolicyGroups)
 	if err != nil {
 		return Resolved{}, err
 	}
 	resolvedConfig.CustomRules = resolvedCustomRules
 	selection.CustomRules = customRulesForSelection(resolvedCustomRules)
-	resolvedRuleProviders, ruleProviderResults, err := resolveRuleProviders(resolvedConfig.RuleProviders, selection.ProxyGroups)
+	resolvedRuleProviders, ruleProviderResults, err := resolveRuleProviders(resolvedConfig.RuleProviders, selection.ProxyGroups, selection.PolicyGroups)
 	if err != nil {
 		return Resolved{}, err
 	}
 	resolvedConfig.RuleProviders = resolvedRuleProviders
 	selection.RuleProviders = ruleProvidersForSelection(resolvedRuleProviders)
-	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, CustomRules: customRuleResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
+	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, PolicyGroups: policyResults, CustomRules: customRuleResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
 }
 
 func assertPackType(id, declared, actual string) error {
@@ -466,7 +537,42 @@ func resolveExactNodes(id string, rawNodes []string, nodes []SubscriptionNode) (
 	return selected, nil
 }
 
-func resolveCustomRules(customRules []CustomRule, proxyGroups map[string]rules.ProxyGroup) ([]CustomRule, []CustomRuleResult, error) {
+func normalizePolicyGroupExits(rawExits []string) []string {
+	exits := make([]string, 0, len(rawExits))
+	seen := map[string]bool{}
+	for _, raw := range rawExits {
+		exit := canonicalBuiltInTarget(raw)
+		if exit == "" {
+			exit = strings.TrimSpace(raw)
+		}
+		if seen[exit] {
+			continue
+		}
+		seen[exit] = true
+		exits = append(exits, exit)
+	}
+	return exits
+}
+
+func validatePolicyGroupExits(id string, exits []string, proxyGroups map[string]rules.ProxyGroup) error {
+	if len(exits) == 0 {
+		return fmt.Errorf("policy group %q exits is required", id)
+	}
+	for _, exit := range exits {
+		if strings.TrimSpace(exit) == "" {
+			return fmt.Errorf("policy group %q contains an empty exit", id)
+		}
+		if isBuiltInTarget(exit) {
+			continue
+		}
+		if _, ok := proxyGroups[exit]; !ok {
+			return fmt.Errorf("policy group %q exit %q requires a built-in target or matching proxy group", id, exit)
+		}
+	}
+	return nil
+}
+
+func resolveCustomRules(customRules []CustomRule, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) ([]CustomRule, []CustomRuleResult, error) {
 	resolved := make([]CustomRule, 0, len(customRules))
 	results := make([]CustomRuleResult, 0, len(customRules))
 	ids := map[string]bool{}
@@ -483,10 +589,8 @@ func resolveCustomRules(customRules []CustomRule, proxyGroups map[string]rules.P
 		if target == "" {
 			return nil, nil, fmt.Errorf("custom rule %q target is required", id)
 		}
-		if !isBuiltInTarget(target) {
-			if _, ok := proxyGroups[target]; !ok {
-				return nil, nil, fmt.Errorf("custom rule target %q requires a matching proxy group", target)
-			}
+		if !isKnownTarget(target, proxyGroups, policyGroups) {
+			return nil, nil, fmt.Errorf("custom rule target %q requires a matching proxy group or policy group", target)
 		}
 		if len(custom.Rules) == 0 {
 			return nil, nil, fmt.Errorf("custom rule %q rules is required", id)
@@ -528,7 +632,7 @@ func normalizeCustomRuleLine(id string, rule CustomRuleLine) (CustomRuleLine, er
 	return rule, nil
 }
 
-func resolveRuleProviders(providers []ExternalRuleProvider, proxyGroups map[string]rules.ProxyGroup) ([]ExternalRuleProvider, []RuleProviderResult, error) {
+func resolveRuleProviders(providers []ExternalRuleProvider, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) ([]ExternalRuleProvider, []RuleProviderResult, error) {
 	resolved := make([]ExternalRuleProvider, 0, len(providers))
 	results := make([]RuleProviderResult, 0, len(providers))
 	ids := map[string]bool{}
@@ -541,10 +645,8 @@ func resolveRuleProviders(providers []ExternalRuleProvider, proxyGroups map[stri
 			return nil, nil, fmt.Errorf("rule provider %q is defined more than once", normalized.ID)
 		}
 		ids[normalized.ID] = true
-		if !isBuiltInTarget(normalized.Target) {
-			if _, ok := proxyGroups[normalized.Target]; !ok {
-				return nil, nil, fmt.Errorf("rule provider target %q requires a matching proxy group", normalized.Target)
-			}
+		if !isKnownTarget(normalized.Target, proxyGroups, policyGroups) {
+			return nil, nil, fmt.Errorf("rule provider target %q requires a matching proxy group or policy group", normalized.Target)
 		}
 		resolved = append(resolved, normalized)
 		results = append(results, ruleProviderResult(normalized))
@@ -745,10 +847,28 @@ func uniqueName(name string, used map[string]bool) string {
 }
 
 func isBuiltInTarget(target string) bool {
+	return canonicalBuiltInTarget(target) != ""
+}
+
+func canonicalBuiltInTarget(target string) string {
 	switch strings.ToLower(strings.TrimSpace(target)) {
 	case "direct", "reject", "proxy", "manual":
-		return true
+		return strings.ToUpper(strings.TrimSpace(target))
 	default:
-		return false
+		return ""
 	}
+}
+
+func isKnownTarget(target string, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) bool {
+	if isBuiltInTarget(target) {
+		return true
+	}
+	trimmed := strings.TrimSpace(target)
+	if _, ok := proxyGroups[trimmed]; ok {
+		return true
+	}
+	if _, ok := policyGroups[trimmed]; ok {
+		return true
+	}
+	return false
 }
