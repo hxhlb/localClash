@@ -114,7 +114,7 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestRefreshFetchesArtifactsAndMergesWithCollisionRename(t *testing.T) {
+func TestRefreshFetchesArtifactsAndPrefixesMultiSourceNodes(t *testing.T) {
 	var gotUA string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.UserAgent()
@@ -170,14 +170,53 @@ rules:
 	assertFileExists(t, filepath.Join(paths.runtimeDir, "primary.yaml"))
 	assertFileExists(t, filepath.Join(paths.runtimeDir, "backup.yaml"))
 	assertFileExists(t, paths.merged)
-	if result.Merged.ProxiesCount != 3 || result.Merged.RenamedProxiesCount != 2 {
-		t.Fatalf("merged = %+v, want 3 proxies and 2 renamed", result.Merged)
+	if result.Merged.ProxiesCount != 3 || result.Merged.RenamedProxiesCount != 3 {
+		t.Fatalf("merged = %+v, want 3 proxies and 3 renamed", result.Merged)
 	}
 	merged := readTestFile(t, paths.merged)
-	for _, want := range []string{"[primary] Same", "[backup] Same", "Unique"} {
+	for _, want := range []string{"[primary] Same", "[backup] Same", "[backup] Unique"} {
 		if !strings.Contains(merged, want) {
 			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
 		}
+	}
+	assertNoTokenLeak(t, result)
+}
+
+func TestRefreshSingleSourcePreservesNodeNames(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`proxies:
+  - name: HK 01
+    type: ss
+    server: hk.example
+    password: secret
+  - name: SG 01
+    type: ss
+    server: sg.example
+    password: secret
+`))
+	}))
+	defer server.Close()
+	paths := writeRefreshConfig(t, []Source{{ID: "primary", URL: server.URL + "/sub?token=secret-token"}})
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Merged.ProxiesCount != 2 || result.Merged.RenamedProxiesCount != 0 {
+		t.Fatalf("merged = %+v, want 2 proxies and no renamed nodes", result.Merged)
+	}
+	merged := readTestFile(t, paths.merged)
+	for _, want := range []string{"name: HK 01", "name: SG 01"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
+		}
+	}
+	if strings.Contains(merged, "[primary]") {
+		t.Fatalf("single-source merged subscription should not add source prefix:\n%s", merged)
 	}
 	assertNoTokenLeak(t, result)
 }

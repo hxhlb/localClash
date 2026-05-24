@@ -45,6 +45,10 @@ packs:
 					Mode:  "manual",
 					Match: &Match{Type: "name_regex", Pattern: "HK", SourceIDs: []string{"main"}, Min: 1},
 				},
+				"MainSG": {
+					Mode:  "manual",
+					Match: &Match{Type: "name_regex", Pattern: "SG", SourceIDs: []string{"main"}, Min: 1},
+				},
 			},
 			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "SteamHK"}},
 		},
@@ -58,6 +62,11 @@ packs:
 	}
 	got := resolved.Config.ProxyGroups["SteamHK"].SelectedNodes
 	want := []string{"[main] HK 01"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected nodes = %#v, want %#v", got, want)
+	}
+	got = resolved.Config.ProxyGroups["MainSG"].SelectedNodes
+	want = []string{"[main] SG 01"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected nodes = %#v, want %#v", got, want)
 	}

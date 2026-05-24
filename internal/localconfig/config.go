@@ -416,7 +416,6 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 	if err := yaml.Unmarshal(data, &sources); err != nil {
 		return nil, err
 	}
-	nameCounts := map[string]int{}
 	sourceDocs := map[string][]map[string]any{}
 	for _, source := range sources.Sources {
 		if source.ID == "" {
@@ -428,16 +427,14 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 		}
 		proxies := anyMapSlice(doc["proxies"])
 		sourceDocs[source.ID] = proxies
-		for _, proxy := range proxies {
-			nameCounts[stringValue(proxy["name"])]++
-		}
 	}
+	prefixSource := len(sourceDocs) > 1
 	usedNames := map[string]bool{}
 	var nodes []SubscriptionNode
 	for _, source := range sources.Sources {
 		for _, proxy := range sourceDocs[source.ID] {
 			name := stringValue(proxy["name"])
-			if nameCounts[name] > 1 {
+			if prefixSource {
 				name = "[" + source.ID + "] " + name
 			}
 			name = uniqueName(name, usedNames)

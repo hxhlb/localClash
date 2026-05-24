@@ -450,13 +450,7 @@ func writeSubscriptionArtifact(path string, doc map[string]any) error {
 }
 
 func mergeSubscriptions(sources []Source, docs map[string]subscriptionDoc) (map[string]any, int, error) {
-	nameCounts := map[string]int{}
-	for _, doc := range docs {
-		for _, rawProxy := range anySlice(doc.Data["proxies"]) {
-			proxy := rawProxy.(map[string]any)
-			nameCounts[stringValue(proxy["name"])]++
-		}
-	}
+	prefixSource := len(docs) > 1
 	usedNames := map[string]bool{}
 	var mergedProxies []any
 	renamed := 0
@@ -467,12 +461,15 @@ func mergeSubscriptions(sources []Source, docs map[string]subscriptionDoc) (map[
 		}
 		for _, rawProxy := range anySlice(doc.Data["proxies"]) {
 			proxy := cloneMap(rawProxy.(map[string]any))
-			name := stringValue(proxy["name"])
-			if nameCounts[name] > 1 {
+			originalName := stringValue(proxy["name"])
+			name := originalName
+			if prefixSource {
 				name = "[" + source.ID + "] " + name
-				renamed++
 			}
 			name = uniqueProxyName(name, usedNames)
+			if name != originalName {
+				renamed++
+			}
 			proxy["name"] = name
 			usedNames[name] = true
 			mergedProxies = append(mergedProxies, proxy)

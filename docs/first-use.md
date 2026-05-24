@@ -54,7 +54,10 @@ go run . mcp
 ```
 
 The MCP path stores source URLs in `localclash-subscriptions.yaml` and produces
-the merged `subscription.yaml`.
+the merged `subscription.yaml`. When more than one source is configured, merged
+proxy names are prefixed with `[source-id]` so Dashboard and MCP selectors can
+show where each node came from. A single source keeps the provider's original
+node names unless a local duplicate still needs disambiguation.
 
 ## 4. Render and Validate Config
 
