@@ -32,7 +32,7 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	if !result.DryRun || len(result.Deleted) != 9 {
 		t.Fatalf("result = %+v, want dry-run with nine delete targets", result)
 	}
-	for _, path := range []string{filepath.Join(".runtime", "logs"), "generated", "localclash.yaml", "localclash-subscriptions.yaml", "localclash-runtime.yaml", "profiles", "subscription.yaml", "subscription-backup.yaml"} {
+	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-subscriptions.yaml", "localclash-runtime.yaml", "profiles", "subscription.yaml", "subscription-backup.yaml"} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should remain after dry-run: %v", path, err)
 		}
@@ -46,8 +46,6 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	writeResetFile(t, filepath.Join(".runtime", "mihomo", "logs", "mihomo.log"), "log")
-	writeResetFile(t, filepath.Join(".runtime", "mihomo", "ui", "zashboard", "index.html"), "dashboard")
-	writeResetFile(t, filepath.Join(".runtime", "mihomo", "geoip.dat"), "geoip")
 	writeResetFile(t, filepath.Join("generated", "mihomo.yaml"), "config")
 	writeResetFile(t, filepath.Join("bin", "mihomo"), "binary")
 	writeResetFile(t, filepath.Join("policies", "loyalsoldier.yaml"), "policy")
@@ -64,12 +62,12 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	if _, err := Run(Options{Yes: true, Out: &out}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{filepath.Join(".runtime", "mihomo", "logs"), "generated", "localclash.yaml", "localclash-packs.yaml", "localclash-subscriptions.yaml", "localclash-runtime.yaml", "profiles", "subscription.yaml"} {
+	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-packs.yaml", "localclash-subscriptions.yaml", "localclash-runtime.yaml", "profiles", "subscription.yaml"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s should be deleted, err=%v", path, err)
 		}
 	}
-	for _, path := range []string{filepath.Join("bin", "mihomo"), filepath.Join("policies", "loyalsoldier.yaml"), filepath.Join("policy-templates", "minimal.yaml"), filepath.Join("rule-sources", "source.yaml"), filepath.Join(".runtime", "mihomo", "ui", "zashboard", "index.html"), filepath.Join(".runtime", "mihomo", "geoip.dat")} {
+	for _, path := range []string{filepath.Join("bin", "mihomo"), filepath.Join("policies", "loyalsoldier.yaml"), filepath.Join("policy-templates", "minimal.yaml"), filepath.Join("rule-sources", "source.yaml")} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should be kept: %v", path, err)
 		}
