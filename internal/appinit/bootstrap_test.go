@@ -67,15 +67,15 @@ packs:
 `, 0o644)
 
 	state := Bootstrap(context.Background(), Options{
-		RuntimeRoot:      filepath.Join(dir, ".runtime"),
-		RuleSourcesDir:   filepath.Join(dir, "rule-sources"),
-		RulesCacheDir:    cacheDir,
-		GeneratedConfig:  filepath.Join(dir, "generated", "mihomo.yaml"),
-		SubscriptionPath: subscription,
-		MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
-		CorePath:         core,
-		PolicyPath:       policy,
-		RuntimeProfilePath:       filepath.Join(dir, "localclash-runtime.yaml"),
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "rule-sources"),
+		RulesCacheDir:      cacheDir,
+		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+		SubscriptionPath:   subscription,
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           core,
+		PolicyPath:         policy,
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.yaml"),
 	})
 
 	if !state.Core.Exists || !strings.Contains(state.Core.Version, "Mihomo test") {
@@ -98,15 +98,15 @@ packs:
 func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 	dir := t.TempDir()
 	state := Bootstrap(context.Background(), Options{
-		RuntimeRoot:      filepath.Join(dir, ".runtime"),
-		RuleSourcesDir:   filepath.Join(dir, "missing-rule-sources"),
-		RulesCacheDir:    filepath.Join(dir, ".runtime", "rules", "packs"),
-		GeneratedConfig:  filepath.Join(dir, "generated", "mihomo.yaml"),
-		SubscriptionPath: filepath.Join(dir, "subscription.yaml"),
-		MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
-		CorePath:         filepath.Join(dir, "bin", "mihomo"),
-		PolicyPath:       filepath.Join(dir, "policy.yaml"),
-		RuntimeProfilePath:       filepath.Join(dir, "localclash-runtime.yaml"),
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+		SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           filepath.Join(dir, "bin", "mihomo"),
+		PolicyPath:         filepath.Join(dir, "policy.yaml"),
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.yaml"),
 	})
 
 	if state.Core.Exists {
@@ -123,6 +123,33 @@ func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 	}
 	if _, err := os.Stat(state.Paths.RulesCacheDir); err != nil {
 		t.Fatalf("rules cache dir should be created: %v", err)
+	}
+}
+
+func TestBootstrapDefaultsToDetectedRouterWorkDir(t *testing.T) {
+	wrongDir := t.TempDir()
+	routerDir := t.TempDir()
+	t.Chdir(wrongDir)
+	writeAppinitFile(t, filepath.Join(routerDir, "generated", "mihomo.yaml"), "mixed-port: 7890\n", 0o644)
+	oldCandidates := defaultWorkDirCandidates
+	defaultWorkDirCandidates = []string{routerDir}
+	t.Cleanup(func() {
+		defaultWorkDirCandidates = oldCandidates
+	})
+
+	state := Bootstrap(context.Background(), Options{})
+
+	if state.Paths.MihomoRuntimeDir != filepath.Join(routerDir, ".runtime", "mihomo") {
+		t.Fatalf("mihomo runtime dir = %q, want detected router workdir", state.Paths.MihomoRuntimeDir)
+	}
+	if state.Paths.GeneratedConfig != filepath.Join(routerDir, "generated", "mihomo.yaml") {
+		t.Fatalf("generated config = %q, want detected router workdir", state.Paths.GeneratedConfig)
+	}
+	if got := defaultWorkDirPath(state.Paths.RuntimeRoot, "localclash.yaml"); got != filepath.Join(routerDir, "localclash.yaml") {
+		t.Fatalf("localclash config path = %q, want detected router workdir", got)
+	}
+	if _, err := os.Stat(filepath.Join(wrongDir, ".runtime")); !os.IsNotExist(err) {
+		t.Fatalf("bootstrap should not create runtime dir in wrong cwd, err=%v", err)
 	}
 }
 

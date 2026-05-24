@@ -64,6 +64,55 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeStatusUsesDetectedWorkDir(t *testing.T) {
+	installDir := t.TempDir()
+	wrongDir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", installDir)
+	t.Chdir(wrongDir)
+
+	workDir := filepath.Join(installDir, ".runtime", "mihomo")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(installDir, "generated", "mihomo.yaml")
+	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	core := filepath.Join(installDir, "bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	cmd := startFakeRuntime(t, core, workDir, config)
+	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() error {
+		return run([]string{"runtime", "status", "--json"})
+	})
+	var result struct {
+		OK     bool `json:"ok"`
+		Status struct {
+			Running    bool   `json:"running"`
+			PID        int    `json:"pid"`
+			RuntimeDir string `json:"runtime_dir"`
+			Config     string `json:"config"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("status JSON = %q, error = %v", output, err)
+	}
+	if !result.OK || !result.Status.Running || result.Status.PID != cmd.Process.Pid {
+		t.Fatalf("status result = %+v, want detected runtime", result)
+	}
+	if result.Status.RuntimeDir != workDir || result.Status.Config != config {
+		t.Fatalf("status paths = runtime %q config %q, want detected workdir", result.Status.RuntimeDir, result.Status.Config)
+	}
+	if _, err := os.Stat(filepath.Join(wrongDir, ".runtime")); !os.IsNotExist(err) {
+		t.Fatalf("runtime status should not create state under wrong cwd, err=%v", err)
+	}
+}
+
 func TestRunProductStatusPrintsJSONEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
