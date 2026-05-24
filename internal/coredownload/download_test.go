@@ -2,6 +2,7 @@ package coredownload
 
 import (
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -138,5 +139,44 @@ func TestDefaultHostOutputPathIncludesCurrentPlatform(t *testing.T) {
 	}
 	if got := outputPath(opts, FlavorMeta); got != want {
 		t.Fatalf("host output path = %q, want %q", got, want)
+	}
+}
+
+func TestDownloadCandidatesMirrorsGitHubReleaseBeforeDirect(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz")
+	want := []string{
+		"https://mirror.example/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+}
+
+func TestDownloadCandidatesCanDisableMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "direct")
+
+	got := downloadCandidates("https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz")
+	want := []string{"https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+}
+
+func TestRawMirrorCandidatesIncludeJsdelivrShape(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RAW_MIRRORS", "https://fastly.jsdelivr.net/gh")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version")
+	want := []string{
+		"https://fastly.jsdelivr.net/gh/vernesong/OpenClash@core/master/core_version",
+		"https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
 	}
 }

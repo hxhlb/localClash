@@ -57,6 +57,11 @@ const (
 	TargetRouter = "router"
 )
 
+const (
+	defaultGitHubReleaseMirrors = "https://gh.llkk.cc/https://github.com https://gh-proxy.com/https://github.com https://v1.ax/https://github.com https://ghp.xptvhelper.link/https://github.com"
+	defaultGitHubRawMirrors     = "https://v1.ax/https://raw.githubusercontent.com https://ghp.xptvhelper.link/https://raw.githubusercontent.com https://fastly.jsdelivr.net/gh"
+)
+
 func Download(ctx context.Context, opts Options) ([]Result, error) {
 	opts = normalizeOptions(opts)
 	if err := opts.validate(); err != nil {
@@ -259,12 +264,26 @@ func fetchRelease(ctx context.Context, repo, version string) (release, error) {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", repo, version)
 	}
 
+	var lastErr error
+	for _, candidate := range downloadCandidates(endpoint) {
+		rel, err := fetchReleaseURL(ctx, candidate)
+		if err == nil {
+			return rel, nil
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "download: release metadata failed from %s: %v\n", candidate, err)
+	}
+	return release{}, lastErr
+}
+
+func fetchReleaseURL(ctx context.Context, endpoint string) (release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return release{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "localclash-core-downloader")
+	fmt.Fprintf(os.Stderr, "download: requesting release metadata %s\n", endpoint)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -273,7 +292,7 @@ func fetchRelease(ctx context.Context, repo, version string) (release, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return release{}, fmt.Errorf("github release request failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return release{}, fmt.Errorf("github release request failed: %s: %s", resp.Status, shortHTTPBody(body))
 	}
 
 	var rel release
@@ -288,11 +307,25 @@ func fetchRelease(ctx context.Context, repo, version string) (release, error) {
 
 func fetchOpenClashSmartVersion(ctx context.Context, branch string) (string, error) {
 	endpoint := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/core_version", branch)
+	var lastErr error
+	for _, candidate := range downloadCandidates(endpoint) {
+		version, err := fetchOpenClashSmartVersionURL(ctx, candidate)
+		if err == nil {
+			return version, nil
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "download: smart version failed from %s: %v\n", candidate, err)
+	}
+	return "", lastErr
+}
+
+func fetchOpenClashSmartVersionURL(ctx context.Context, endpoint string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "localclash-core-downloader")
+	fmt.Fprintf(os.Stderr, "download: requesting smart core version %s\n", endpoint)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
@@ -300,7 +333,7 @@ func fetchOpenClashSmartVersion(ctx context.Context, branch string) (string, err
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("openclash core version request failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("openclash core version request failed: %s: %s", resp.Status, shortHTTPBody(body))
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 8192))
 	if err != nil {
@@ -398,11 +431,26 @@ func ensureWritableOutput(path string, force bool) error {
 }
 
 func downloadAsset(ctx context.Context, url, name, outputPath string) error {
+	var lastErr error
+	for _, candidate := range downloadCandidates(url) {
+		if err := downloadAssetURL(ctx, candidate, name, outputPath); err != nil {
+			lastErr = err
+			fmt.Fprintf(os.Stderr, "download: asset failed from %s: %v\n", candidate, err)
+			_ = os.Remove(outputPath)
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func downloadAssetURL(ctx context.Context, url, name, outputPath string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", "localclash-core-downloader")
+	fmt.Fprintf(os.Stderr, "download: requesting asset %s\n", url)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -436,6 +484,105 @@ func downloadAsset(ctx context.Context, url, name, outputPath string) error {
 		_, err = io.Copy(out, resp.Body)
 		return err
 	}
+}
+
+func downloadCandidates(url string) []string {
+	if mirrorModeDisabled() {
+		return []string{url}
+	}
+
+	candidates := make([]string, 0, 6)
+	candidates = append(candidates, mirroredURLs(url)...)
+	candidates = append(candidates, url)
+	return uniqueStrings(candidates)
+}
+
+func mirrorModeDisabled() bool {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LOCALCLASH_GITHUB_MIRROR")))
+	return mode == "off" || mode == "none" || mode == "direct"
+}
+
+func mirroredURLs(url string) []string {
+	switch {
+	case strings.HasPrefix(url, "https://github.com/"):
+		return mirrorByPrefix(url, "https://github.com", envWords("LOCALCLASH_GITHUB_RELEASE_MIRRORS", defaultGitHubReleaseMirrors))
+	case strings.HasPrefix(url, "https://api.github.com/"):
+		return mirrorByPrefix(url, "https://api.github.com", envWords("LOCALCLASH_GITHUB_API_MIRRORS", strings.ReplaceAll(defaultGitHubReleaseMirrors, "https://github.com", "https://api.github.com")))
+	case strings.HasPrefix(url, "https://raw.githubusercontent.com/"):
+		return rawMirrorURLs(url)
+	default:
+		return nil
+	}
+}
+
+func mirrorByPrefix(url, upstreamPrefix string, mirrors []string) []string {
+	out := make([]string, 0, len(mirrors))
+	suffix := strings.TrimPrefix(url, upstreamPrefix)
+	for _, mirror := range mirrors {
+		mirror = strings.TrimRight(strings.TrimSpace(mirror), "/")
+		if mirror == "" {
+			continue
+		}
+		out = append(out, mirror+suffix)
+	}
+	return out
+}
+
+func rawMirrorURLs(url string) []string {
+	mirrors := envWords("LOCALCLASH_GITHUB_RAW_MIRRORS", defaultGitHubRawMirrors)
+	out := make([]string, 0, len(mirrors))
+	const rawPrefix = "https://raw.githubusercontent.com/"
+	rawPath := strings.TrimPrefix(url, rawPrefix)
+	for _, mirror := range mirrors {
+		mirror = strings.TrimRight(strings.TrimSpace(mirror), "/")
+		if mirror == "" {
+			continue
+		}
+		if strings.Contains(mirror, "jsdelivr.net/gh") {
+			out = append(out, jsdelivrRawURL(mirror, rawPath))
+			continue
+		}
+		out = append(out, mirror+"/"+rawPath)
+	}
+	return out
+}
+
+func jsdelivrRawURL(mirror, rawPath string) string {
+	parts := strings.SplitN(rawPath, "/", 4)
+	if len(parts) < 4 {
+		return mirror + "/" + rawPath
+	}
+	return fmt.Sprintf("%s/%s/%s@%s/%s", mirror, parts[0], parts[1], parts[2], parts[3])
+}
+
+func envWords(name, fallback string) []string {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		value = fallback
+	}
+	return strings.Fields(value)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func shortHTTPBody(body []byte) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(string(body))), " ")
+	if len(text) > 240 {
+		return text[:240] + "..."
+	}
+	return text
 }
 
 func extractFirstTarGzFile(in io.Reader, out io.Writer) error {

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -72,6 +73,31 @@ func TestExtractZipStripsSingleTopLevelDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(output, "dist", "index.html")); !os.IsNotExist(err) {
 		t.Fatalf("expected dist prefix to be stripped, err=%v", err)
+	}
+}
+
+func TestDownloadCandidatesMirrorsGitHubBeforeDirect(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip")
+	want := []string{
+		"https://mirror.example/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+}
+
+func TestDownloadCandidatesCanDisableMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "off")
+
+	got := downloadCandidates("https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip")
+	want := []string{"https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
 	}
 }
 

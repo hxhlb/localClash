@@ -37,6 +37,8 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+const defaultGitHubReleaseMirrors = "https://gh.llkk.cc/https://github.com https://gh-proxy.com/https://github.com https://v1.ax/https://github.com https://ghp.xptvhelper.link/https://github.com"
+
 func Download(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
 	if err := opts.validate(); err != nil {
@@ -110,12 +112,26 @@ func fetchRelease(ctx context.Context, repo, version string) (release, error) {
 	if version != "latest" {
 		endpoint = fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", repo, version)
 	}
+	var lastErr error
+	for _, candidate := range downloadCandidates(endpoint) {
+		rel, err := fetchReleaseURL(ctx, candidate)
+		if err == nil {
+			return rel, nil
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "download: dashboard release metadata failed from %s: %v\n", candidate, err)
+	}
+	return release{}, lastErr
+}
+
+func fetchReleaseURL(ctx context.Context, endpoint string) (release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return release{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "localclash-dashboard-downloader")
+	fmt.Fprintf(os.Stderr, "download: requesting dashboard release metadata %s\n", endpoint)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -124,7 +140,7 @@ func fetchRelease(ctx context.Context, repo, version string) (release, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return release{}, fmt.Errorf("github release request failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+		return release{}, fmt.Errorf("github release request failed: %s: %s", resp.Status, shortHTTPBody(body))
 	}
 	var rel release
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
@@ -164,11 +180,25 @@ func prepareOutputDir(path string, force bool) error {
 }
 
 func downloadAsset(ctx context.Context, url string) (string, error) {
+	var lastErr error
+	for _, candidate := range downloadCandidates(url) {
+		tmp, err := downloadAssetURL(ctx, candidate)
+		if err == nil {
+			return tmp, nil
+		}
+		lastErr = err
+		fmt.Fprintf(os.Stderr, "download: dashboard asset failed from %s: %v\n", candidate, err)
+	}
+	return "", lastErr
+}
+
+func downloadAssetURL(ctx context.Context, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "localclash-dashboard-downloader")
+	fmt.Fprintf(os.Stderr, "download: requesting dashboard asset %s\n", url)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -189,6 +219,75 @@ func downloadAsset(ctx context.Context, url string) (string, error) {
 		return "", err
 	}
 	return tmp.Name(), nil
+}
+
+func downloadCandidates(url string) []string {
+	if mirrorModeDisabled() {
+		return []string{url}
+	}
+	candidates := make([]string, 0, 6)
+	candidates = append(candidates, mirroredURLs(url)...)
+	candidates = append(candidates, url)
+	return uniqueStrings(candidates)
+}
+
+func mirrorModeDisabled() bool {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LOCALCLASH_GITHUB_MIRROR")))
+	return mode == "off" || mode == "none" || mode == "direct"
+}
+
+func mirroredURLs(url string) []string {
+	switch {
+	case strings.HasPrefix(url, "https://github.com/"):
+		return mirrorByPrefix(url, "https://github.com", envWords("LOCALCLASH_GITHUB_RELEASE_MIRRORS", defaultGitHubReleaseMirrors))
+	case strings.HasPrefix(url, "https://api.github.com/"):
+		return mirrorByPrefix(url, "https://api.github.com", envWords("LOCALCLASH_GITHUB_API_MIRRORS", strings.ReplaceAll(defaultGitHubReleaseMirrors, "https://github.com", "https://api.github.com")))
+	default:
+		return nil
+	}
+}
+
+func mirrorByPrefix(url, upstreamPrefix string, mirrors []string) []string {
+	out := make([]string, 0, len(mirrors))
+	suffix := strings.TrimPrefix(url, upstreamPrefix)
+	for _, mirror := range mirrors {
+		mirror = strings.TrimRight(strings.TrimSpace(mirror), "/")
+		if mirror == "" {
+			continue
+		}
+		out = append(out, mirror+suffix)
+	}
+	return out
+}
+
+func envWords(name, fallback string) []string {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		value = fallback
+	}
+	return strings.Fields(value)
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func shortHTTPBody(body []byte) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(string(body))), " ")
+	if len(text) > 240 {
+		return text[:240] + "..."
+	}
+	return text
 }
 
 func extractZip(zipPath, outputDir string) error {
