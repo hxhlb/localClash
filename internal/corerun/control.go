@@ -22,6 +22,7 @@ type StatusResult struct {
 	Running            bool   `json:"running"`
 	PID                int    `json:"pid,omitempty"`
 	ProcessAlive       bool   `json:"process_alive,omitempty"`
+	ProcessZombie      bool   `json:"process_zombie,omitempty"`
 	PIDFile            string `json:"pid_file"`
 	StalePIDFile       bool   `json:"stale_pid_file,omitempty"`
 	StalePIDFileReason string `json:"stale_pid_file_reason,omitempty"`
@@ -54,6 +55,7 @@ type StopResult struct {
 	PID                int      `json:"pid,omitempty"`
 	Signal             string   `json:"signal,omitempty"`
 	Forced             bool     `json:"forced,omitempty"`
+	ProcessZombie      bool     `json:"process_zombie,omitempty"`
 	RuntimeDir         string   `json:"runtime_dir"`
 	PIDFile            string   `json:"pid_file"`
 	RemovedPIDFile     bool     `json:"removed_pid_file,omitempty"`
@@ -103,6 +105,12 @@ func Status(opts StatusOptions) StatusResult {
 	if !processRunning(pid) {
 		result.StalePIDFile = true
 		result.StalePIDFileReason = "pid file points to a process that is not running"
+		return result
+	}
+	if processZombie(pid) {
+		result.ProcessZombie = true
+		result.StalePIDFile = true
+		result.StalePIDFileReason = "pid file points to a zombie process"
 		return result
 	}
 	result.ProcessAlive = true
@@ -200,6 +208,13 @@ func Stop(opts StopOptions) (StopResult, error) {
 		result.RemovedPIDFile = removePIDFile(pidPath)
 		return result, nil
 	}
+	if processZombie(pid) {
+		result.ProcessZombie = true
+		result.StalePIDFile = true
+		result.StalePIDFileReason = "pid file points to a zombie process"
+		result.RemovedPIDFile = removePIDFile(pidPath)
+		return result, nil
+	}
 
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -262,7 +277,7 @@ func removePIDFile(path string) bool {
 func waitForExit(pid int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
-		if !processRunning(pid) {
+		if !processRunning(pid) || processZombie(pid) {
 			return true
 		}
 		if time.Now().After(deadline) {
@@ -270,6 +285,33 @@ func waitForExit(pid int, timeout time.Duration) bool {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+var processZombie = defaultProcessZombie
+
+func defaultProcessZombie(pid int) bool {
+	state, ok := readProcStatState(pid)
+	return ok && state == 'Z'
+}
+
+func readProcStatState(pid int) (byte, bool) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return 0, false
+	}
+	return parseProcStatState(string(data))
+}
+
+func parseProcStatState(stat string) (byte, bool) {
+	closeParen := strings.LastIndex(stat, ")")
+	if closeParen < 0 || closeParen+1 >= len(stat) {
+		return 0, false
+	}
+	fields := strings.Fields(stat[closeParen+1:])
+	if len(fields) == 0 || len(fields[0]) != 1 {
+		return 0, false
+	}
+	return fields[0][0], true
 }
 
 func processMatchesRuntime(pid int, opts StartOptions) (bool, string) {

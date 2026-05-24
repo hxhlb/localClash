@@ -86,6 +86,29 @@ func TestStatusReportsStalePIDFile(t *testing.T) {
 	}
 }
 
+func TestStatusReportsStalePIDForZombieProcess(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(cmd.Process.Pid)
+	go func() { _ = cmd.Wait() }()
+	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessZombie(t, cmd.Process.Pid, true)
+
+	result := Status(StatusOptions{WorkDir: workDir})
+	if result.Running || result.ProcessAlive || !result.ProcessZombie || !result.StalePIDFile || !strings.Contains(result.StalePIDFileReason, "zombie") {
+		t.Fatalf("status = %+v, want zombie pid reported stale", result)
+	}
+}
+
 func TestStopTerminatesRunningRuntime(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
@@ -116,6 +139,35 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("process pid %d was not reaped", cmd.Process.Pid)
+	}
+	if _, err := os.Stat(runtimePIDPath(workDir)); !os.IsNotExist(err) {
+		t.Fatalf("pid file should be removed, err=%v", err)
+	}
+}
+
+func TestStopRemovesZombiePIDFile(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(cmd.Process.Pid)
+	go func() { _ = cmd.Wait() }()
+	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessZombie(t, cmd.Process.Pid, true)
+
+	result, err := Stop(StopOptions{WorkDir: workDir, Timeout: 2 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stopped || result.WasRunning || !result.ProcessZombie || !result.StalePIDFile || !result.RemovedPIDFile {
+		t.Fatalf("stop = %+v, want zombie pid cleanup without stop timeout", result)
 	}
 	if _, err := os.Stat(runtimePIDPath(workDir)); !os.IsNotExist(err) {
 		t.Fatalf("pid file should be removed, err=%v", err)
@@ -186,6 +238,26 @@ sleep 30
 	}
 }
 
+func TestParseProcStatState(t *testing.T) {
+	tests := []struct {
+		name string
+		stat string
+		want byte
+	}{
+		{name: "simple", stat: "3866 (mihomo-meta) Z 1 2 3", want: 'Z'},
+		{name: "space in command", stat: "3866 (mihomo meta) S 1 2 3", want: 'S'},
+		{name: "paren in command", stat: "3866 (name with ) paren) R 1 2 3", want: 'R'},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := parseProcStatState(tt.stat)
+			if !ok || got != tt.want {
+				t.Fatalf("parseProcStatState(%q) = %q, %v; want %q, true", tt.stat, got, ok, tt.want)
+			}
+		})
+	}
+}
+
 func stubProcessCommandLine(t *testing.T, pid int, args []string) {
 	t.Helper()
 	original := readProcessCommandLine
@@ -197,6 +269,20 @@ func stubProcessCommandLine(t *testing.T, pid int, args []string) {
 	}
 	t.Cleanup(func() {
 		readProcessCommandLine = original
+	})
+}
+
+func stubProcessZombie(t *testing.T, pid int, zombie bool) {
+	t.Helper()
+	original := processZombie
+	processZombie = func(candidate int) bool {
+		if candidate == pid {
+			return zombie
+		}
+		return original(candidate)
+	}
+	t.Cleanup(func() {
+		processZombie = original
 	})
 }
 

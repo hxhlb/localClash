@@ -80,6 +80,43 @@ func TestStartAlreadyRunningDoesNotStartSecondRuntime(t *testing.T) {
 	}
 }
 
+func TestStartIgnoresZombiePIDFile(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	writeStartExecutable(t, core, `#!/bin/sh
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    echo configuration test is successful
+    exit 0
+  fi
+done
+sleep 30
+`)
+	config := writeStartConfig(t, dir)
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	zombiePID := os.Getpid()
+	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(zombiePID)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessZombie(t, zombiePID, true)
+
+	result, err := Start(context.Background(), StartOptions{
+		CorePath:   core,
+		ConfigPath: config,
+		WorkDir:    workDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(result.PID)
+	if !result.Started || result.AlreadyRunning || result.PID == zombiePID {
+		t.Fatalf("result = %+v, want new runtime replacing zombie pid %d", result, zombiePID)
+	}
+}
+
 func TestStartLaunchesBackgroundRuntime(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")

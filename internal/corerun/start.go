@@ -157,7 +157,7 @@ func readRunningPID(path string) (int, bool) {
 	if err != nil || pid <= 0 {
 		return 0, false
 	}
-	if processRunning(pid) {
+	if processRunning(pid) && !processZombie(pid) {
 		return pid, true
 	}
 	return 0, false
