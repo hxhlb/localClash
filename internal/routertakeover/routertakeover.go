@@ -390,6 +390,18 @@ wait_tun_ready() {
   return 1
 }
 
+add_dynamic_localnetwork4() {
+  ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | sort -u | while read -r addr; do
+    [ -n "$addr" ] && nft add element inet fw4 localclash_localnetwork { "$addr" } >/dev/null 2>&1 || true
+  done
+}
+
+add_dynamic_localnetwork6() {
+  ip -o -6 addr show scope global 2>/dev/null | awk '{print $4}' | sort -u | while read -r addr; do
+    [ -n "$addr" ] && nft add element inet fw4 localclash_localnetwork6 { "$addr" } >/dev/null 2>&1 || true
+  done
+}
+
 check_fw4_ready
 trap 'cleanup_localclash_state' ERR
 cleanup_localclash_state
@@ -424,8 +436,11 @@ insert rule inet fw4 input position 0 meta nfproto ipv4 iifname "$TUN_DEVICE" co
 insert rule inet fw4 srcnat position 0 meta nfproto ipv4 oifname "$TUN_DEVICE" counter return comment "localClash TUN postrouting"
 EOF_NFT
 
+add_dynamic_localnetwork4
+
 nft 'add set inet fw4 localclash_localnetwork6 { type ipv6_addr; flags interval; auto-merge; }' >/dev/null 2>&1 || true
 nft 'add element inet fw4 localclash_localnetwork6 { ::/128, ::1/128, ::ffff:0:0/96, 64:ff9b::/96, 100::/64, 2001:db8::/32, fe80::/10, ff00::/8 }' >/dev/null 2>&1 || true
+add_dynamic_localnetwork6
 nft 'add chain inet fw4 nat_output { type nat hook output priority -1; }' >/dev/null 2>&1 || true
 nft "insert rule inet fw4 nat_output position 0 meta l4proto { tcp, udp } th dport 53 ip daddr 127.0.0.1 counter redirect to $DNS_PORT comment \"localClash DNS hijack\""
 
