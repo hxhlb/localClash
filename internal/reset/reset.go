@@ -77,7 +77,14 @@ func Run(opts Options) (Result, error) {
 
 func BuildPlan() ([]Target, error) {
 	paths := []Target{
-		{Path: ".runtime", Kind: "directory"},
+		{Path: filepath.Join(".runtime", "logs"), Kind: "directory"},
+		{Path: filepath.Join(".runtime", "subscriptions"), Kind: "directory"},
+		{Path: filepath.Join(".runtime", "mihomo", "mihomo.pid"), Kind: "file"},
+		{Path: filepath.Join(".runtime", "mihomo", "mihomo.log"), Kind: "file"},
+		{Path: filepath.Join(".runtime", "mihomo", "logs"), Kind: "directory"},
+		{Path: filepath.Join(".runtime", "mihomo", "cache.db"), Kind: "file"},
+		{Path: filepath.Join(".runtime", "mihomo", "cache.db-shm"), Kind: "file"},
+		{Path: filepath.Join(".runtime", "mihomo", "cache.db-wal"), Kind: "file"},
 		{Path: "generated", Kind: "directory"},
 		{Path: "localclash.yaml", Kind: "file"},
 		{Path: "localclash-packs.yaml", Kind: "file"},
@@ -149,6 +156,8 @@ func printPlan(out io.Writer, result Result) {
 	fmt.Fprintln(out, "  - policies/")
 	fmt.Fprintln(out, "  - policy-templates/")
 	fmt.Fprintln(out, "  - rule-sources/")
+	fmt.Fprintln(out, "  - .runtime/mihomo/ui/")
+	fmt.Fprintln(out, "  - .runtime/mihomo/*.dat and *.mmdb")
 	fmt.Fprintln(out, "  - source code, docs, and scripts")
 }
 
