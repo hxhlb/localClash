@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -80,6 +81,94 @@ func TestRunProductStatusPrintsJSONEnvelope(t *testing.T) {
 	}
 	if !result.OK || result.Changed || result.Status["runtime"] == nil || result.Status["components"] == nil {
 		t.Fatalf("product status result = %+v, want product status envelope", result)
+	}
+}
+
+func TestRunProductConfigRenderUsesDurableLocalClashIntent(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	writeMainTestFile(t, filepath.Join("policies", "loyalsoldier.yaml"), `rule_source:
+  base_url: https://example.com/rules
+  update_interval: 86400
+groups:
+  direct: DIRECT
+  reject: REJECT
+  proxy: PROXY
+  auto: AUTO
+  manual: MANUAL
+  apple: Apple
+provider_mapping:
+  applications:
+    path: applications.txt
+    behavior: classical
+    target: direct
+  proxy:
+    path: proxy.txt
+    behavior: domain
+    target: proxy
+modes:
+  default: whitelist
+  whitelist:
+    rules:
+      - provider: applications
+        target: direct
+      - provider: proxy
+        target: proxy
+      - match: true
+        target: proxy
+`)
+	writeMainTestFile(t, "subscription.yaml", `proxies:
+  - name: "HK 01"
+    type: ss
+    server: example.com
+    port: 443
+    cipher: none
+    password: test
+`)
+	writeMainTestFile(t, "localclash.yaml", `version: 1
+policy_template: localclash-default
+proxy_groups:
+  AI:
+    mode: auto
+    match:
+      type: name_regex
+      pattern: ".*"
+      min: 1
+custom_rules:
+  - id: ai_test
+    target: AI
+    rules:
+      - type: DOMAIN
+        value: example.ai
+`)
+
+	output := captureStdout(t, func() error {
+		return run([]string{"config", "render", "--json"})
+	})
+	var result struct {
+		OK     bool `json:"ok"`
+		Status struct {
+			Source    string `json:"source"`
+			Selection string `json:"selection"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("config render JSON = %q, error = %v", output, err)
+	}
+	if !result.OK || result.Status.Source != "durable_state" || result.Status.Selection != "localclash-packs.yaml" {
+		t.Fatalf("config render result = %+v, want durable state with derived selection", result)
+	}
+	generated, err := os.ReadFile(filepath.Join("generated", "mihomo.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(generated)
+	if !strings.Contains(text, "name: AI") || !strings.Contains(text, "DOMAIN,example.ai,AI") {
+		t.Fatalf("generated config did not consume localclash.yaml intent:\n%s", text)
+	}
+	if _, err := os.Stat("localclash-packs.yaml"); err != nil {
+		t.Fatalf("derived localclash-packs.yaml missing: %v", err)
 	}
 }
 
@@ -159,4 +248,14 @@ func captureStdout(t *testing.T, fn func() error) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func writeMainTestFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

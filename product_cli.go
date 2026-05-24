@@ -292,11 +292,11 @@ func runProductConfig(args []string, state appinit.RuntimeState) error {
 		if err := parseJSONOnly("config render", args[1:]); err != nil {
 			return err
 		}
-		result, err := configrender.Render(configRenderOptions(state))
+		result, warnings, err := renderProductConfig(state)
 		if err != nil {
 			return err
 		}
-		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Generated Mihomo config rendered.", Status: result, Changes: []string{"config_rendered"}, Warnings: []string{}})
+		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Generated Mihomo config rendered.", Status: result, Changes: []string{"config_rendered"}, Warnings: warnings})
 	default:
 		return fmt.Errorf("unknown config subcommand %q", args[0])
 	}
@@ -556,9 +556,11 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 		changes = append(changes, "config_updated")
 	}
 	if configChanged || contains(changes, "subscriptions_refreshed") {
-		if _, err := configrender.Render(configRenderOptions(state)); err != nil {
+		_, renderWarnings, err := renderProductConfig(state)
+		if err != nil {
 			return changes, warnings, err
 		}
+		warnings = append(warnings, renderWarnings...)
 		changes = append(changes, "config_rendered")
 	}
 	runtimeChanges, runtimeWarnings, err := executeDesiredRuntime(input.Runtime, state)
@@ -956,6 +958,52 @@ func configRenderOptions(state appinit.RuntimeState) configrender.Options {
 		RuntimeProfilePath: state.Paths.RuntimeProfilePath,
 		Force:              true,
 	}
+}
+
+func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, error) {
+	opts := configRenderOptions(state)
+	selectionPath := ""
+	source := "base"
+	warnings := []string{}
+
+	if pathExists("localclash.yaml") {
+		config, err := localconfig.Load("localclash.yaml")
+		if err != nil {
+			return nil, nil, err
+		}
+		resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+			Config:              config,
+			SubscriptionPath:    state.Paths.SubscriptionPath,
+			SubscriptionConfig:  state.Paths.SubscriptionConfig,
+			SubscriptionRuntime: state.Paths.SubscriptionRuntime,
+			RulesCache:          state.Paths.RulesCacheDir,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		selectionPath = state.Paths.PacksSelectionPath
+		if strings.TrimSpace(selectionPath) == "" {
+			selectionPath = "localclash-packs.yaml"
+		}
+		if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
+			return nil, nil, err
+		}
+		opts.PacksSelectionPath = selectionPath
+		source = "durable_state"
+		warnings = append(warnings, resolved.Warnings...)
+	}
+
+	result, err := configrender.Render(opts)
+	if err != nil {
+		return nil, nil, err
+	}
+	return map[string]any{
+		"render":          result,
+		"source":          source,
+		"source_of_truth": "localclash.yaml",
+		"selection":       selectionPath,
+		"output":          state.Paths.GeneratedConfig,
+	}, warnings, nil
 }
 
 func runtimeStatusOptions(state appinit.RuntimeState) corerun.StatusOptions {

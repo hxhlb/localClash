@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"localclash/internal/configrender"
+	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
@@ -261,7 +262,39 @@ func ensureGeneratedConfig(state *RuntimeState, opts Options) {
 		RuntimeProfilePath: opts.RuntimeProfilePath,
 		Force:              true,
 	}
-	if opts.PacksSelectionPath != "" && fileExists(opts.PacksSelectionPath) {
+	if fileExists("localclash.yaml") {
+		config, err := localconfig.Load("localclash.yaml")
+		if err != nil {
+			state.Config.Available = fileExists(opts.GeneratedConfig)
+			state.Config.Diagnostic = err.Error()
+			state.addDiagnostic("config_render", "warning", err.Error())
+			return
+		}
+		resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
+			Config:              config,
+			SubscriptionPath:    opts.SubscriptionPath,
+			SubscriptionConfig:  opts.SubscriptionConfig,
+			SubscriptionRuntime: opts.SubscriptionRuntime,
+			RulesCache:          opts.RulesCacheDir,
+		})
+		if err != nil {
+			state.Config.Available = fileExists(opts.GeneratedConfig)
+			state.Config.Diagnostic = err.Error()
+			state.addDiagnostic("config_render", "warning", err.Error())
+			return
+		}
+		selectionPath := opts.PacksSelectionPath
+		if strings.TrimSpace(selectionPath) == "" {
+			selectionPath = "localclash-packs.yaml"
+		}
+		if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
+			state.Config.Available = fileExists(opts.GeneratedConfig)
+			state.Config.Diagnostic = err.Error()
+			state.addDiagnostic("config_render", "warning", err.Error())
+			return
+		}
+		renderOpts.PacksSelectionPath = selectionPath
+	} else if opts.PacksSelectionPath != "" && fileExists(opts.PacksSelectionPath) {
 		renderOpts.PacksSelectionPath = opts.PacksSelectionPath
 	}
 	if _, err := configrender.Render(renderOpts); err != nil {
