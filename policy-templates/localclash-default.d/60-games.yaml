@@ -1,0 +1,37 @@
+---
+id: default.games.v1
+description: Add Bahamut and generic game-platform routing.
+config:
+  version: 2
+  policy_groups:
+    "\U0001F579 Bahamut":
+      mode: manual
+      exits:
+      - "\U0001F1F9\U0001F1FC 台湾节点"
+      - MANUAL
+      - "\U0001F310 全球直连"
+      reason: 巴哈姆特默认优先台湾节点，失败时再回到手动选择或直连。
+      boundary: business_to_exit_layer
+    "\U0001F3AE 游戏平台":
+      mode: manual
+      exits:
+      - "\U0001F310 全球直连"
+      - MANUAL
+      - AUTO
+      - "\U0001F1ED\U0001F1F0 香港节点"
+      - "\U0001F1FA\U0001F1F8 美国节点"
+      - "\U0001F1EF\U0001F1F5 日本节点"
+      - "\U0001F1F8\U0001F1EC 新加坡节点"
+      - "\U0001F1F9\U0001F1FC 台湾节点"
+      - "\U0001F1F0\U0001F1F7 韩国节点"
+      reason: 游戏平台默认优先直连，保留手动、自动和地区出口作为备用。
+      boundary: business_to_exit_layer
+  packs:
+  - id: v2fly_dlc_bahamut
+    type: geosite
+    target: "\U0001F579 Bahamut"
+    reason: Route Bahamut domains through Bahamut selector.
+  - id: v2fly_dlc_category_games
+    type: geosite
+    target: "\U0001F3AE 游戏平台"
+    reason: Route game service categories through game platform selector.

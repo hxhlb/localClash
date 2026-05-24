@@ -237,11 +237,13 @@ MCP config tools:
   `policy_template` (`minimal` or `localclash-default`). It writes
   `localclash-runtime.yaml` and/or `localclash.yaml`, but does not configure
   subscriptions, render generated config, start runtime, or apply router
-  takeover. Templates are disk YAML files under `policy-templates/`;
-  `localclash-default` is the ACL4SSR-like v2fly-dlc/GEOSITE template for
-  open-box use. It renders a layered Dashboard structure of business group ->
-  exit group -> subscription nodes, while `minimal` keeps the compact base
-  policy for advanced manual customization.
+  takeover. Templates are disk YAML manifests under `policy-templates/`.
+  `localclash-default` is a patch-set manifest whose ordered files under
+  `policy-templates/localclash-default.d/` are merged during initialization.
+  It is the ACL4SSR-like v2fly-dlc/GEOSITE default for open-box use and renders
+  a layered Dashboard structure of business group -> exit group -> subscription
+  nodes, while `minimal` keeps the compact base policy for advanced manual
+  customization.
 - `config_status`: inspect source-of-truth state, generated config presence,
   render readiness, generated summaries, overlay metadata, and pending patches.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable

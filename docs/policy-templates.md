@@ -41,8 +41,11 @@ The renderer should turn the policy into a generated Mihomo runtime config under
 ## localClash Templates
 
 MCP `config_configure` exposes policy templates from disk as base product
-configuration. Template files live under `policy-templates/`, and the tool does
-not render or start runtime.
+configuration. Template manifests live under `policy-templates/`, and the tool
+does not render or start runtime. A template may either embed one `config:`
+block directly or declare an ordered `patches:` list. Patch-set templates are
+merged in manifest order and then written as the durable `localclash.yaml`
+intent.
 
 - `minimal`: records a compact durable intent and leaves routing to the local
   safety baseline plus the base policy. This is for users who want manual
@@ -50,6 +53,12 @@ not render or start runtime.
 - `localclash-default`: ACL4SSR-like default for new users. It uses v2fly-dlc
   GEOSITE packs for common categories such as AI, media, communication, Google,
   Apple, Microsoft, developer services, games, ads, and China direct domains.
+  The manifest `policy-templates/localclash-default.yaml` is a patch set: each
+  file under `policy-templates/localclash-default.d/` contributes one stable
+  default patch, such as region exits, communication/social routing, Steam, or
+  media groups. The patch files intentionally keep emoji identifiers as YAML
+  `\U...` escapes so OpenWrt/BusyBox display locale quirks do not change the
+  on-disk template bytes.
   Its Dashboard-facing structure is layered as business group -> exit group ->
   subscription nodes. The base policy provides `⚡ 自动选择` and `🎯 手动选择`;
   the default template adds direct and region exits. For example, `🎮 Steam`
@@ -62,6 +71,12 @@ not render or start runtime.
   initialization fail.
   `🤖 ChatGPT` is the OpenAI-specific rule target and is rendered before the
   broader `🧠 AI` category.
+
+MCP `config_status` exposes this template through `intent.packs`,
+`intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. A known MCP
+gap remains: there is not yet a compact Agent-facing routing catalog or
+`routing_explain` tool, so Agents must not infer the default template from the
+truncated `generated_summary.rules_sample` alone. See `docs/rule-model.md`.
 
 ## Starter Base Policy
 

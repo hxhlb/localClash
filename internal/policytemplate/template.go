@@ -24,6 +24,20 @@ type File struct {
 	Description string             `yaml:"description" json:"description"`
 	Default     bool               `yaml:"default,omitempty" json:"default,omitempty"`
 	Config      localconfig.Config `yaml:"config" json:"config"`
+	Patches     []PatchRef         `yaml:"patches,omitempty" json:"patches,omitempty"`
+	Path        string             `yaml:"-" json:"path,omitempty"`
+}
+
+type PatchRef struct {
+	ID          string `yaml:"id" json:"id"`
+	Path        string `yaml:"path" json:"path"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+}
+
+type PatchFile struct {
+	ID          string             `yaml:"id" json:"id"`
+	Description string             `yaml:"description,omitempty" json:"description,omitempty"`
+	Config      localconfig.Config `yaml:"config" json:"config"`
 	Path        string             `yaml:"-" json:"path,omitempty"`
 }
 
@@ -57,7 +71,10 @@ func Build(dir, id string) (localconfig.Config, Summary, error) {
 		if template.ID != id {
 			continue
 		}
-		config := template.Config
+		config, err := buildTemplateConfig(template)
+		if err != nil {
+			return localconfig.Config{}, Summary{}, err
+		}
 		if config.Version == 0 {
 			config.Version = 1
 		}
@@ -67,6 +84,135 @@ func Build(dir, id string) (localconfig.Config, Summary, error) {
 		return config, summaryFor(template), nil
 	}
 	return localconfig.Config{}, Summary{}, fmt.Errorf("unknown policy_template %q; supported templates: %s", id, strings.Join(idsFromTemplates(templates), ", "))
+}
+
+func buildTemplateConfig(template File) (localconfig.Config, error) {
+	config := template.Config
+	for _, patchRef := range template.Patches {
+		patch, err := loadPatchFile(template, patchRef)
+		if err != nil {
+			return localconfig.Config{}, err
+		}
+		config = mergeConfig(config, patch.Config)
+	}
+	return config, nil
+}
+
+func loadPatchFile(template File, ref PatchRef) (PatchFile, error) {
+	if strings.TrimSpace(ref.ID) == "" {
+		return PatchFile{}, fmt.Errorf("%s: patch id is required", template.Path)
+	}
+	if strings.TrimSpace(ref.Path) == "" {
+		return PatchFile{}, fmt.Errorf("%s: patch %q path is required", template.Path, ref.ID)
+	}
+	path := ref.Path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(filepath.Dir(template.Path), path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PatchFile{}, err
+	}
+	var patch PatchFile
+	if err := yaml.Unmarshal(data, &patch); err != nil {
+		return PatchFile{}, fmt.Errorf("%s: %w", path, err)
+	}
+	patch.Path = path
+	if strings.TrimSpace(patch.ID) == "" {
+		return PatchFile{}, fmt.Errorf("%s: id is required", path)
+	}
+	if patch.ID != ref.ID {
+		return PatchFile{}, fmt.Errorf("%s: patch id %q does not match manifest id %q", path, patch.ID, ref.ID)
+	}
+	if strings.TrimSpace(patch.Config.PolicyTemplate) != "" && patch.Config.PolicyTemplate != template.ID {
+		return PatchFile{}, fmt.Errorf("%s: config.policy_template must be empty or match template id %q", path, template.ID)
+	}
+	return patch, nil
+}
+
+func mergeConfig(base localconfig.Config, patch localconfig.Config) localconfig.Config {
+	if base.Version == 0 {
+		base.Version = 1
+	}
+	if patch.Version > base.Version {
+		base.Version = patch.Version
+	}
+	if strings.TrimSpace(base.PolicyTemplate) == "" {
+		base.PolicyTemplate = patch.PolicyTemplate
+	}
+	if base.ProxyGroups == nil {
+		base.ProxyGroups = map[string]localconfig.ProxyGroup{}
+	}
+	for id, group := range patch.ProxyGroups {
+		base.ProxyGroups[id] = group
+	}
+	if base.PolicyGroups == nil {
+		base.PolicyGroups = map[string]localconfig.PolicyGroup{}
+	}
+	for id, group := range patch.PolicyGroups {
+		base.PolicyGroups[id] = group
+	}
+	base.CustomRules = mergeCustomRules(base.CustomRules, patch.CustomRules)
+	base.RuleProviders = mergeRuleProviders(base.RuleProviders, patch.RuleProviders)
+	base.Packs = mergePacks(base.Packs, patch.Packs)
+	if len(base.PolicyGroups) > 0 && base.Version < 2 {
+		base.Version = 2
+	}
+	return base
+}
+
+func mergePacks(base []localconfig.Pack, patch []localconfig.Pack) []localconfig.Pack {
+	merged := append([]localconfig.Pack{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range patch {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func mergeCustomRules(base []localconfig.CustomRule, patch []localconfig.CustomRule) []localconfig.CustomRule {
+	merged := append([]localconfig.CustomRule{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range patch {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func mergeRuleProviders(base []localconfig.ExternalRuleProvider, patch []localconfig.ExternalRuleProvider) []localconfig.ExternalRuleProvider {
+	merged := append([]localconfig.ExternalRuleProvider{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range patch {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
 }
 
 func IDs(dir string) ([]string, error) {
@@ -124,11 +270,21 @@ func validate(template File, path string) error {
 	if strings.TrimSpace(template.Name) == "" {
 		return fmt.Errorf("%s: name is required", path)
 	}
+	hasConfig := template.Config.Version != 0 ||
+		strings.TrimSpace(template.Config.PolicyTemplate) != "" ||
+		len(template.Config.ProxyGroups) > 0 ||
+		len(template.Config.PolicyGroups) > 0 ||
+		len(template.Config.Packs) > 0 ||
+		len(template.Config.CustomRules) > 0 ||
+		len(template.Config.RuleProviders) > 0
 	if template.Config.Version == 0 {
 		template.Config.Version = 1
 	}
 	if strings.TrimSpace(template.Config.PolicyTemplate) != "" && template.Config.PolicyTemplate != template.ID {
 		return fmt.Errorf("%s: config.policy_template must be empty or match id %q", path, template.ID)
+	}
+	if len(template.Patches) == 0 && !hasConfig {
+		return fmt.Errorf("%s: config or patches is required", path)
 	}
 	return nil
 }

@@ -42,6 +42,128 @@ func TestBuildLocalClashDefaultTemplate(t *testing.T) {
 	if group.Mode != "auto" || group.Match == nil || group.Match.Pattern != ".*" {
 		t.Fatalf("AI group = %+v, want auto all-nodes selector", group)
 	}
+	if got := packTarget(config.Packs, "v2fly_dlc_openai"); got != "AI" {
+		t.Fatalf("openai pack target = %q, want AI", got)
+	}
+}
+
+func TestBuildPatchSetTemplateMergesPatchesInManifestOrder(t *testing.T) {
+	dir := t.TempDir()
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+name: localClash Default
+description: Patch-set policy.
+default: true
+config:
+  version: 1
+  policy_template: localclash-default
+patches:
+  - id: default.region.v1
+    path: localclash-default.d/00-region.yaml
+  - id: default.ai.v1
+    path: localclash-default.d/10-ai.yaml
+  - id: default.ai-override.v1
+    path: localclash-default.d/20-ai-override.yaml
+`)
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "00-region.yaml"), `id: default.region.v1
+config:
+  version: 2
+  proxy_groups:
+    AI:
+      mode: auto
+      match:
+        type: name_regex
+        pattern: .*
+        min: 1
+      reason: first definition
+`)
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.yaml"), `id: default.ai.v1
+config:
+  version: 2
+  policy_groups:
+    ChatGPT:
+      mode: manual
+      exits:
+        - AI
+  packs:
+    - id: v2fly_dlc_category_ads_all
+      type: geosite
+      target: REJECT
+    - id: v2fly_dlc_openai
+      type: geosite
+      target: ChatGPT
+`)
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "20-ai-override.yaml"), `id: default.ai-override.v1
+config:
+  version: 2
+  proxy_groups:
+    AI:
+      mode: manual
+      nodes:
+        - SG 01
+      reason: override definition
+  packs:
+    - id: v2fly_dlc_openai
+      type: geosite
+      target: AI
+`)
+
+	config, summary, err := Build(dir, TemplateLocalClashDefault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.ID != TemplateLocalClashDefault || config.PolicyTemplate != TemplateLocalClashDefault {
+		t.Fatalf("template = %+v config = %+v, want localclash default", summary, config)
+	}
+	if config.Version != 2 {
+		t.Fatalf("version = %d, want v2 from patches", config.Version)
+	}
+	group := config.ProxyGroups["AI"]
+	if group.Mode != "manual" || len(group.Nodes) != 1 || group.Nodes[0] != "SG 01" {
+		t.Fatalf("AI group = %+v, want later patch override", group)
+	}
+	if len(config.Packs) != 2 {
+		t.Fatalf("packs = %+v, want ads plus deduped openai", config.Packs)
+	}
+	if config.Packs[0].ID != "v2fly_dlc_category_ads_all" || config.Packs[1].ID != "v2fly_dlc_openai" {
+		t.Fatalf("pack order = %+v, want manifest order with replacement in place", config.Packs)
+	}
+	if config.Packs[1].Target != "AI" {
+		t.Fatalf("openai pack = %+v, want later patch target replacement", config.Packs[1])
+	}
+}
+
+func TestBuildPatchSetTemplateRejectsPatchIDMismatch(t *testing.T) {
+	dir := t.TempDir()
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+name: localClash Default
+description: Patch-set policy.
+patches:
+  - id: default.ai.v1
+    path: localclash-default.d/10-ai.yaml
+`)
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.yaml"), `id: wrong.id
+config:
+  version: 1
+  packs: []
+`)
+
+	_, _, err := Build(dir, TemplateLocalClashDefault)
+	if err == nil {
+		t.Fatal("expected patch id mismatch error")
+	}
+}
+
+func TestBuildRejectsEmptyTemplate(t *testing.T) {
+	dir := t.TempDir()
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+name: localClash Default
+description: Empty policy.
+`)
+
+	_, _, err := Build(dir, TemplateLocalClashDefault)
+	if err == nil {
+		t.Fatal("expected empty template error")
+	}
 }
 
 func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
@@ -51,6 +173,9 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	}
 	if summary.ID != TemplateLocalClashDefault || config.Version != 2 {
 		t.Fatalf("template = %+v config version = %d, want v2 localclash default", summary, config.Version)
+	}
+	if len(config.ProxyGroups) != 7 || len(config.PolicyGroups) != 25 || len(config.Packs) != 31 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d, want 7/25/31", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs))
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
@@ -126,11 +251,18 @@ config:
 `)
 	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
 name: localClash Default
-description: ACL4SSR-like default policy.
+description: Patch-set default policy.
 default: true
 config:
   version: 1
   policy_template: localclash-default
+patches:
+  - id: default.ai.v1
+    path: localclash-default.d/10-ai.yaml
+`)
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.yaml"), `id: default.ai.v1
+config:
+  version: 1
   proxy_groups:
     AI:
       mode: auto
@@ -151,6 +283,9 @@ config:
 
 func writePolicyTemplateTestFile(t *testing.T, path string, content string) {
 	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

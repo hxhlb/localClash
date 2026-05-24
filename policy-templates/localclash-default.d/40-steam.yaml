@@ -1,0 +1,25 @@
+---
+id: default.steam.v1
+description: Add Steam business routing.
+config:
+  version: 2
+  policy_groups:
+    "\U0001F3AE Steam":
+      mode: manual
+      exits:
+      - "\U0001F310 全球直连"
+      - MANUAL
+      - AUTO
+      - "\U0001F1ED\U0001F1F0 香港节点"
+      - "\U0001F1FA\U0001F1F8 美国节点"
+      - "\U0001F1EF\U0001F1F5 日本节点"
+      - "\U0001F1F8\U0001F1EC 新加坡节点"
+      - "\U0001F1F9\U0001F1FC 台湾节点"
+      - "\U0001F1F0\U0001F1F7 韩国节点"
+      reason: Steam 默认优先直连，保留代理和地区出口处理商店、社区或网络异常。
+      boundary: business_to_exit_layer
+  packs:
+  - id: v2fly_dlc_steam
+    type: geosite
+    target: "\U0001F3AE Steam"
+    reason: Route Steam store and community domains through Steam selector.

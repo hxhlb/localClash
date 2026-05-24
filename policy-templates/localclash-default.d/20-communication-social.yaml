@@ -1,0 +1,43 @@
+---
+id: default.communication-social.v1
+description: Add communication and social media business groups.
+config:
+  version: 2
+  policy_groups:
+    "\U0001F4AC 通信服务":
+      mode: manual
+      exits:
+      - MANUAL
+      - AUTO
+      - "\U0001F1ED\U0001F1F0 香港节点"
+      - "\U0001F1FA\U0001F1F8 美国节点"
+      - "\U0001F1EF\U0001F1F5 日本节点"
+      - "\U0001F1F8\U0001F1EC 新加坡节点"
+      - "\U0001F1F9\U0001F1FC 台湾节点"
+      - "\U0001F1F0\U0001F1F7 韩国节点"
+      - "\U0001F310 全球直连"
+      reason: 通信服务走业务层选择器。
+      boundary: business_to_exit_layer
+    "\U0001F465 社交媒体":
+      mode: manual
+      exits:
+      - MANUAL
+      - AUTO
+      - "\U0001F1ED\U0001F1F0 香港节点"
+      - "\U0001F1FA\U0001F1F8 美国节点"
+      - "\U0001F1EF\U0001F1F5 日本节点"
+      - "\U0001F1F8\U0001F1EC 新加坡节点"
+      - "\U0001F1F9\U0001F1FC 台湾节点"
+      - "\U0001F1F0\U0001F1F7 韩国节点"
+      - "\U0001F310 全球直连"
+      reason: 非中国社交媒体走业务层选择器。
+      boundary: business_to_exit_layer
+  packs:
+  - id: v2fly_dlc_category_communication
+    type: geosite
+    target: "\U0001F4AC 通信服务"
+    reason: Route communication services through a business-layer selector.
+  - id: v2fly_dlc_category_social_media__cn
+    type: geosite
+    target: "\U0001F465 社交媒体"
+    reason: Route non-China social media through a business-layer selector.

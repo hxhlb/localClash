@@ -234,9 +234,13 @@ Current code now has:
 - a `config_configure` MCP tool for base product configuration: core,
   runtime profile, and policy template
 - disk-backed `minimal` and `localclash-default` policy templates under
-  `policy-templates/`, where
-  `localclash-default` is ACL4SSR-like and primarily uses v2fly-dlc GEOSITE
-  packs with a business -> exit -> node selector structure
+  `policy-templates/`; `localclash-default` is a patch-set manifest whose
+  ordered files under `policy-templates/localclash-default.d/` are merged during
+  initialization into the same durable `localclash.yaml` intent model that MCP
+  patches use
+- default patch files for region exits, direct baselines, communication/social
+  routing, AI/developer routing, Steam, media/platform routing, games, and tail
+  fallback routing
 - renderer support for selected third-party packs
 - renderer support for inline `custom_rules`
 - renderer support for user-supplied external `rule_providers`
@@ -249,6 +253,41 @@ Current code does not yet have:
 - UI support for base policy and rule pack selection
 - doctor checks for custom rule or external provider schema and target
   references
+- an Agent-oriented routing catalog for default template discovery
+
+## Known MCP Gap: Default Routing Discovery
+
+`config_status` exposes the factual source of truth for default routing:
+
+- `intent.proxy_groups` lists reusable exit groups such as region selectors and
+  direct exits
+- `intent.policy_groups` lists business-layer Dashboard groups and their exits
+- `intent.packs` lists active rule packs and their targets
+- `overlay.rules` shows rendered localClash-managed rule targets
+
+That is enough for a careful Agent to discover that `localclash-default` is a
+business -> exit -> node model created by default patches, for example
+`default.steam.v1` contributing `v2fly_dlc_steam` targeting `🎮 Steam`, whose
+exits include direct, manual, automatic, and regional groups.
+
+The current MCP surface is still weak for ordinary execution Agents. If an
+Agent looks only at `generated_summary.rules_sample`, it can miss the default
+business routing because that sample is intentionally truncated and dominated by
+the local safety baseline. The Agent must know to read `intent.packs`,
+`intent.policy_groups`, and `overlay.rules`; the protocol does not yet provide a
+compact "routing catalog" or "explain this route" tool.
+
+The intended future shape is a read-only MCP discovery layer such as:
+
+- `routing_catalog`: summarize active business groups, aliases, rule packs,
+  default or first exits, available exits, and reusable region groups
+- `routing_explain(query)`: answer questions such as "what handles Steam?" or
+  "how would I route ChatGPT through Singapore?" with the matching packs,
+  policy group, exits, and the safe patch path
+
+Until that exists, Agents should treat `config_status` as the authoritative
+entry point for default routing discovery and must not infer active default
+rules from `generated_summary.rules_sample` alone.
 
 ## Development Sequence
 
@@ -256,11 +295,13 @@ Build this in small steps:
 
 1. Extend MCP patch tools until agents can express common routing intent without
    editing YAML directly.
-2. Add declarative `rule-packs/*.yaml` for localClash-owned reusable packs.
-3. Add doctor checks for pack parsing, custom rule validity, target validity,
+2. Add read-only MCP routing discovery tools so Agents can inspect default
+   business groups without parsing the full `config_status` payload.
+3. Add declarative `rule-packs/*.yaml` for localClash-owned reusable packs.
+4. Add doctor checks for pack parsing, custom rule validity, target validity,
    and missing providers.
-4. Add CLI flags for config path and dry-run diff.
-5. Expose the same model through the local web UI.
+5. Add CLI flags for config path and dry-run diff.
+6. Expose the same model through the local web UI.
 
 Do not start by adding many pack contents. First make the mechanism correct.
 
