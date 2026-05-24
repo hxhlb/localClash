@@ -226,7 +226,7 @@ func startFakeRuntime(t *testing.T, core, workDir, config string) *exec.Cmd {
 	if err := os.MkdirAll(filepath.Dir(core), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(core, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(core, []byte("#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo \"mihomo fake\"; exit 0; fi\nsleep 300\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(core, "-d", workDir, "-f", config)
