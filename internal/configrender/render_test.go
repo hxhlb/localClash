@@ -211,6 +211,56 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 	assertNoSensitiveConfigMetadata(t, metadata)
 }
 
+func TestRenderOmitsLegacyAppleGroupWhenPolicyDoesNotDefineIt(t *testing.T) {
+	paths := writeRenderFixture(t)
+	writeFile(t, paths.policy, `rule_source:
+  base_url: https://example.com/rules
+  update_interval: 86400
+groups:
+  direct: DIRECT
+  reject: REJECT
+  proxy: PROXY
+  auto: AUTO
+  manual: MANUAL
+provider_mapping:
+  applications:
+    path: applications.txt
+    behavior: classical
+    target: direct
+modes:
+  default: whitelist
+  whitelist:
+    rules:
+      - provider: applications
+        target: direct
+      - match: true
+        target: proxy
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		PolicyPath:         paths.policy,
+		OutputPath:         filepath.Join(paths.dir, "without-legacy-apple.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	if proxyGroupNamesFromConfig(config)["Apple"] {
+		t.Fatal("legacy Apple proxy-group should not be generated without groups.apple")
+	}
+	if _, ok := config["rule-providers"].(map[string]any)["apple"]; ok {
+		t.Fatal("legacy apple rule-provider should not be generated without apple provider")
+	}
+	for _, rule := range testStringSlice(config["rules"]) {
+		if strings.Contains(rule, "RULE-SET,apple,") {
+			t.Fatalf("legacy apple rule should not be generated: %s", rule)
+		}
+	}
+}
+
 func TestRenderWithPacksSelectionRejectsMissingProxyGroupNode(t *testing.T) {
 	paths := writeRenderFixture(t)
 	writeFile(t, paths.selection, `version: 1

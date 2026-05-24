@@ -21,7 +21,6 @@ groups:
   proxy: PROXY
   auto: AUTO
   manual: MANUAL
-  apple: Apple
 
 provider_mapping:
   reject:
@@ -32,10 +31,6 @@ provider_mapping:
     path: icloud.txt
     behavior: domain
     target: direct
-  apple:
-    path: apple.txt
-    behavior: domain
-    target: apple
   google:
     path: google.txt
     behavior: domain
@@ -98,8 +93,6 @@ modes:
       - provider: reject
         target: reject
       - provider: icloud
-        target: direct
-      - provider: apple
         target: direct
       - provider: google
         target: proxy

@@ -668,12 +668,11 @@ func buildProxyGroups(groups map[string]string, proxyNames []string) []map[strin
 	proxy := groups["proxy"]
 	auto := groups["auto"]
 	manual := groups["manual"]
-	apple := groups["apple"]
 
 	manualChoices := append([]string{}, proxyNames...)
 	autoChoices := append([]string{}, proxyNames...)
 	proxyChoices := []string{auto, manual, direct}
-	return []map[string]any{
+	out := []map[string]any{
 		{
 			"name":    proxy,
 			"type":    "select",
@@ -691,12 +690,15 @@ func buildProxyGroups(groups map[string]string, proxyNames []string) []map[strin
 			"type":    "select",
 			"proxies": manualChoices,
 		},
-		{
+	}
+	if apple := groups["apple"]; apple != "" {
+		out = append(out, map[string]any{
 			"name":    apple,
 			"type":    "select",
 			"proxies": []string{direct, proxy},
-		},
+		})
 	}
+	return out
 }
 
 func buildRules(pol policy, mode policyMode) ([]string, error) {
