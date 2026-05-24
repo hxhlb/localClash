@@ -369,6 +369,19 @@ func TestGitHubAPIContentsURL(t *testing.T) {
 	}
 }
 
+func TestGitHubTreeAPIURL(t *testing.T) {
+	got, repoPath, err := githubTreeAPIURL("https://github.com/v2fly/domain-list-community/tree/master/data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "https://api.github.com/repos/v2fly/domain-list-community/git/trees/master?recursive=1" {
+		t.Fatalf("api url = %q", got)
+	}
+	if repoPath != "data" {
+		t.Fatalf("repoPath = %q, want data", repoPath)
+	}
+}
+
 func TestAdaptSyncnextBuildsAppMaintenancePacks(t *testing.T) {
 	cache := adaptSyncnext(Source{
 		ID:         "syncnext",

@@ -378,7 +378,11 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		if !ok {
 			return Fragment{}, fmt.Errorf("source %q has no pack cache; run rules adapt first", enabled.Source)
 		}
-		pack, ok := findPack(cache.Packs, enabled.Pack)
+		packID := enabled.Pack
+		if base, _, ok := strings.Cut(enabled.Pack, "@"); ok {
+			packID = base
+		}
+		pack, ok := findPack(cache.Packs, packID)
 		if !ok {
 			return Fragment{}, fmt.Errorf("pack %q not found in source %q", enabled.Pack, enabled.Source)
 		}
@@ -394,7 +398,7 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 		}
 		for _, component := range pack.Components {
 			if strings.EqualFold(component.Behavior, "v2fly-dlc") {
-				fragment.Rules = append(fragment.Rules, fmt.Sprintf("GEOSITE,%s,%s", pack.ID, target))
+				fragment.Rules = append(fragment.Rules, fmt.Sprintf("GEOSITE,%s,%s", enabled.Pack, target))
 				continue
 			}
 			providerName := providerName(enabled.Source, pack.ID, component.ID)
@@ -663,6 +667,23 @@ func githubAPIContentsURL(htmlURL string) (string, error) {
 	owner, repo, ref := parts[0], parts[1], parts[3]
 	repoPath := strings.Join(parts[4:], "/")
 	return fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", owner, repo, repoPath, ref), nil
+}
+
+func githubTreeAPIURL(htmlURL string) (string, string, error) {
+	parsed, err := url.Parse(htmlURL)
+	if err != nil {
+		return "", "", err
+	}
+	if parsed.Host != "github.com" {
+		return "", "", fmt.Errorf("expected github.com url, got %q", htmlURL)
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) < 5 || parts[2] != "tree" {
+		return "", "", fmt.Errorf("expected GitHub tree url, got %q", htmlURL)
+	}
+	owner, repo, ref := parts[0], parts[1], parts[3]
+	repoPath := strings.Join(parts[4:], "/")
+	return fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, ref), repoPath, nil
 }
 
 func trimConf(name string) (string, bool) {
