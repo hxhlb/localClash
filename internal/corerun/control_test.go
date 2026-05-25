@@ -109,6 +109,32 @@ func TestStatusReportsStalePIDForZombieProcess(t *testing.T) {
 	}
 }
 
+func TestStatusReportsOrphanRuntimeWithoutPIDFile(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := writeStartConfig(t, dir)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(cmd.Process.Pid)
+	go func() { _ = cmd.Wait() }()
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
+	stubProcessList(t, cmd.Process.Pid)
+
+	result := Status(StatusOptions{
+		CorePath:   "mihomo",
+		ConfigPath: config,
+		WorkDir:    workDir,
+	})
+	if !result.Running || !result.OrphanRuntime || result.PID != cmd.Process.Pid || len(result.OrphanPIDs) != 1 {
+		t.Fatalf("status = %+v, want orphan runtime pid %d", result, cmd.Process.Pid)
+	}
+}
+
 func TestStopTerminatesRunningRuntime(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
@@ -142,6 +168,44 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 	}
 	if _, err := os.Stat(runtimePIDPath(workDir)); !os.IsNotExist(err) {
 		t.Fatalf("pid file should be removed, err=%v", err)
+	}
+}
+
+func TestStopTerminatesOrphanRuntimeWithoutPIDFile(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := writeStartConfig(t, dir)
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
+	stubProcessList(t, cmd.Process.Pid)
+
+	result, err := Stop(StopOptions{
+		CorePath:   "mihomo",
+		ConfigPath: config,
+		WorkDir:    workDir,
+		Timeout:    2 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Stopped || !result.WasRunning || !result.OrphanRuntime || len(result.StoppedPIDs) != 1 || result.StoppedPIDs[0] != cmd.Process.Pid {
+		t.Fatalf("stop = %+v, want stopped orphan pid %d", result, cmd.Process.Pid)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("orphan process pid %d was not reaped", cmd.Process.Pid)
 	}
 }
 
@@ -283,6 +347,17 @@ func stubProcessZombie(t *testing.T, pid int, zombie bool) {
 	}
 	t.Cleanup(func() {
 		processZombie = original
+	})
+}
+
+func stubProcessList(t *testing.T, pids ...int) {
+	t.Helper()
+	original := listProcessIDs
+	listProcessIDs = func() []int {
+		return append([]int(nil), pids...)
+	}
+	t.Cleanup(func() {
+		listProcessIDs = original
 	})
 }
 

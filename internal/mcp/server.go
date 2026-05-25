@@ -2067,6 +2067,9 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 		if in.Config == "" {
 			in.Config = s.state.Paths.GeneratedConfig
 		}
+		if in.Core == "" {
+			in.Core = s.state.Paths.CorePath
+		}
 		if in.RuntimeDir == "" {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
@@ -2586,6 +2589,7 @@ func (s *Server) callStopRuntime(ctx context.Context, args json.RawMessage) (too
 	var in struct {
 		RuntimeProfile string `json:"runtime_profile"`
 		Config         string `json:"config"`
+		Core           string `json:"core"`
 		RuntimeDir     string `json:"runtime_dir"`
 		LogFile        string `json:"log_file"`
 		StateDir       string `json:"state_dir"`
@@ -2622,6 +2626,7 @@ func (s *Server) callStopRuntime(ctx context.Context, args json.RawMessage) (too
 		})
 		if takeoverErr == nil && takeover.Effective {
 			status := corerun.Status(corerun.StatusOptions{
+				CorePath:   in.Core,
 				ConfigPath: in.Config,
 				WorkDir:    in.RuntimeDir,
 				LogPath:    in.LogFile,
@@ -2645,9 +2650,11 @@ func (s *Server) callStopRuntime(ctx context.Context, args json.RawMessage) (too
 		}
 	}
 	result, err := corerun.Stop(corerun.StopOptions{
-		WorkDir:   in.RuntimeDir,
-		Timeout:   time.Duration(in.TimeoutMS) * time.Millisecond,
-		ForceKill: in.Force,
+		CorePath:   in.Core,
+		ConfigPath: in.Config,
+		WorkDir:    in.RuntimeDir,
+		Timeout:    time.Duration(in.TimeoutMS) * time.Millisecond,
+		ForceKill:  in.Force,
 	})
 	if err != nil {
 		return toolResult{}, err
