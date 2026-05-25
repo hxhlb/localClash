@@ -174,8 +174,8 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if summary.ID != TemplateLocalClashDefault || config.Version != 2 {
 		t.Fatalf("template = %+v config version = %d, want v2 localclash default", summary, config.Version)
 	}
-	if len(config.ProxyGroups) != 7 || len(config.PolicyGroups) != 25 || len(config.Packs) != 31 {
-		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d, want 7/25/31", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs))
+	if len(config.ProxyGroups) != 7 || len(config.PolicyGroups) != 25 || len(config.Packs) != 32 || len(config.CustomRules) != 1 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d custom_rules=%d, want 7/25/32/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.CustomRules))
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
@@ -217,6 +217,15 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	}
 	if got := packTarget(config.Packs, "v2fly_dlc_category_games"); got != "🎮 游戏平台" {
 		t.Fatalf("game category target = %q, want 🎮 游戏平台", got)
+	}
+	if got := packTarget(config.Packs, "v2fly_dlc_telegram"); got != "💬 通信服务" {
+		t.Fatalf("telegram target = %q, want 💬 通信服务", got)
+	}
+	if got := customRuleTarget(config.CustomRules, "telegram-ip-ranges"); got != "💬 通信服务" {
+		t.Fatalf("telegram IP custom rule target = %q, want 💬 通信服务", got)
+	}
+	if len(config.CustomRules[0].Rules) != 12 {
+		t.Fatalf("telegram IP custom rule count = %d, want 12", len(config.CustomRules[0].Rules))
 	}
 	if got := config.Packs[len(config.Packs)-2].Target; got != "🧭 漏网之鱼" {
 		t.Fatalf("geolocation fallback target = %q, want 🧭 漏网之鱼", got)
@@ -295,6 +304,15 @@ func packTarget(packs []localconfig.Pack, id string) string {
 	for _, pack := range packs {
 		if pack.ID == id {
 			return pack.Target
+		}
+	}
+	return ""
+}
+
+func customRuleTarget(customRules []localconfig.CustomRule, id string) string {
+	for _, rule := range customRules {
+		if rule.ID == id {
+			return rule.Target
 		}
 	}
 	return ""

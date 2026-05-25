@@ -238,9 +238,10 @@ Current code now has:
   ordered files under `policy-templates/localclash-default.d/` are merged during
   initialization into the same durable `localclash.yaml` intent model that MCP
   patches use
-- default patch files for region exits, direct baselines, communication/social
-  routing, AI/developer routing, Steam, media/platform routing, games, and tail
-  fallback routing
+- default patch files for region exits, direct baselines,
+  communication/social/Telegram routing (including Telegram IP CIDR ranges),
+  AI/developer routing, Steam,
+  media/platform routing, games, and tail fallback routing
 - renderer support for selected third-party packs
 - renderer support for inline `custom_rules`
 - renderer support for user-supplied external `rule_providers`

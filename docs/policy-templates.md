@@ -51,8 +51,11 @@ intent.
   safety baseline plus the base policy. This is for users who want manual
   customization.
 - `localclash-default`: ACL4SSR-like default for new users. It uses v2fly-dlc
-  GEOSITE packs for common categories such as AI, media, communication, Google,
-  Apple, Microsoft, developer services, games, ads, and China direct domains.
+  GEOSITE packs for common categories such as AI, media, communication,
+  Telegram, Google, Apple, Microsoft, developer services, games, ads, and China
+  direct domains. Telegram also includes explicit IPv4/IPv6 CIDR custom rules,
+  because many Telegram clients connect to Telegram IP ranges directly and do
+  not always expose a domain that can be caught by `GEOSITE,telegram`.
   The manifest `policy-templates/localclash-default.yaml` is a patch set: each
   file under `policy-templates/localclash-default.d/` contributes one stable
   default patch, such as region exits, communication/social routing, Steam, or
