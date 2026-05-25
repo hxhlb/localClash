@@ -126,6 +126,59 @@ func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 	}
 }
 
+func TestBootstrapCanSkipGeneratedConfigRender(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "bin", "mihomo")
+	writeAppinitFile(t, core, "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo Mihomo test; exit 0; fi\nexit 0\n", 0o755)
+	subscription := filepath.Join(dir, "subscription.yaml")
+	writeAppinitFile(t, subscription, `proxies:
+  - name: SG 01
+    type: ss
+    server: sg.example.com
+    password: secret
+`, 0o644)
+	policy := filepath.Join(dir, "policy.yaml")
+	writeAppinitFile(t, policy, `rule_source:
+  base_url: https://example.com/rules
+groups:
+  direct: DIRECT
+  reject: REJECT
+  proxy: PROXY
+  auto: AUTO
+  manual: MANUAL
+modes:
+  default: whitelist
+  whitelist:
+    rules:
+      - match: true
+        target: proxy
+`, 0o644)
+	generated := filepath.Join(dir, "generated", "mihomo.yaml")
+
+	state := Bootstrap(context.Background(), Options{
+		RuntimeRoot:         filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:      filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:     generated,
+		SubscriptionPath:    subscription,
+		MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:            core,
+		PolicyPath:          policy,
+		RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.yaml"),
+		SkipGeneratedConfig: true,
+	})
+
+	if state.Config.Rendered {
+		t.Fatalf("config = %+v, want render skipped", state.Config)
+	}
+	if state.Config.Available {
+		t.Fatalf("config = %+v, generated config should not be available", state.Config)
+	}
+	if _, err := os.Stat(generated); !os.IsNotExist(err) {
+		t.Fatalf("generated config should not be created, err=%v", err)
+	}
+}
+
 func TestBootstrapDefaultsToDetectedRouterWorkDir(t *testing.T) {
 	wrongDir := t.TempDir()
 	routerDir := t.TempDir()

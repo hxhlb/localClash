@@ -201,6 +201,33 @@ sleep 30
 	}
 }
 
+func TestReadRuntimeConfigEndpointsScansOnlyTopLevelFields(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte(`
+proxies:
+  - name: external-controller: nested
+    server: example.com
+external-controller: "127.0.0.1:19090" # local dashboard controller
+external-ui: 'ui/zashboard'
+proxy-groups:
+  - name: external-ui: nested
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	endpoints := readRuntimeConfigEndpoints(config)
+	if endpoints.ExternalController != "127.0.0.1:19090" {
+		t.Fatalf("external controller = %q", endpoints.ExternalController)
+	}
+	if endpoints.ExternalUI != "ui/zashboard" {
+		t.Fatalf("external ui = %q", endpoints.ExternalUI)
+	}
+	if got := externalUIURL(endpoints.ExternalController, endpoints.ExternalUI); got != "http://127.0.0.1:19090/ui" {
+		t.Fatalf("external ui url = %q", got)
+	}
+}
+
 func writeStartConfig(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "mihomo.yaml")

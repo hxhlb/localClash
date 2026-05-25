@@ -1046,6 +1046,8 @@ type configToolInput struct {
 	Output              string `json:"output"`
 	PatchesDir          string `json:"patches_dir"`
 	Limit               int    `json:"limit"`
+	Detail              bool   `json:"detail"`
+	Resolve             *bool  `json:"resolve"`
 	Force               *bool  `json:"force"`
 }
 
@@ -1081,6 +1083,10 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	if limit <= 0 {
 		limit = 20
 	}
+	resolve := in.Detail
+	if in.Resolve != nil {
+		resolve = *in.Resolve
+	}
 	intent, err := configinspect.InspectIntent(configinspect.IntentOptions{
 		ConfigPath:          in.Config,
 		Subscription:        in.Subscription,
@@ -1088,9 +1094,13 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		SubscriptionRuntime: in.SubscriptionRuntime,
 		RulesCache:          in.RulesCache,
 		Limit:               limit,
+		SkipResolve:         !resolve,
 	})
 	if err != nil {
 		return toolResult{}, err
+	}
+	if !in.Detail && !resolve {
+		trimConfigStatusIntent(&intent)
 	}
 	generated := inspectConfigFile(in.Output)
 	status := map[string]any{
@@ -1119,12 +1129,13 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		"patches": listConfigPatches(in.PatchesDir, limit),
 		"usage_guidance": []string{
 			"config_status is the preferred tool for checking durable localClash routing intent and generated overlay state.",
+			"By default config_status is lightweight and does not resolve subscription-node matches or inspect generated overlay details; pass detail=true when a full audit is needed.",
 			"generated_summary.rules_sample is a truncated sample, not the complete rule list. Do not infer absent rules from the sample.",
 			"Use intent.packs and overlay.rules to verify localClash-managed pack routing. Use nl_file only when explicit line-level file evidence is needed.",
 			"runtime_status only reports whether Mihomo is running; it does not prove that a pending config change is loaded by a running process.",
 		},
 	}
-	if generated.Present {
+	if in.Detail && generated.Present {
 		if base, err := configinspect.InspectBase(configinspect.Options{ConfigPath: in.Output, Limit: limit}); err == nil {
 			status["generated_summary"] = base.Summary
 		} else {
@@ -1138,9 +1149,19 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(status)
 }
 
+func trimConfigStatusIntent(intent *configinspect.IntentResult) {
+	for i := range intent.ProxyGroups {
+		intent.ProxyGroups[i].Nodes = nil
+		intent.ProxyGroups[i].SelectedNodes = nil
+	}
+	for i := range intent.CustomRules {
+		intent.CustomRules[i].Rules = nil
+	}
+}
+
 func (s *Server) configRenderState(in configToolInput, intent configinspect.IntentResult, generatedPresent bool) configRenderState {
 	missing := missingRenderInputs(in)
-	canRender := len(missing) == 0 && (!intent.Exists || intent.Resolved)
+	canRender := len(missing) == 0 && (!intent.Exists || intent.Resolved || (intent.Valid && intent.ResolveSkipped && intent.ResolveError == ""))
 	stale := !generatedPresent || isGeneratedStale(in.Output, []string{in.Config, in.Subscription, in.Policy, in.RuntimeProfile, in.Selection})
 	state := configRenderState{
 		Needed:        !generatedPresent || stale,

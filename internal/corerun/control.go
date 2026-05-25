@@ -94,13 +94,14 @@ func Status(opts StatusOptions) StatusResult {
 	})
 	pidPath := runtimePIDPath(normalized.WorkDir)
 	result := StatusResult{
-		PIDFile:            pidPath,
-		RuntimeDir:         normalized.WorkDir,
-		Config:             normalized.ConfigPath,
-		LogFile:            normalized.LogPath,
-		ExternalController: readExternalController(normalized.ConfigPath),
+		PIDFile:    pidPath,
+		RuntimeDir: normalized.WorkDir,
+		Config:     normalized.ConfigPath,
+		LogFile:    normalized.LogPath,
 	}
-	result.ExternalUIURL = externalUIURL(normalized.ConfigPath, result.ExternalController)
+	endpoints := readRuntimeConfigEndpoints(normalized.ConfigPath)
+	result.ExternalController = endpoints.ExternalController
+	result.ExternalUIURL = externalUIURL(result.ExternalController, endpoints.ExternalUI)
 	applyOrphanRuntimeStatus := func(exclude map[int]bool) {
 		orphanPIDs := findRuntimeProcessPIDs(normalized, exclude)
 		if len(orphanPIDs) == 0 {

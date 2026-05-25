@@ -890,6 +890,7 @@ func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 		SubscriptionRuntime: state.Paths.SubscriptionRuntime,
 		RulesCache:          state.Paths.RulesCacheDir,
 		Limit:               8,
+		SkipResolve:         true,
 	})
 	if err != nil {
 		warnings = append(warnings, err.Error())

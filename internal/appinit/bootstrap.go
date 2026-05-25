@@ -28,6 +28,7 @@ type Options struct {
 	PolicyPath          string
 	PacksSelectionPath  string
 	RuntimeProfilePath  string
+	SkipGeneratedConfig bool
 }
 
 type RuntimeState struct {
@@ -115,14 +116,17 @@ func Bootstrap(ctx context.Context, opts Options) RuntimeState {
 			PacksSelectionPath:  opts.PacksSelectionPath,
 			RuntimeProfilePath:  opts.RuntimeProfilePath,
 		},
+		Core:   CoreState{Path: opts.CorePath},
 		Rules:  RulesState{CacheDir: opts.RulesCacheDir, Details: map[string]rules.PackDetail{}},
-		Config: ConfigState{Path: opts.GeneratedConfig},
+		Config: ConfigState{Path: opts.GeneratedConfig, Available: fileExists(opts.GeneratedConfig)},
 	}
 	ensureDirs(&state, opts)
 	inspectCore(ctx, &state, opts)
 	inspectSubscription(&state, opts)
 	ensureRulesCatalog(ctx, &state, opts)
-	ensureGeneratedConfig(&state, opts)
+	if !opts.SkipGeneratedConfig {
+		ensureGeneratedConfig(&state, opts)
+	}
 	return state
 }
 

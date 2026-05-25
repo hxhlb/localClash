@@ -1,6 +1,7 @@
 package corerun
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -14,8 +15,6 @@ import (
 	"time"
 
 	"localclash/internal/runtimeprofile"
-
-	"gopkg.in/yaml.v3"
 )
 
 type StartOptions struct {
@@ -69,13 +68,14 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 		return StartResult{}, err
 	}
 	baseResult := StartResult{
-		Config:             runOpts.ConfigPath,
-		RuntimeDir:         runOpts.WorkDir,
-		LogFile:            runOpts.LogPath,
-		ExternalController: readExternalController(runOpts.ConfigPath),
-		Warnings:           append([]string(nil), NetworkInterruptionWarnings...),
+		Config:     runOpts.ConfigPath,
+		RuntimeDir: runOpts.WorkDir,
+		LogFile:    runOpts.LogPath,
+		Warnings:   append([]string(nil), NetworkInterruptionWarnings...),
 	}
-	baseResult.ExternalUIURL = externalUIURL(runOpts.ConfigPath, baseResult.ExternalController)
+	endpoints := readRuntimeConfigEndpoints(runOpts.ConfigPath)
+	baseResult.ExternalController = endpoints.ExternalController
+	baseResult.ExternalUIURL = externalUIURL(baseResult.ExternalController, endpoints.ExternalUI)
 
 	pidPath := runtimePIDPath(runOpts.WorkDir)
 	if pid, ok := readRunningPID(pidPath); ok {
@@ -206,33 +206,85 @@ func compactStartOutput(output []byte, err error) string {
 }
 
 func readExternalController(path string) string {
-	config := readConfigForRuntime(path)
-	if controller, ok := config["external-controller"].(string); ok {
-		return controller
-	}
-	return ""
+	return readRuntimeConfigEndpoints(path).ExternalController
 }
 
-func externalUIURL(path, controller string) string {
-	if controller == "" {
-		return ""
-	}
-	config := readConfigForRuntime(path)
-	ui, _ := config["external-ui"].(string)
-	if strings.TrimSpace(ui) == "" {
+func externalUIURL(controller, ui string) string {
+	if controller == "" || strings.TrimSpace(ui) == "" {
 		return ""
 	}
 	return "http://" + controller + "/ui"
 }
 
-func readConfigForRuntime(path string) map[string]any {
-	data, err := os.ReadFile(path)
+type runtimeConfigEndpoints struct {
+	ExternalController string
+	ExternalUI         string
+}
+
+func readRuntimeConfigEndpoints(path string) runtimeConfigEndpoints {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil
+		return runtimeConfigEndpoints{}
 	}
-	var config map[string]any
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil
+	defer file.Close()
+
+	var endpoints runtimeConfigEndpoints
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" || line[0] == ' ' || line[0] == '\t' {
+			continue
+		}
+		key, value, ok := splitTopLevelYAMLScalar(line)
+		if !ok {
+			continue
+		}
+		switch key {
+		case "external-controller":
+			endpoints.ExternalController = value
+		case "external-ui":
+			endpoints.ExternalUI = value
+		}
+		if endpoints.ExternalController != "" && endpoints.ExternalUI != "" {
+			break
+		}
 	}
-	return config
+	return endpoints
+}
+
+func splitTopLevelYAMLScalar(line string) (string, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", "", false
+	}
+	idx := strings.Index(trimmed, ":")
+	if idx <= 0 {
+		return "", "", false
+	}
+	key := strings.TrimSpace(trimmed[:idx])
+	value := strings.TrimSpace(stripInlineYAMLComment(trimmed[idx+1:]))
+	value = strings.Trim(value, `"'`)
+	return key, value, true
+}
+
+func stripInlineYAMLComment(value string) string {
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+			}
+		case '#':
+			if !inSingle && !inDouble && (i == 0 || value[i-1] == ' ' || value[i-1] == '\t') {
+				return value[:i]
+			}
+		}
+	}
+	return value
 }

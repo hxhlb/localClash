@@ -52,7 +52,7 @@ type ToolsListResult struct {
 func Registry() []Tool {
 	tools := []Tool{
 		{Name: "config_configure", SafetyLevel: SafeWrite, Description: "Configure localClash base product state with optional core, runtime_profile, and policy_template. This writes localclash-runtime.yaml and/or localclash.yaml, but does not configure subscriptions, render generated config, start runtime, or apply router takeover."},
-		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash.yaml, generated/mihomo.yaml build artifact, render readiness, and pending patches. Use this before claiming what routing is configured; rules_sample fields are truncated samples."},
+		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash.yaml, generated/mihomo.yaml build artifact, render readiness, and pending patches. Default output is lightweight; pass resolve=true for selected-node matches or detail=true for generated-summary/overlay audit."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, and localClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},

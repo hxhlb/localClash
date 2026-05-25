@@ -257,7 +257,11 @@ MCP config tools:
   nodes, while `minimal` keeps the compact base policy for advanced manual
   customization.
 - `config_status`: inspect source-of-truth state, generated config presence,
-  render readiness, generated summaries, overlay metadata, and pending patches.
+  render readiness, and pending patches. The default response is lightweight for
+  router-class CPUs: it does not resolve subscription-node matches and does not
+  parse generated overlay details. Pass `resolve: true` when selected-node
+  matches are needed, or `detail: true` when a full generated-summary/overlay
+  audit is needed.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable
   `localclash.yaml`, subscription, policy, and runtime profile. If
   `localclash.yaml` does not exist, it renders the base config without an

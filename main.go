@@ -181,7 +181,7 @@ func run(args []string) error {
 	}
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer bootstrapCancel()
-	state := appinit.Bootstrap(bootstrapCtx, appinit.Options{})
+	state := appinit.Bootstrap(bootstrapCtx, bootstrapOptionsForArgs(args))
 	if handled, err := runProductCommand(args, state); handled {
 		return err
 	}
@@ -219,6 +219,13 @@ func run(args []string) error {
 		return runMCP(args[1:], state)
 	}
 	return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
+}
+
+func bootstrapOptionsForArgs(args []string) appinit.Options {
+	if productCommandWasHandled(args) {
+		return appinit.Options{SkipGeneratedConfig: true}
+	}
+	return appinit.Options{}
 }
 
 func runReset(args []string) error {

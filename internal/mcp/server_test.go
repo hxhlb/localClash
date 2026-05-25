@@ -892,6 +892,7 @@ packs:
 				"subscription": paths.subscription,
 				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
+				"resolve":      true,
 			},
 		},
 	})
@@ -1801,6 +1802,7 @@ func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 			"name": "config_status",
 			"arguments": map[string]any{
 				"output": config,
+				"detail": true,
 			},
 		},
 	})
@@ -1818,12 +1820,21 @@ func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 		t.Fatalf("summary = %+v, want one proxy", summary)
 	}
 	guidance := content["usage_guidance"].([]any)
-	if len(guidance) == 0 || !strings.Contains(guidance[1].(string), "truncated sample") {
+	if len(guidance) == 0 || !guidanceContains(guidance, "truncated sample") {
 		t.Fatalf("usage_guidance = %+v, want truncated sample warning", guidance)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("config_status structured content is not serializable: %v", err)
 	}
+}
+
+func guidanceContains(values []any, needle string) bool {
+	for _, value := range values {
+		if strings.Contains(value.(string), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestToolsCallConfigStatusReturnsOverlaySummary(t *testing.T) {
@@ -1836,6 +1847,7 @@ func TestToolsCallConfigStatusReturnsOverlaySummary(t *testing.T) {
 			"name": "config_status",
 			"arguments": map[string]any{
 				"output": config,
+				"detail": true,
 			},
 		},
 	})

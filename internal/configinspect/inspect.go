@@ -24,6 +24,7 @@ type IntentOptions struct {
 	SubscriptionRuntime string
 	RulesCache          string
 	Limit               int
+	SkipResolve         bool
 }
 
 type BaseResult struct {
@@ -78,6 +79,7 @@ type IntentResult struct {
 	Exists             bool                 `json:"exists"`
 	Valid              bool                 `json:"valid"`
 	Resolved           bool                 `json:"resolved"`
+	ResolveSkipped     bool                 `json:"resolve_skipped,omitempty"`
 	Version            int                  `json:"version,omitempty"`
 	PolicyTemplate     string               `json:"policy_template,omitempty"`
 	LoadError          string               `json:"load_error,omitempty"`
@@ -281,6 +283,10 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 		result.RuleProvidersCount > len(result.RuleProviders) ||
 		result.PacksCount > len(result.Packs)
 
+	if opts.SkipResolve {
+		result.ResolveSkipped = true
+		return result, nil
+	}
 	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
 		Config:              config,
 		SubscriptionPath:    opts.Subscription,
