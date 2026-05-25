@@ -39,33 +39,33 @@
 
 ### 快速讀取與建構工具
 
-這些工具在約 0.7s 到 2.2s 內完成，採樣窗口中沒有看到持續的 localClash CPU 壓力：
+這些工具在約 0.7s 到 2.2s 內完成，採樣窗口中沒有看到持續的 localClash CPU 壓力。下表按耗時由短到長排列：
 
 | 工具 | 時間 |
 | --- | ---: |
 | `config_configure` | 747ms |
-| `tools_list` | 929ms |
+| `subscriptions_configure` | 886ms |
 | `config_status` | 894ms |
-| `nl_file` | 924ms |
 | `sed_file` | 899ms |
-| `subscriptions_status` | 962ms |
-| `subscription_nodes_list` | 1090ms |
-| `subscription_nodes_search` | 966ms |
+| `policy_group_build` | 910ms |
+| `nl_file` | 924ms |
+| `tools_list` | 929ms |
+| `custom_rules_build` | 940ms |
 | `runtime_profile_status` | 961ms |
+| `subscriptions_status` | 962ms |
+| `subscription_nodes_search` | 966ms |
+| `proxy_group_build` | 967ms |
+| `rule_provider_build` | 1004ms |
+| `subscription_nodes_list` | 1090ms |
+| `doctor` | 1136ms |
 | `runtime_status` | 1236ms |
-| `router_takeover_status` | 1687ms |
-| `packs_list` | 1570ms |
+| `environment_inspect` | 1332ms |
 | `packs_get` | 1429ms |
-| `pack_rules_prefetch` | 2223ms |
 | `pack_rules_read` | 1520ms |
 | `pack_rules_query` | 1531ms |
-| `proxy_group_build` | 967ms |
-| `policy_group_build` | 910ms |
-| `custom_rules_build` | 940ms |
-| `rule_provider_build` | 1004ms |
-| `subscriptions_configure` | 886ms |
-| `doctor` | 1136ms |
-| `environment_inspect` | 1332ms |
+| `packs_list` | 1570ms |
+| `router_takeover_status` | 1687ms |
+| `pack_rules_prefetch` | 2223ms |
 
 ### 慢速讀取工具
 
