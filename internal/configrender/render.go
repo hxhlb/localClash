@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"localclash/internal/configmeta"
@@ -15,6 +16,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+type StageEvent struct {
+	Stage      string         `json:"stage"`
+	Event      string         `json:"event"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Fields     map[string]any `json:"fields,omitempty"`
+}
 
 type Options struct {
 	SourcePath         string
@@ -25,6 +34,7 @@ type Options struct {
 	RulesCacheDir      string
 	RuntimeProfilePath string
 	Force              bool
+	OnStage            func(StageEvent) `json:"-"`
 }
 
 type Result struct {
@@ -103,41 +113,67 @@ func LocalBaselineRuleLines() []string {
 
 func Render(opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
+	stage := configRenderStageEmitter(opts.OnStage)
+
+	finish := stage("ensure_output", map[string]any{"output": opts.OutputPath, "force": opts.Force})
 	if err := ensureOutput(opts.OutputPath, opts.Force); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, nil)
 
+	finish = stage("read_subscription", map[string]any{"path": opts.SourcePath})
 	source, err := readYAMLMap(opts.SourcePath)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, nil)
+
+	finish = stage("read_policy", map[string]any{"path": opts.PolicyPath})
 	pol, err := readPolicy(opts.PolicyPath)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, nil)
+
+	finish = stage("select_policy_mode", map[string]any{"mode": opts.Mode})
 	modeName, mode, err := selectMode(pol, opts.Mode)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"selected_mode": modeName})
+
+	finish = stage("read_runtime_profile", map[string]any{"path": opts.RuntimeProfilePath})
 	runtimeFile, profile, _, err := runtimeprofile.ActiveProfile(opts.RuntimeProfilePath)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"runtime_mode": runtimeFile.Mode, "core": runtimeFile.Core})
 
+	finish = stage("read_proxies", nil)
 	proxies, err := readProxies(source)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	proxyNames, err := proxyNames(proxies)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"proxy_count": len(proxyNames)})
 
 	var fragment *rulespkg.Fragment
 	var selection *rulespkg.Selection
 	if opts.PacksSelectionPath != "" {
+		finish = stage("render_pack_selection", map[string]any{"selection": opts.PacksSelectionPath, "rules_cache": opts.RulesCacheDir})
 		loadedSelection, err := rulespkg.LoadSelection(opts.PacksSelectionPath)
 		if err != nil {
+			finish(err, nil)
 			return Result{}, err
 		}
 		selection = &loadedSelection
@@ -147,31 +183,49 @@ func Render(opts Options) (Result, error) {
 			Subscription:  opts.SourcePath,
 		})
 		if err != nil {
+			finish(err, nil)
 			return Result{}, err
 		}
 		fragment = &renderedFragment
+		finish(nil, map[string]any{
+			"rule_provider_count": len(renderedFragment.RuleProviders),
+			"rule_count":          len(renderedFragment.Rules),
+		})
 	}
 
+	finish = stage("build_runtime_config", nil)
 	rendered, err := buildRuntimeConfig(source, pol, mode, proxyNames, proxies, fragment)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, nil)
+
 	if runtimeFile.Core == runtimeprofile.CoreSmart {
+		finish = stage("apply_smart_core_groups", nil)
 		applySmartCoreProxyGroups(rendered, runtimeFile.Smart)
+		finish(nil, nil)
 	}
+	finish = stage("apply_runtime_profile", map[string]any{"runtime_mode": runtimeFile.Mode, "core": runtimeFile.Core})
 	runtimeprofile.ApplyToConfig(rendered, profile)
+	finish(nil, nil)
 	rendered[configmeta.Key] = buildLocalClashMetadata(selection, fragment)
 
+	finish = stage("write_output", map[string]any{"output": opts.OutputPath})
 	if err := os.MkdirAll(filepath.Dir(opts.OutputPath), 0o755); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	data, err := yaml.Marshal(rendered)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	if err := os.WriteFile(opts.OutputPath, data, 0o644); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"bytes": len(data)})
 
 	return Result{
 		OutputPath:  opts.OutputPath,
@@ -181,6 +235,29 @@ func Render(opts Options) (Result, error) {
 		ProxyCount:  len(proxyNames),
 		RuleCount:   len(rendered["rules"].([]string)),
 	}, nil
+}
+
+func configRenderStageEmitter(callback func(StageEvent)) func(string, map[string]any) func(error, map[string]any) {
+	return func(stage string, fields map[string]any) func(error, map[string]any) {
+		if callback == nil {
+			return func(error, map[string]any) {}
+		}
+		started := time.Now()
+		callback(StageEvent{Stage: stage, Event: "started", Fields: fields})
+		return func(err error, doneFields map[string]any) {
+			event := StageEvent{
+				Stage:      stage,
+				Event:      "done",
+				DurationMS: time.Since(started).Milliseconds(),
+				Fields:     doneFields,
+			}
+			if err != nil {
+				event.Event = "error"
+				event.Error = err.Error()
+			}
+			callback(event)
+		}
+	}
 }
 
 func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.Fragment) configmeta.Metadata {

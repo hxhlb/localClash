@@ -17,6 +17,61 @@ type asyncToolInput struct {
 	Wait       *bool `json:"wait"`
 }
 
+type taskLogContextKey struct{}
+
+type taskLogger struct {
+	tool string
+	path string
+}
+
+func (logger taskLogger) Append(event string, fields map[string]any) {
+	appendTaskLog(logger.path, event, logger.tool, fields)
+}
+
+func taskLoggerFromContext(ctx context.Context) (taskLogger, bool) {
+	logger, ok := ctx.Value(taskLogContextKey{}).(taskLogger)
+	return logger, ok
+}
+
+func appendTaskStage(ctx context.Context, event, stage string, fields map[string]any) {
+	logger, ok := taskLoggerFromContext(ctx)
+	if !ok {
+		return
+	}
+	out := map[string]any{"stage": stage}
+	for key, value := range fields {
+		out[key] = value
+	}
+	logger.Append(event, out)
+}
+
+func startTaskStage(ctx context.Context, stage string, fields map[string]any) func(string, map[string]any) {
+	started := time.Now()
+	appendTaskStage(ctx, "stage_started", stage, fields)
+	return func(event string, doneFields map[string]any) {
+		out := map[string]any{"duration_ms": time.Since(started).Milliseconds()}
+		for key, value := range doneFields {
+			out[key] = value
+		}
+		appendTaskStage(ctx, event, stage, out)
+	}
+}
+
+func finishTaskStage(finish func(string, map[string]any), err error, fields map[string]any) {
+	if finish == nil {
+		return
+	}
+	if err != nil {
+		out := map[string]any{"error": err.Error()}
+		for key, value := range fields {
+			out[key] = value
+		}
+		finish("stage_error", out)
+		return
+	}
+	finish("stage_done", fields)
+}
+
 type asyncTaskResult struct {
 	Queued      bool     `json:"queued"`
 	TaskID      string   `json:"task_id"`
@@ -90,6 +145,7 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 		appendTaskLog(logFile, "started", tool, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
+		ctx = context.WithValue(ctx, taskLogContextKey{}, taskLogger{tool: tool, path: logFile})
 		result, err := run(ctx, args)
 		finished := time.Now().UTC()
 		status.FinishedAt = finished.Format(time.RFC3339)

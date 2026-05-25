@@ -2070,8 +2070,8 @@ func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}
-	if !strings.Contains(string(logText), `"event":"queued"`) || !strings.Contains(string(logText), `"event":"error"`) {
-		t.Fatalf("log = %s, want queued and error events", logText)
+	if !strings.Contains(string(logText), `"event":"queued"`) || !strings.Contains(string(logText), `"event":"error"`) || !strings.Contains(string(logText), `"event":"stage_started"`) {
+		t.Fatalf("log = %s, want queued, stage_started, and error events", logText)
 	}
 }
 

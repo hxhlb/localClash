@@ -37,6 +37,7 @@ type Options struct {
 	CorePath            string
 	WorkDir             string
 	Now                 time.Time
+	OnStage             func(StageEvent) `json:"-"`
 }
 
 type ApplyOptions struct {
@@ -59,6 +60,15 @@ type ApplyOptions struct {
 	Test                bool
 	TestExplicit        bool
 	Now                 time.Time
+	OnStage             func(StageEvent) `json:"-"`
+}
+
+type StageEvent struct {
+	Stage      string         `json:"stage"`
+	Event      string         `json:"event"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Fields     map[string]any `json:"fields,omitempty"`
 }
 
 type OverlayIntent struct {
@@ -218,9 +228,12 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	if len(opts.Overlay.Packs) == 0 && len(opts.Overlay.CustomRules) == 0 && len(opts.Overlay.RuleProviders) == 0 {
 		return Result{}, fmt.Errorf("overlay.packs, overlay.custom_rules, or overlay.rule_providers is required")
 	}
+	stage := configPlanStageEmitter(opts.OnStage)
 
+	finish := stage("resolve_candidate_config", nil)
 	config, err := configWithOverlay(opts.ConfigPath, opts.Overlay)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
@@ -231,13 +244,22 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		RulesCache:          opts.RulesCache,
 	})
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	overlaySummary := requestedOverlaySummary(resolved, opts.Overlay, opts.RulesCache)
 	warnings := resolved.Warnings
+	finish(nil, map[string]any{
+		"proxy_groups":  len(resolved.ProxyGroups),
+		"policy_groups": len(resolved.PolicyGroups),
+		"packs":         len(resolved.Packs),
+		"custom_rules":  len(resolved.CustomRules),
+	})
 
+	finish = stage("allocate_patch", map[string]any{"patches_dir": opts.OutputDir, "patch_name": opts.PlanName})
 	planID, err := allocatePlanID(opts.OutputDir, opts.PlanName, opts.Now)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	planDir := filepath.Join(opts.OutputDir, planID)
@@ -245,18 +267,28 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	summaryPath := filepath.Join(planDir, "summary.json")
 	configPath := filepath.Join(planDir, "localclash.yaml")
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
-	if err := localconfig.Write(configPath, resolved.Config); err != nil {
-		return Result{}, err
-	}
+	finish(nil, map[string]any{"patch_id": planID, "patch_dir": planDir})
 
+	finish = stage("write_candidate_config", map[string]any{"config": configPath})
+	if err := localconfig.Write(configPath, resolved.Config); err != nil {
+		finish(err, nil)
+		return Result{}, err
+	}
+	finish(nil, nil)
+
+	finish = stage("write_candidate_selection", nil)
 	selectionPath, cleanup, err := writeTempSelection(resolved.Selection)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
 	defer cleanup()
+	finish(nil, map[string]any{"selection": selectionPath})
 
+	finish = stage("render_candidate", map[string]any{"output": outputPath})
 	if _, err := configrender.Render(configrender.Options{
 		SourcePath:         opts.Subscription,
 		PolicyPath:         opts.Policy,
@@ -266,9 +298,12 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		RulesCacheDir:      opts.RulesCache,
 		RuntimeProfilePath: opts.RuntimeProfilePath,
 		Force:              true,
+		OnStage:            nestedConfigRenderStage(opts.OnStage, "render_candidate"),
 	}); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, nil)
 
 	result := Result{
 		PlanID:      planID,
@@ -296,31 +331,47 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		},
 	}
 	if opts.Test {
+		finish = stage("mihomo_test", map[string]any{"core": opts.CorePath, "work_dir": opts.WorkDir})
 		result.MihomoTest = runMihomoTest(ctx, opts, outputPath)
+		finish(mihomoStageError(result.MihomoTest), map[string]any{
+			"passed":      result.MihomoTest.Passed,
+			"timed_out":   result.MihomoTest.TimedOut,
+			"duration_ms": result.MihomoTest.DurationMS,
+			"exit_code":   result.MihomoTest.ExitCode,
+		})
 		result.Valid = result.MihomoTest.Passed
 		if !result.Valid {
 			result.NextActions = mihomoTestFailureNextActions(result.MihomoTest)
 		}
 	}
+	finish = stage("write_summary", map[string]any{"summary": summaryPath})
 	if err := writeSummary(summaryPath, result); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"valid": result.Valid})
 	return result, nil
 }
 
 func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
+	stage := configPlanStageEmitter(opts.OnStage)
 	opts = normalizeApplyLocatorOptions(opts)
+	finish := stage("load_patch_summary", map[string]any{"patch_id": opts.PlanID, "patches_dir": opts.PlansDir, "summary": opts.SummaryPath})
 	summaryPath, err := resolveSummaryPath(opts)
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	plan, err := readSummary(summaryPath)
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	if !plan.Valid {
+		finish(fmt.Errorf("plan %q is not valid and cannot be applied", plan.PlanID), nil)
 		return ApplyResult{}, fmt.Errorf("plan %q is not valid and cannot be applied", plan.PlanID)
 	}
+	finish(nil, map[string]any{"patch_id": plan.PlanID, "summary": summaryPath})
 	if opts.PlanID == "" {
 		opts.PlanID = plan.PlanID
 	}
@@ -329,8 +380,10 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	}
 	opts = normalizeApplyOptions(applyPlanInputDefaults(opts, plan.Inputs))
 
+	finish = stage("resolve_apply_config", nil)
 	config, err := loadApplyConfig(opts, plan)
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	config = preserveExistingPolicyTemplate(opts.ConfigPath, config)
@@ -342,21 +395,34 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		RulesCache:          opts.RulesCache,
 	})
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	overlaySummary := overlaySummaryFromResolved(resolved)
 	warnings := resolved.Warnings
+	finish(nil, map[string]any{
+		"proxy_groups":  len(resolved.ProxyGroups),
+		"policy_groups": len(resolved.PolicyGroups),
+		"packs":         len(resolved.Packs),
+		"custom_rules":  len(resolved.CustomRules),
+	})
 
+	finish = stage("prepare_temp_render", nil)
 	tempDir, err := os.MkdirTemp("", "localclash-plan-apply-*")
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	defer os.RemoveAll(tempDir)
 	tempSelection := filepath.Join(tempDir, "localclash-packs.yaml")
 	tempOutput := filepath.Join(tempDir, "mihomo.yaml")
 	if err := localconfig.WriteSelection(tempSelection, resolved.Selection); err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
+	finish(nil, map[string]any{"temp_dir": tempDir})
+
+	finish = stage("render_candidate", map[string]any{"output": tempOutput})
 	renderResult, err := configrender.Render(configrender.Options{
 		SourcePath:         opts.Subscription,
 		PolicyPath:         opts.Policy,
@@ -366,10 +432,13 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		RulesCacheDir:      opts.RulesCache,
 		RuntimeProfilePath: opts.RuntimeProfilePath,
 		Force:              true,
+		OnStage:            nestedConfigRenderStage(opts.OnStage, "render_candidate"),
 	})
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
+	finish(nil, map[string]any{"proxy_count": renderResult.ProxyCount, "rule_count": renderResult.RuleCount})
 
 	result := ApplyResult{
 		PlanID:        plan.PlanID,
@@ -391,10 +460,17 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	result.Warnings = append(result.Warnings, warnings...)
 	result.Render.OutputPath = opts.OutputPath
 	if opts.Test {
+		finish = stage("mihomo_test", map[string]any{"core": opts.CorePath, "work_dir": opts.WorkDir})
 		result.MihomoTest = runMihomoTest(ctx, Options{
 			CorePath: opts.CorePath,
 			WorkDir:  opts.WorkDir,
 		}, tempOutput)
+		finish(mihomoStageError(result.MihomoTest), map[string]any{
+			"passed":      result.MihomoTest.Passed,
+			"timed_out":   result.MihomoTest.TimedOut,
+			"duration_ms": result.MihomoTest.DurationMS,
+			"exit_code":   result.MihomoTest.ExitCode,
+		})
 		result.Valid = result.MihomoTest.Passed
 		if !result.Valid {
 			result.NextActions = mihomoTestFailureNextActions(result.MihomoTest)
@@ -402,22 +478,76 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		}
 	}
 
+	finish = stage("backup_apply_targets", map[string]any{"backup_dir": opts.BackupDir})
 	backups, err := backupApplyTargets(opts)
 	if err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	result.Backups = backups
+	finish(nil, map[string]any{"backup_count": len(backups)})
+
+	finish = stage("write_active_config", map[string]any{"config": opts.ConfigPath, "selection": opts.SelectionPath, "output": opts.OutputPath})
 	if err := localconfig.Write(opts.ConfigPath, resolved.Config); err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	if err := localconfig.WriteSelection(opts.SelectionPath, resolved.Selection); err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	if err := copyFile(tempOutput, opts.OutputPath); err != nil {
+		finish(err, nil)
 		return ApplyResult{}, err
 	}
 	result.Applied = true
+	finish(nil, nil)
 	return result, nil
+}
+
+func configPlanStageEmitter(callback func(StageEvent)) func(string, map[string]any) func(error, map[string]any) {
+	return func(stage string, fields map[string]any) func(error, map[string]any) {
+		if callback == nil {
+			return func(error, map[string]any) {}
+		}
+		started := time.Now()
+		callback(StageEvent{Stage: stage, Event: "started", Fields: fields})
+		return func(err error, doneFields map[string]any) {
+			event := StageEvent{
+				Stage:      stage,
+				Event:      "done",
+				DurationMS: time.Since(started).Milliseconds(),
+				Fields:     doneFields,
+			}
+			if err != nil {
+				event.Event = "error"
+				event.Error = err.Error()
+			}
+			callback(event)
+		}
+	}
+}
+
+func nestedConfigRenderStage(callback func(StageEvent), parent string) func(configrender.StageEvent) {
+	if callback == nil {
+		return nil
+	}
+	return func(event configrender.StageEvent) {
+		callback(StageEvent{
+			Stage:      parent + "." + event.Stage,
+			Event:      event.Event,
+			DurationMS: event.DurationMS,
+			Error:      event.Error,
+			Fields:     event.Fields,
+		})
+	}
+}
+
+func mihomoStageError(result MihomoTestResult) error {
+	if result.Passed || result.Error == "" {
+		return nil
+	}
+	return errors.New(result.Error)
 }
 
 func normalizeOptions(opts Options) Options {

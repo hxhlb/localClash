@@ -33,6 +33,15 @@ type Options struct {
 	TunDevice      string
 	IPv6           bool
 	DryRun         bool
+	OnStage        func(StageEvent) `json:"-"`
+}
+
+type StageEvent struct {
+	Stage      string         `json:"stage"`
+	Event      string         `json:"event"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Fields     map[string]any `json:"fields,omitempty"`
 }
 
 type Check struct {
@@ -63,33 +72,50 @@ type commandRunner func(context.Context, string) (string, error)
 
 func Status(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
+	stage := routerTakeoverStageEmitter(opts.OnStage)
+	finish := stage("read_runtime_profile", map[string]any{"runtime_profile": opts.RuntimeProfile})
 	status, err := runtimeprofile.StatusFor(opts.RuntimeProfile)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"profile_mode": status.Mode})
 	opts = mergeProfileDefaults(opts, status)
 	result := baseResult(opts, status)
+	finish = stage("runtime_status", map[string]any{"runtime_dir": opts.RuntimeDir, "config": opts.ConfigPath})
 	runtimeStatus := corerun.Status(corerun.StatusOptions{
 		ConfigPath: opts.ConfigPath,
 		WorkDir:    opts.RuntimeDir,
 		LogPath:    opts.LogPath,
 	})
 	result.RuntimeRunning = runtimeStatus.Running
+	finish(nil, map[string]any{"running": runtimeStatus.Running, "pid": runtimeStatus.PID})
 	result.Checks = append(result.Checks, check("profile_router", status.Mode == runtimeprofile.ModeRouter, fmt.Sprintf("active profile mode is %s", status.Mode), "router_takeover_* is only meaningful when runtime profile mode is router"))
 	result.Checks = append(result.Checks, check("runtime_running", runtimeStatus.Running, "localClash Mihomo runtime is running", "call run_runtime before router_takeover_apply"))
 	runner := defaultRunner
-	result.Checks = append(result.Checks,
-		commandCheck(ctx, runner, "fw4_available", "command -v fw4 >/dev/null 2>&1", "Firewall4/fw4 is available", "fw4 is unavailable"),
-		commandCheck(ctx, runner, "nft_available", "command -v nft >/dev/null 2>&1", "nft is available", "nft is unavailable"),
-		commandCheck(ctx, runner, "fw4_table", "nft list table inet fw4 >/dev/null 2>&1", "Firewall4 nft table inet fw4 is active", "Firewall4 nft table inet fw4 is not active"),
-		commandCheck(ctx, runner, "fw4_base_chains", "for chain in dstnat mangle_prerouting forward input srcnat; do nft list chain inet fw4 \"$chain\" >/dev/null 2>&1 || exit 1; done", "Firewall4 base chains are available", "Firewall4 base chains are missing"),
-		commandCheck(ctx, runner, "tun_interface", fmt.Sprintf("ip link show %s >/dev/null 2>&1", shellQuote(opts.TunDevice)), fmt.Sprintf("TUN device %s exists", opts.TunDevice), fmt.Sprintf("TUN device %s is missing", opts.TunDevice)),
-		commandCheck(ctx, runner, "fwmark_route_v4", fmt.Sprintf("ip rule show | grep -q 'fwmark %s' && ip route show table %s | grep -q %s", defaultFWMark, defaultRouteTable, shellQuote(opts.TunDevice)), "IPv4 fwmark route points to TUN", "IPv4 fwmark route is missing"),
-		commandCheck(ctx, runner, "nft_chains", "nft list chain inet fw4 localclash >/dev/null 2>&1 && nft list chain inet fw4 localclash_mangle >/dev/null 2>&1", "localClash nft takeover chains are installed", "localClash nft takeover chains are missing"),
-		commandCheck(ctx, runner, "tcp_redirect", "nft list chain inet fw4 dstnat 2>/dev/null | grep -q 'localClash TCP redirect'", "localClash TCP redir-host redirect is installed", "localClash TCP redir-host redirect is missing"),
-		commandCheck(ctx, runner, "udp_tun_mark", "nft list chain inet fw4 mangle_prerouting 2>/dev/null | grep -q 'localClash TUN mark'", "localClash UDP/ICMP TUN mark is installed", "localClash UDP/ICMP TUN mark is missing"),
-		commandCheck(ctx, runner, "dns_hijack", "nft list ruleset 2>/dev/null | grep -q 'localClash DNS hijack'", "localClash DNS hijack rule is installed", "localClash DNS hijack rule is missing"),
-	)
+	checks := []struct {
+		id      string
+		command string
+		ok      string
+		fail    string
+	}{
+		{"fw4_available", "command -v fw4 >/dev/null 2>&1", "Firewall4/fw4 is available", "fw4 is unavailable"},
+		{"nft_available", "command -v nft >/dev/null 2>&1", "nft is available", "nft is unavailable"},
+		{"fw4_table", "nft list table inet fw4 >/dev/null 2>&1", "Firewall4 nft table inet fw4 is active", "Firewall4 nft table inet fw4 is not active"},
+		{"fw4_base_chains", "for chain in dstnat mangle_prerouting forward input srcnat; do nft list chain inet fw4 \"$chain\" >/dev/null 2>&1 || exit 1; done", "Firewall4 base chains are available", "Firewall4 base chains are missing"},
+		{"tun_interface", fmt.Sprintf("ip link show %s >/dev/null 2>&1", shellQuote(opts.TunDevice)), fmt.Sprintf("TUN device %s exists", opts.TunDevice), fmt.Sprintf("TUN device %s is missing", opts.TunDevice)},
+		{"fwmark_route_v4", fmt.Sprintf("ip rule show | grep -q 'fwmark %s' && ip route show table %s | grep -q %s", defaultFWMark, defaultRouteTable, shellQuote(opts.TunDevice)), "IPv4 fwmark route points to TUN", "IPv4 fwmark route is missing"},
+		{"nft_chains", "nft list chain inet fw4 localclash >/dev/null 2>&1 && nft list chain inet fw4 localclash_mangle >/dev/null 2>&1", "localClash nft takeover chains are installed", "localClash nft takeover chains are missing"},
+		{"tcp_redirect", "nft list chain inet fw4 dstnat 2>/dev/null | grep -q 'localClash TCP redirect'", "localClash TCP redir-host redirect is installed", "localClash TCP redir-host redirect is missing"},
+		{"udp_tun_mark", "nft list chain inet fw4 mangle_prerouting 2>/dev/null | grep -q 'localClash TUN mark'", "localClash UDP/ICMP TUN mark is installed", "localClash UDP/ICMP TUN mark is missing"},
+		{"dns_hijack", "nft list ruleset 2>/dev/null | grep -q 'localClash DNS hijack'", "localClash DNS hijack rule is installed", "localClash DNS hijack rule is missing"},
+	}
+	for _, item := range checks {
+		finish = stage("check_"+item.id, nil)
+		checkResult := commandCheck(ctx, runner, item.id, item.command, item.ok, item.fail)
+		result.Checks = append(result.Checks, checkResult)
+		finish(nil, map[string]any{"ok": checkResult.OK})
+	}
 	result.Effective = allChecksOK(result.Checks)
 	result.NextActions = nextActions(result)
 	return result, nil
@@ -97,10 +123,14 @@ func Status(ctx context.Context, opts Options) (Result, error) {
 
 func Apply(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
+	stage := routerTakeoverStageEmitter(opts.OnStage)
+	finish := stage("read_runtime_profile", map[string]any{"runtime_profile": opts.RuntimeProfile})
 	status, err := runtimeprofile.StatusFor(opts.RuntimeProfile)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"profile_mode": status.Mode})
 	opts = mergeProfileDefaults(opts, status)
 	result := baseResult(opts, status)
 	if status.Mode != runtimeprofile.ModeRouter {
@@ -108,8 +138,10 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 		result.NextActions = []string{"call config_configure with runtime_profile=router", "call config_render", "call run_runtime", "call router_takeover_apply again"}
 		return result, nil
 	}
+	finish = stage("runtime_status", map[string]any{"runtime_dir": opts.RuntimeDir, "config": opts.ConfigPath})
 	runtimeStatus := corerun.Status(corerun.StatusOptions{ConfigPath: opts.ConfigPath, WorkDir: opts.RuntimeDir, LogPath: opts.LogPath})
 	result.RuntimeRunning = runtimeStatus.Running
+	finish(nil, map[string]any{"running": runtimeStatus.Running, "pid": runtimeStatus.PID})
 	script := applyScript(opts)
 	result.Script = script
 	if opts.DryRun {
@@ -127,23 +159,35 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 		result.NextActions = []string{"call run_runtime after user confirmation", "call router_takeover_apply again"}
 		return result, nil
 	}
+	finish = stage("apply_script", map[string]any{"state_dir": opts.StateDir, "tun_device": opts.TunDevice})
 	if _, err := defaultRunner(ctx, script); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
-	result, err = Status(ctx, opts)
+	finish(nil, nil)
+	finish = stage("verify_takeover_status", nil)
+	statusOpts := opts
+	statusOpts.OnStage = nil
+	result, err = Status(ctx, statusOpts)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"effective": result.Effective})
 	result.Applied = true
 	return result, nil
 }
 
 func Stop(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
+	stage := routerTakeoverStageEmitter(opts.OnStage)
+	finish := stage("read_runtime_profile", map[string]any{"runtime_profile": opts.RuntimeProfile})
 	status, err := runtimeprofile.StatusFor(opts.RuntimeProfile)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"profile_mode": status.Mode})
 	opts = mergeProfileDefaults(opts, status)
 	result := baseResult(opts, status)
 	script := stopScript(opts)
@@ -153,15 +197,46 @@ func Stop(ctx context.Context, opts Options) (Result, error) {
 		result.NextActions = []string{"review the cleanup script", "call router_takeover_stop without dry_run after user confirmation"}
 		return result, nil
 	}
+	finish = stage("stop_script", map[string]any{"state_dir": opts.StateDir, "tun_device": opts.TunDevice})
 	if _, err := defaultRunner(ctx, script); err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
-	result, err = Status(ctx, opts)
+	finish(nil, nil)
+	finish = stage("verify_takeover_status", nil)
+	statusOpts := opts
+	statusOpts.OnStage = nil
+	result, err = Status(ctx, statusOpts)
 	if err != nil {
+		finish(err, nil)
 		return Result{}, err
 	}
+	finish(nil, map[string]any{"effective": result.Effective})
 	result.Stopped = true
 	return result, nil
+}
+
+func routerTakeoverStageEmitter(callback func(StageEvent)) func(string, map[string]any) func(error, map[string]any) {
+	return func(stage string, fields map[string]any) func(error, map[string]any) {
+		if callback == nil {
+			return func(error, map[string]any) {}
+		}
+		started := time.Now()
+		callback(StageEvent{Stage: stage, Event: "started", Fields: fields})
+		return func(err error, doneFields map[string]any) {
+			event := StageEvent{
+				Stage:      stage,
+				Event:      "done",
+				DurationMS: time.Since(started).Milliseconds(),
+				Fields:     doneFields,
+			}
+			if err != nil {
+				event.Event = "error"
+				event.Error = err.Error()
+			}
+			callback(event)
+		}
+	}
 }
 
 func normalizeOptions(opts Options) Options {

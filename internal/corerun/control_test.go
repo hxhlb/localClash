@@ -396,12 +396,16 @@ sleep 30
 `)
 	config := writeStartConfig(t, dir)
 	stubProcessCommandLine(t, old.Process.Pid, []string{core, "-d", workDir, "-f", config})
+	var stages []RestartStageEvent
 
 	result, err := Restart(context.Background(), RestartOptions{
 		CorePath:    core,
 		ConfigPath:  config,
 		WorkDir:     workDir,
 		StopTimeout: 2 * time.Second,
+		OnStage: func(event RestartStageEvent) {
+			stages = append(stages, event)
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,6 +416,17 @@ sleep 30
 	}
 	if !result.Start.ConfigTestSkipped {
 		t.Fatalf("restart start = %+v, want second config test skipped after pretest", result.Start)
+	}
+	if !result.Status.Running || result.Status.PID != result.Start.PID {
+		t.Fatalf("restart status = %+v, want new runtime pid %d running", result.Status, result.Start.PID)
+	}
+	if result.Timings.TotalMS == 0 {
+		t.Fatalf("restart timings = %+v, want total duration", result.Timings)
+	}
+	for _, want := range []string{"config_test:done", "stop:done", "start:done", "status:done"} {
+		if !restartStagesContain(stages, want) {
+			t.Fatalf("restart stages = %+v, missing %s", stages, want)
+		}
 	}
 	count, err := os.ReadFile(filepath.Join(dir, "config-test-count"))
 	if err != nil {
@@ -425,4 +440,13 @@ sleep 30
 	case <-time.After(2 * time.Second):
 		t.Fatalf("old process pid %d was not reaped", old.Process.Pid)
 	}
+}
+
+func restartStagesContain(stages []RestartStageEvent, want string) bool {
+	for _, stage := range stages {
+		if stage.Stage+":"+stage.Event == want {
+			return true
+		}
+	}
+	return false
 }

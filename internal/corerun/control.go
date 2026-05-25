@@ -52,6 +52,23 @@ type RestartOptions struct {
 	LogPath     string
 	StopTimeout time.Duration
 	ForceKill   bool
+	OnStage     func(RestartStageEvent) `json:"-"`
+}
+
+type RestartStageEvent struct {
+	Stage      string `json:"stage"`
+	Event      string `json:"event"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+	PID        int    `json:"pid,omitempty"`
+	Error      string `json:"error,omitempty"`
+}
+
+type RestartTimings struct {
+	ConfigTestMS int64 `json:"config_test_ms"`
+	StopMS       int64 `json:"stop_ms"`
+	StartMS      int64 `json:"start_ms"`
+	StatusMS     int64 `json:"status_ms"`
+	TotalMS      int64 `json:"total_ms"`
 }
 
 type StopResult struct {
@@ -77,12 +94,14 @@ type StopResult struct {
 }
 
 type RestartResult struct {
-	Restarted   bool        `json:"restarted"`
-	Stop        StopResult  `json:"stop"`
-	Start       StartResult `json:"start"`
-	Error       string      `json:"error,omitempty"`
-	Warnings    []string    `json:"warnings,omitempty"`
-	NextActions []string    `json:"next_actions,omitempty"`
+	Restarted   bool           `json:"restarted"`
+	Stop        StopResult     `json:"stop"`
+	Start       StartResult    `json:"start"`
+	Status      StatusResult   `json:"status"`
+	Timings     RestartTimings `json:"timings"`
+	Error       string         `json:"error,omitempty"`
+	Warnings    []string       `json:"warnings,omitempty"`
+	NextActions []string       `json:"next_actions,omitempty"`
 }
 
 func Status(opts StatusOptions) StatusResult {
@@ -154,6 +173,12 @@ func Status(opts StatusOptions) StatusResult {
 }
 
 func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
+	totalStarted := time.Now()
+	stage := func(event RestartStageEvent) {
+		if opts.OnStage != nil {
+			opts.OnStage(event)
+		}
+	}
 	startOpts := normalizeStartOptions(StartOptions{
 		CorePath:       opts.CorePath,
 		ConfigPath:     opts.ConfigPath,
@@ -182,10 +207,19 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 	if err := os.MkdirAll(filepath.Dir(runOpts.LogPath), 0o755); err != nil {
 		return result, err
 	}
+	configTestStarted := time.Now()
+	stage(RestartStageEvent{Stage: "config_test", Event: "started"})
 	if err := testConfig(ctx, runOpts); err != nil {
+		result.Timings.ConfigTestMS = elapsedMS(configTestStarted)
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "config_test", Event: "error", DurationMS: result.Timings.ConfigTestMS, Error: err.Error()})
 		return result, err
 	}
+	result.Timings.ConfigTestMS = elapsedMS(configTestStarted)
+	stage(RestartStageEvent{Stage: "config_test", Event: "done", DurationMS: result.Timings.ConfigTestMS})
 
+	stopStarted := time.Now()
+	stage(RestartStageEvent{Stage: "stop", Event: "started"})
 	stop, err := Stop(StopOptions{
 		CorePath:   runOpts.CorePath,
 		ConfigPath: runOpts.ConfigPath,
@@ -194,22 +228,51 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 		ForceKill:  opts.ForceKill,
 	})
 	result.Stop = stop
+	result.Timings.StopMS = elapsedMS(stopStarted)
 	if err != nil {
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "stop", Event: "error", DurationMS: result.Timings.StopMS, PID: stop.PID, Error: err.Error()})
 		return result, err
 	}
 	if stop.Error != "" {
 		result.Error = stop.Error
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "stop", Event: "error", DurationMS: result.Timings.StopMS, PID: stop.PID, Error: stop.Error})
 		return result, nil
 	}
+	stage(RestartStageEvent{Stage: "stop", Event: "done", DurationMS: result.Timings.StopMS, PID: stop.PID})
 
+	startStarted := time.Now()
+	stage(RestartStageEvent{Stage: "start", Event: "started"})
 	start, err := Start(ctx, startOpts)
 	result.Start = start
+	result.Timings.StartMS = elapsedMS(startStarted)
 	if err != nil {
 		result.Error = err.Error()
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "start", Event: "error", DurationMS: result.Timings.StartMS, PID: start.PID, Error: err.Error()})
 		return result, nil
 	}
+	stage(RestartStageEvent{Stage: "start", Event: "done", DurationMS: result.Timings.StartMS, PID: start.PID})
+
+	statusStarted := time.Now()
+	stage(RestartStageEvent{Stage: "status", Event: "started"})
+	status := Status(StatusOptions{
+		CorePath:   runOpts.CorePath,
+		ConfigPath: runOpts.ConfigPath,
+		WorkDir:    runOpts.WorkDir,
+		LogPath:    runOpts.LogPath,
+	})
+	result.Status = status
+	result.Timings.StatusMS = elapsedMS(statusStarted)
+	stage(RestartStageEvent{Stage: "status", Event: "done", DurationMS: result.Timings.StatusMS, PID: status.PID})
 	result.Restarted = start.Started
+	result.Timings.TotalMS = elapsedMS(totalStarted)
 	return result, nil
+}
+
+func elapsedMS(started time.Time) int64 {
+	return time.Since(started).Milliseconds()
 }
 
 func Stop(opts StopOptions) (StopResult, error) {

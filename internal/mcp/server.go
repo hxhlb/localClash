@@ -412,9 +412,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "config_configure":
 		return s.callConfigConfigure(args)
 	case "config_render":
-		return s.callMaybeAsyncTool(ctx, "config_render", args, func(_ context.Context, args json.RawMessage) (toolResult, error) {
-			return s.callConfigRender(args)
-		})
+		return s.callMaybeAsyncTool(ctx, "config_render", args, s.callConfigRender)
 	case "config_patch_apply":
 		return s.callMaybeAsyncTool(ctx, "config_patch_apply", args, s.callConfigPatchApply)
 	case "config_patch_create":
@@ -1202,38 +1200,43 @@ func configStatusNextActions(render configRenderState) []string {
 	return []string{"generated/mihomo.yaml is present; use config_patch_create for reviewed routing changes"}
 }
 
-func (s *Server) callConfigRender(args json.RawMessage) (toolResult, error) {
+func (s *Server) callConfigRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in configToolInput
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	s.applyConfigToolDefaults(&in)
+	appendTaskStage(ctx, "stage_started", "validate_inputs", nil)
 	missing := missingRenderInputs(in)
 	if len(missing) > 0 {
+		appendTaskStage(ctx, "stage_error", "validate_inputs", map[string]any{"missing_inputs": missing})
 		return jsonToolResult(map[string]any{
 			"rendered":       false,
 			"missing_inputs": missing,
 			"next_actions":   configStatusNextActions(configRenderState{MissingInputs: missing}),
 		})
 	}
+	appendTaskStage(ctx, "stage_done", "validate_inputs", nil)
 	force := true
 	if in.Force != nil {
 		force = *in.Force
 	}
-	result, err := renderCurrentConfig(in, force)
+	result, err := renderCurrentConfig(ctx, in, force)
 	if err != nil {
 		return toolResult{}, err
 	}
 	return jsonToolResult(result)
 }
 
-func renderCurrentConfig(in configToolInput, force bool) (map[string]any, error) {
+func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (map[string]any, error) {
 	selectionPath := ""
 	source := "base"
 	warnings := []string{}
 	if fileExists(in.Config) {
+		finish := startTaskStage(ctx, "resolve_localclash_config", map[string]any{"config": in.Config})
 		config, err := localconfig.Load(in.Config)
 		if err != nil {
+			finishTaskStage(finish, err, nil)
 			return nil, err
 		}
 		resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
@@ -1244,15 +1247,25 @@ func renderCurrentConfig(in configToolInput, force bool) (map[string]any, error)
 			RulesCache:          in.RulesCache,
 		})
 		if err != nil {
+			finishTaskStage(finish, err, nil)
 			return nil, err
 		}
 		if err := localconfig.WriteSelection(in.Selection, resolved.Selection); err != nil {
+			finishTaskStage(finish, err, nil)
 			return nil, err
 		}
 		selectionPath = in.Selection
 		source = "durable_state"
 		warnings = append(warnings, resolved.Warnings...)
+		finishTaskStage(finish, nil, map[string]any{
+			"selection":     in.Selection,
+			"proxy_groups":  len(resolved.ProxyGroups),
+			"policy_groups": len(resolved.PolicyGroups),
+			"packs":         len(resolved.Packs),
+			"custom_rules":  len(resolved.CustomRules),
+		})
 	}
+	finish := startTaskStage(ctx, "render_generated_config", map[string]any{"output": in.Output})
 	result, err := configrender.Render(configrender.Options{
 		SourcePath:         in.Subscription,
 		PolicyPath:         in.Policy,
@@ -1262,10 +1275,13 @@ func renderCurrentConfig(in configToolInput, force bool) (map[string]any, error)
 		PacksSelectionPath: selectionPath,
 		RulesCacheDir:      in.RulesCache,
 		RuntimeProfilePath: in.RuntimeProfile,
+		OnStage:            configRenderTaskLogger(ctx, "render_generated_config"),
 	})
 	if err != nil {
+		finishTaskStage(finish, err, nil)
 		return nil, err
 	}
+	finishTaskStage(finish, nil, map[string]any{"proxy_count": result.ProxyCount, "rule_count": result.RuleCount, "core": result.Core})
 	return map[string]any{
 		"rendered":        true,
 		"source":          source,
@@ -1345,6 +1361,7 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 		CorePath:            in.Core,
 		WorkDir:             in.RuntimeDir,
 		Overlay:             in.Overlay,
+		OnStage:             configPlanTaskLogger(ctx),
 	})
 	if err != nil {
 		return toolResult{}, err
@@ -1426,6 +1443,7 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 		BackupDir:           in.BackupDir,
 		Test:                test,
 		TestExplicit:        in.Test != nil,
+		OnStage:             configPlanTaskLogger(ctx),
 	})
 	if err != nil {
 		return toolResult{}, err
@@ -1759,11 +1777,13 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 	if in.LocalClashConfig == "" {
 		in.LocalClashConfig = "localclash.yaml"
 	}
+	finish := startTaskStage(ctx, "load_subscription_nodes_before", map[string]any{"subscription": in.Merged})
 	beforeNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
 		SubscriptionPath:    in.Merged,
 		SubscriptionConfig:  in.Config,
 		SubscriptionRuntime: in.RuntimeDir,
 	})
+	finishTaskStage(finish, nil, map[string]any{"node_count": len(beforeNodes)})
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := subscriptions.Refresh(ctx, subscriptions.RefreshOptions{
@@ -1773,20 +1793,25 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		MergedPath: in.Merged,
 		Force:      in.Force,
 		UserAgent:  in.UserAgent,
+		OnStage:    subscriptionsTaskLogger(ctx),
 	})
 	if err != nil {
 		return toolResult{}, err
 	}
+	finish = startTaskStage(ctx, "load_subscription_nodes_after", map[string]any{"subscription": in.Merged})
 	afterNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
 		SubscriptionPath:    in.Merged,
 		SubscriptionConfig:  in.Config,
 		SubscriptionRuntime: in.RuntimeDir,
 	})
+	finishTaskStage(finish, nil, map[string]any{"node_count": len(afterNodes)})
 	toolResultValue := subscriptionsRefreshToolResult{
 		RefreshResult: result,
 		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
 	}
+	finish = startTaskStage(ctx, "evaluate_localclash_impact", map[string]any{"config": in.LocalClashConfig})
 	impact := s.evaluateLocalClashAfterRefresh(in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output)
+	finishTaskStage(finish, nil, map[string]any{"exists": impact.Exists, "state": impact.State, "valid": impact.Valid})
 	if impact.Exists {
 		toolResultValue.LocalClash = &impact
 	}
@@ -2101,7 +2126,7 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 			in.Core = s.state.Paths.CorePath
 		}
 		if in.Config == s.state.Paths.GeneratedConfig {
-			if err := s.ensureRunnableConfig(in.Config); err != nil {
+			if err := s.ensureRunnableConfig(ctx, in.Config); err != nil {
 				return jsonToolResult(runtimeErrorResult("generated config is unavailable: " + err.Error()))
 			}
 		}
@@ -2114,6 +2139,7 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 		WorkDir:    in.RuntimeDir,
 		LogPath:    in.LogFile,
 		Foreground: in.Foreground,
+		OnStage:    startRuntimeStageLogger(ctx),
 	})
 	if err != nil {
 		return jsonToolResult(runtimeErrorResult(err.Error()))
@@ -2154,7 +2180,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 			in.Core = s.state.Paths.CorePath
 		}
 		if in.Config == s.state.Paths.GeneratedConfig {
-			if err := s.ensureRunnableConfig(in.Config); err != nil {
+			if err := s.ensureRunnableConfig(ctx, in.Config); err != nil {
 				return jsonToolResult(runtimeErrorResult("generated config is unavailable: " + err.Error()))
 			}
 		}
@@ -2168,6 +2194,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 		LogPath:     in.LogFile,
 		StopTimeout: time.Duration(in.TimeoutMS) * time.Millisecond,
 		ForceKill:   in.Force,
+		OnStage:     restartRuntimeStageLogger(ctx),
 	})
 	if err != nil {
 		return jsonToolResult(runtimeErrorResult(err.Error()))
@@ -2181,7 +2208,86 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 	return jsonToolResult(result)
 }
 
-func (s *Server) ensureRunnableConfig(configPath string) error {
+func restartRuntimeStageLogger(ctx context.Context) func(corerun.RestartStageEvent) {
+	return func(event corerun.RestartStageEvent) {
+		fields := map[string]any{
+			"stage": event.Stage,
+		}
+		if event.DurationMS > 0 {
+			fields["duration_ms"] = event.DurationMS
+		}
+		if event.PID > 0 {
+			fields["pid"] = event.PID
+		}
+		if event.Error != "" {
+			fields["error"] = event.Error
+		}
+		appendTaskStage(ctx, "stage_"+event.Event, event.Stage, fields)
+	}
+}
+
+func startRuntimeStageLogger(ctx context.Context) func(corerun.StartStageEvent) {
+	return func(event corerun.StartStageEvent) {
+		fields := event.Fields
+		if fields == nil {
+			fields = map[string]any{}
+		}
+		if event.DurationMS > 0 {
+			fields["duration_ms"] = event.DurationMS
+		}
+		if event.PID > 0 {
+			fields["pid"] = event.PID
+		}
+		if event.Error != "" {
+			fields["error"] = event.Error
+		}
+		appendTaskStage(ctx, "stage_"+event.Event, event.Stage, fields)
+	}
+}
+
+func configRenderTaskLogger(ctx context.Context, parent string) func(configrender.StageEvent) {
+	return func(event configrender.StageEvent) {
+		stage := event.Stage
+		if parent != "" {
+			stage = parent + "." + stage
+		}
+		logGenericStage(ctx, stage, event.Event, event.DurationMS, event.Error, event.Fields)
+	}
+}
+
+func configPlanTaskLogger(ctx context.Context) func(configplan.StageEvent) {
+	return func(event configplan.StageEvent) {
+		logGenericStage(ctx, event.Stage, event.Event, event.DurationMS, event.Error, event.Fields)
+	}
+}
+
+func subscriptionsTaskLogger(ctx context.Context) func(subscriptions.StageEvent) {
+	return func(event subscriptions.StageEvent) {
+		logGenericStage(ctx, event.Stage, event.Event, event.DurationMS, event.Error, event.Fields)
+	}
+}
+
+func routerTakeoverTaskLogger(ctx context.Context) func(routertakeover.StageEvent) {
+	return func(event routertakeover.StageEvent) {
+		logGenericStage(ctx, event.Stage, event.Event, event.DurationMS, event.Error, event.Fields)
+	}
+}
+
+func logGenericStage(ctx context.Context, stage, event string, durationMS int64, errText string, fields map[string]any) {
+	out := map[string]any{}
+	for key, value := range fields {
+		out[key] = value
+	}
+	if durationMS > 0 {
+		out["duration_ms"] = durationMS
+	}
+	if errText != "" {
+		out["error"] = errText
+	}
+	appendTaskStage(ctx, "stage_"+event, stage, out)
+}
+
+func (s *Server) ensureRunnableConfig(ctx context.Context, configPath string) error {
 	if fileExists(configPath) {
 		return nil
 	}
@@ -2196,7 +2302,7 @@ func (s *Server) ensureRunnableConfig(configPath string) error {
 	}
 	in := configToolInput{Output: configPath}
 	s.applyConfigToolDefaults(&in)
-	if _, err := renderCurrentConfig(in, true); err != nil {
+	if _, err := renderCurrentConfig(ctx, in, true); err != nil {
 		return fmt.Errorf("render %s: %w", configPath, err)
 	}
 	return nil
@@ -2590,6 +2696,7 @@ func (s *Server) callRouterTakeoverApplySync(ctx context.Context, args json.RawM
 	if err != nil {
 		return toolResult{}, err
 	}
+	opts.OnStage = routerTakeoverTaskLogger(ctx)
 	result, err := routertakeover.Apply(ctx, opts)
 	if err != nil {
 		return toolResult{}, err
@@ -2602,6 +2709,7 @@ func (s *Server) callRouterTakeoverStopSync(ctx context.Context, args json.RawMe
 	if err != nil {
 		return toolResult{}, err
 	}
+	opts.OnStage = routerTakeoverTaskLogger(ctx)
 	result, err := routertakeover.Stop(ctx, opts)
 	if err != nil {
 		return toolResult{}, err
@@ -2638,6 +2746,7 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 		}
 	}
 	if !in.Force && (s.state != nil || strings.TrimSpace(in.RuntimeProfile) != "") {
+		finish := startTaskStage(ctx, "takeover_guard_status", map[string]any{"runtime_profile": in.RuntimeProfile})
 		takeover, takeoverErr := routerTakeoverStatus(ctx, routertakeover.Options{
 			RuntimeProfile: in.RuntimeProfile,
 			ConfigPath:     in.Config,
@@ -2648,13 +2757,20 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 			RedirPort:      in.RedirPort,
 			TunDevice:      in.TunDevice,
 		})
+		if takeoverErr != nil {
+			finishTaskStage(finish, takeoverErr, nil)
+		} else {
+			finishTaskStage(finish, nil, map[string]any{"effective": takeover.Effective})
+		}
 		if takeoverErr == nil && takeover.Effective {
+			finish = startTaskStage(ctx, "runtime_status_for_refusal", map[string]any{"runtime_dir": in.RuntimeDir})
 			status := corerun.Status(corerun.StatusOptions{
 				CorePath:   in.Core,
 				ConfigPath: in.Config,
 				WorkDir:    in.RuntimeDir,
 				LogPath:    in.LogFile,
 			})
+			finishTaskStage(finish, nil, map[string]any{"running": status.Running, "pid": status.PID})
 			return jsonToolResult(corerun.StopResult{
 				Refused:    true,
 				WasRunning: status.Running,
@@ -2673,6 +2789,7 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 			})
 		}
 	}
+	finish := startTaskStage(ctx, "stop_runtime", map[string]any{"runtime_dir": in.RuntimeDir, "timeout_ms": in.TimeoutMS, "force": in.Force})
 	result, err := corerun.Stop(corerun.StopOptions{
 		CorePath:   in.Core,
 		ConfigPath: in.Config,
@@ -2681,8 +2798,10 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 		ForceKill:  in.Force,
 	})
 	if err != nil {
+		finishTaskStage(finish, err, nil)
 		return toolResult{}, err
 	}
+	finishTaskStage(finish, nil, map[string]any{"stopped": result.Stopped, "was_running": result.WasRunning, "pid": result.PID, "error": result.Error})
 	return jsonToolResult(result)
 }
 

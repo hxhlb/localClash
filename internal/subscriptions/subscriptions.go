@@ -49,6 +49,15 @@ type RefreshOptions struct {
 	MergedPath string
 	Force      bool
 	UserAgent  string
+	OnStage    func(StageEvent) `json:"-"`
+}
+
+type StageEvent struct {
+	Stage      string         `json:"stage"`
+	Event      string         `json:"event"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Fields     map[string]any `json:"fields,omitempty"`
 }
 
 type StatusResult struct {
@@ -187,44 +196,82 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 
 func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	opts = normalizeRefreshOptions(opts)
+	stage := subscriptionStageEmitter(opts.OnStage)
+
+	finish := stage("read_config", map[string]any{"config": opts.ConfigPath})
 	config, err := readConfig(opts.ConfigPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			finish(err, nil)
 			return RefreshResult{}, fmt.Errorf("subscription sources are not configured; run subscriptions_configure first")
 		}
+		finish(err, nil)
 		return RefreshResult{}, err
 	}
 	if len(config.Sources) == 0 {
+		finish(fmt.Errorf("subscription sources are empty"), nil)
 		return RefreshResult{}, fmt.Errorf("subscription sources are empty; run subscriptions_configure first")
 	}
+	finish(nil, map[string]any{"source_count": len(config.Sources)})
+
+	finish = stage("validate_sources", nil)
 	for _, source := range config.Sources {
 		if err := validateSource(source); err != nil {
+			finish(err, map[string]any{"source_id": source.ID})
 			return RefreshResult{}, err
 		}
 	}
+	finish(nil, nil)
+
+	finish = stage("select_sources", map[string]any{"ids": opts.IDs})
 	selected, err := selectedSourceIDs(config.Sources, opts.IDs)
 	if err != nil {
+		finish(err, nil)
 		return RefreshResult{}, err
 	}
+	selectedCount := 0
+	for _, ok := range selected {
+		if ok {
+			selectedCount++
+		}
+	}
+	finish(nil, map[string]any{"selected_count": selectedCount})
+
+	finish = stage("ensure_runtime_dir", map[string]any{"runtime_dir": opts.RuntimeDir})
 	if err := os.MkdirAll(opts.RuntimeDir, 0o755); err != nil {
+		finish(err, nil)
 		return RefreshResult{}, err
 	}
+	finish(nil, nil)
 
 	refreshed := map[string]bool{}
 	for _, source := range config.Sources {
 		if !selected[source.ID] {
 			continue
 		}
+		finish = stage("fetch_source", map[string]any{"source_id": source.ID, "url": MaskURL(source.URL)})
 		doc, err := fetchSource(ctx, source, opts.UserAgent)
 		if err != nil {
+			finish(err, nil)
 			return RefreshResult{}, err
 		}
+		finish(nil, nil)
+		artifact := artifactPath(opts.RuntimeDir, source.ID)
+		finish = stage("write_source_artifact", map[string]any{"source_id": source.ID, "artifact": artifact})
 		if err := writeSubscriptionArtifact(artifactPath(opts.RuntimeDir, source.ID), doc.Data); err != nil {
+			finish(err, nil)
 			return RefreshResult{}, err
 		}
+		summary := summarizeMap(doc.Data)
+		finish(nil, map[string]any{
+			"proxies":      summary.ProxiesCount,
+			"proxy_groups": summary.ProxyGroupsCount,
+			"rules":        summary.RulesCount,
+		})
 		refreshed[source.ID] = true
 	}
 
+	finish = stage("read_artifacts", nil)
 	docs := map[string]subscriptionDoc{}
 	result := RefreshResult{Refreshed: true, Warnings: []string{}}
 	for _, source := range config.Sources {
@@ -233,11 +280,13 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				if selected[source.ID] {
+					finish(err, map[string]any{"source_id": source.ID})
 					return RefreshResult{}, fmt.Errorf("source %q artifact was not written", source.ID)
 				}
 				result.Warnings = append(result.Warnings, fmt.Sprintf("source %q has no local artifact; run subscriptions_refresh for that source", source.ID))
 				continue
 			}
+			finish(err, map[string]any{"source_id": source.ID})
 			return RefreshResult{}, err
 		}
 		docs[source.ID] = doc
@@ -256,19 +305,55 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 		})
 	}
 	if len(docs) == 0 {
+		finish(fmt.Errorf("no subscription artifacts are available to merge"), nil)
 		return RefreshResult{}, fmt.Errorf("no subscription artifacts are available to merge")
 	}
+	finish(nil, map[string]any{"artifact_count": len(docs)})
+
+	finish = stage("merge_subscriptions", nil)
 	merged, renamed, err := mergeSubscriptions(config.Sources, docs)
 	if err != nil {
+		finish(err, nil)
 		return RefreshResult{}, err
 	}
+	finish(nil, map[string]any{"renamed_proxies": renamed})
+
+	finish = stage("write_merged_subscription", map[string]any{"merged": opts.MergedPath})
 	if err := writeSubscriptionArtifact(opts.MergedPath, merged); err != nil {
+		finish(err, nil)
 		return RefreshResult{}, err
 	}
 	result.Merged = summarizeArtifact(opts.MergedPath)
 	result.Merged.RenamedProxiesCount = renamed
 	sort.Strings(result.Warnings)
+	finish(nil, map[string]any{
+		"proxies":         result.Merged.ProxiesCount,
+		"renamed_proxies": renamed,
+	})
 	return result, nil
+}
+
+func subscriptionStageEmitter(callback func(StageEvent)) func(string, map[string]any) func(error, map[string]any) {
+	return func(stage string, fields map[string]any) func(error, map[string]any) {
+		if callback == nil {
+			return func(error, map[string]any) {}
+		}
+		started := time.Now()
+		callback(StageEvent{Stage: stage, Event: "started", Fields: fields})
+		return func(err error, doneFields map[string]any) {
+			event := StageEvent{
+				Stage:      stage,
+				Event:      "done",
+				DurationMS: time.Since(started).Milliseconds(),
+				Fields:     doneFields,
+			}
+			if err != nil {
+				event.Event = "error"
+				event.Error = err.Error()
+			}
+			callback(event)
+		}
+	}
 }
 
 func normalizeStatusOptions(opts StatusOptions) StatusOptions {

@@ -24,6 +24,16 @@ type StartOptions struct {
 	LogPath        string
 	Foreground     bool
 	SkipConfigTest bool
+	OnStage        func(StartStageEvent) `json:"-"`
+}
+
+type StartStageEvent struct {
+	Stage      string         `json:"stage"`
+	Event      string         `json:"event"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	PID        int            `json:"pid,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Fields     map[string]any `json:"fields,omitempty"`
 }
 
 type StartResult struct {
@@ -49,9 +59,11 @@ var afterProcessStart = func(*exec.Cmd) {}
 
 func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	opts = normalizeStartOptions(opts)
+	stage := startStageEmitter(opts.OnStage)
 	if opts.Foreground {
 		return StartResult{}, fmt.Errorf("foreground=true is not supported by MCP run_runtime; use the CLI run command for foreground execution")
 	}
+	finish := stage("prepare", nil)
 	runOpts := normalizeOptions(Options{
 		CorePath:   opts.CorePath,
 		ConfigPath: opts.ConfigPath,
@@ -59,14 +71,18 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 		LogPath:    opts.LogPath,
 	})
 	if err := runOpts.validate(); err != nil {
+		finish(err, 0)
 		return StartResult{}, err
 	}
 	if err := os.MkdirAll(runOpts.WorkDir, 0o755); err != nil {
+		finish(err, 0)
 		return StartResult{}, err
 	}
 	if err := os.MkdirAll(filepath.Dir(runOpts.LogPath), 0o755); err != nil {
+		finish(err, 0)
 		return StartResult{}, err
 	}
+	finish(nil, 0)
 	baseResult := StartResult{
 		Config:     runOpts.ConfigPath,
 		RuntimeDir: runOpts.WorkDir,
@@ -77,6 +93,7 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	baseResult.ExternalController = endpoints.ExternalController
 	baseResult.ExternalUIURL = externalUIURL(baseResult.ExternalController, endpoints.ExternalUI)
 
+	finish = stage("status_check", nil)
 	pidPath := runtimePIDPath(runOpts.WorkDir)
 	if pid, ok := readRunningPID(pidPath); ok {
 		if match, _ := processMatchesRuntime(pid, StartOptions{
@@ -90,34 +107,52 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 			baseResult.AlreadyRunning = true
 			baseResult.PID = pid
 			baseResult.Warnings = append(baseResult.Warnings, "Runtime is already running; run_runtime did not start a second process.")
+			finish(nil, pid)
 			return baseResult, nil
 		}
 	}
+	finish(nil, 0)
 	if opts.SkipConfigTest {
 		baseResult.ConfigTestSkipped = true
-	} else if err := testConfig(ctx, runOpts); err != nil {
-		return StartResult{}, err
+	} else {
+		finish := stage("config_test", nil)
+		if err := testConfig(ctx, runOpts); err != nil {
+			finish(err, 0)
+			return StartResult{}, err
+		}
+		finish(nil, 0)
 	}
 
+	finish = stage("open_log", map[string]any{"log_file": runOpts.LogPath})
 	logFile, err := os.OpenFile(runOpts.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		finish(err, 0)
 		return StartResult{}, err
 	}
+	finish(nil, 0)
+
+	finish = stage("start_process", map[string]any{"core": runOpts.CorePath, "config": runOpts.ConfigPath, "work_dir": runOpts.WorkDir})
 	cmd := exec.Command(runOpts.CorePath, "-d", runOpts.WorkDir, "-f", runOpts.ConfigPath)
 	cmd.Stdin = nil
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
+		finish(err, 0)
 		return StartResult{}, err
 	}
 	afterProcessStart(cmd)
+	finish(nil, cmd.Process.Pid)
+
+	finish = stage("write_pid_file", map[string]any{"pid_file": pidPath})
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 		_ = logFile.Close()
+		finish(err, cmd.Process.Pid)
 		return StartResult{}, err
 	}
+	finish(nil, cmd.Process.Pid)
 	_ = logFile.Close()
 	go func() {
 		_ = cmd.Wait()
@@ -126,6 +161,29 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	baseResult.Started = true
 	baseResult.PID = cmd.Process.Pid
 	return baseResult, nil
+}
+
+func startStageEmitter(callback func(StartStageEvent)) func(string, map[string]any) func(error, int) {
+	return func(stage string, fields map[string]any) func(error, int) {
+		if callback == nil {
+			return func(error, int) {}
+		}
+		started := time.Now()
+		callback(StartStageEvent{Stage: stage, Event: "started", Fields: fields})
+		return func(err error, pid int) {
+			event := StartStageEvent{
+				Stage:      stage,
+				Event:      "done",
+				DurationMS: time.Since(started).Milliseconds(),
+				PID:        pid,
+			}
+			if err != nil {
+				event.Event = "error"
+				event.Error = err.Error()
+			}
+			callback(event)
+		}
+	}
 }
 
 func normalizeStartOptions(opts StartOptions) StartOptions {
