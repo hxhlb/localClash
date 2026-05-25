@@ -35,6 +35,93 @@
 
 因此，這次測試沒有重現 localClash 程序持續閒置卻佔用 100% CPU 的問題；但有重現特定 MCP 操作期間的高 CPU。
 
+## 2026-05-26 修正後回測
+
+後續修正將 pack runtime path 從 YAML catalog / directory scan 改成
+`index.gob` runtime contract：
+
+- `rules adapt` 生成 `.runtime/rules/packs/index.gob`。
+- runtime 缺少 `index.gob` 時 hard fail，提示重新執行 `localclash rules adapt`。
+- runtime 不再 fallback 到 YAML catalog 或目錄掃描。
+- `localconfig.Resolve` 只載入一次 `PackIndex`，後續 pack 解析全部走 map lookup。
+- 新增 `rules index-dump --format json|yaml` 作為觀測手段。
+
+回測部署：
+
+- 主機：`root@192.168.6.1`
+- Commit：`f027711 refactor: make pack index a runtime contract`
+- 路由器二進位 SHA-256：
+  `61010f89ba700b42e7129fbe199fe0554667e55d97824e4f51d453b6c022f655`
+- `index.gob`：`/root/localclash/.runtime/rules/packs/index.gob`
+- `index.gob` 大小：約 `2.8M`
+- `rules adapt` 產物：
+  - `blackmatrix7`: 668 packs
+  - `sukkaw`: 31 packs
+  - `syncnext`: 2 packs
+  - `v2fly-dlc`: 1472 packs
+
+安全邊界：
+
+- 沒有啟動或停止 Mihomo runtime。
+- 沒有執行 Network Takeover。
+- 只測試 `rules adapt`、`config render`、MCP `config_render` 和
+  `routing_explain` 等不改變路由器接管狀態的路徑。
+
+### 修正後耗時
+
+CLI `config render`：
+
+| Run | 時間 |
+| --- | ---: |
+| 1 | 1140ms |
+| 2 | 1080ms |
+| 3 | 760ms |
+
+MCP `config_render` 任務階段：
+
+| 階段 | 時間 |
+| --- | ---: |
+| `resolve_localclash_config` | 363ms |
+| `load_subscription_nodes` | 122ms |
+| `load_pack_index` | 157ms |
+| `resolve_packs` | 171ms |
+| `render_generated_config` | 552ms |
+| `render_generated_config.render_pack_selection` | 334ms |
+
+MCP `routing_explain`：
+
+| 查詢 | 時間 |
+| --- | ---: |
+| `telegram`, `include_rule_matches=false` | 537ms |
+| `telegram`, `include_rule_matches=true` | 880ms |
+
+### 前後對比
+
+| 路徑 | 修正前 | 修正後 |
+| --- | ---: | ---: |
+| `config_render` 總時間 | 16828ms | 760-1140ms |
+| `resolve_localclash_config` | 15024ms | 363ms |
+| `routing_explain` | 16756-26888ms | 537-880ms |
+
+結論：
+
+- `localconfig.Resolve` 的主要瓶頸已確認是舊 pack runtime path 的重複
+  YAML catalog / 目錄掃描與解析。
+- `index.gob` runtime contract 有效；它把常見 config/routing 解析路徑從
+  十秒級降到秒內。
+- 連續執行 10 次 `config render` 時，單次短窗口仍會看到短暫
+  `localclash` CPU 100% 左右，但 10 次總耗時為 8820ms；完成後 MCP 常駐
+  `localclash` 進程回到 0.0% CPU。
+- 這次沒有重現修正前那種長時間卡住 CPU 的 localClash 狀態。
+
+剩餘觀察：
+
+- MCP 任務日誌顯示 `.runtime/subscriptions/sub1.yaml` 不存在時會 fallback 到
+  `subscription.yaml`。這不是本輪 CPU 主因，但後續應整理訂閱 source
+  artifact 狀態，避免路徑語意混亂。
+- Mihomo `-t` 的 30s 級成本不屬於 pack index 問題，仍需另外做驗證快取或
+  runtime restart 優化。
+
 ## 工具覆蓋
 
 ### 快速讀取與建構工具
@@ -331,29 +418,32 @@ CPU 觀察：
 
 ## 建議討論點
 
-### 1. 優化或快取 `localconfig.Resolve`
+### 1. Pack index runtime contract 已解決主要 `localconfig.Resolve` 瓶頸
 
-可能工作：
+已完成：
 
-- 使用複製的真實路由器設定直接 profile `localconfig.Resolve`。
-- 在 `localconfig.Resolve` 裡加入分階段耗時記錄。
-- 確認成本來自訂閱解析、selector matching、policy-group 展開、rule-pack resolution、YAML marshal/unmarshal，還是重複讀檔。
-- 在以下路徑間重用已解析的訂閱節點索引：
-  - `routing_explain`
-  - `config_render`
-  - `config_patch_create`
-  - `config_patch_apply`
-  - `subscriptions_refresh` 影響評估
+- 將 pack runtime protocol 從 YAML catalog / directory scan 替換為
+  `index.gob`。
+- `localconfig.Resolve` 改為單次載入 `PackIndex`。
+- runtime 缺失或 schema mismatch 時 hard fail，而不是 fallback。
+- 常見 resolve 路徑在真實路由器上已低於 2s。
 
-成功目標：
+後續應避免重新引入：
 
-- 真實路由器上的常見 resolve 路徑低於 2s。
+- runtime YAML catalog fallback。
+- 每個 pack resolve 重新讀檔或掃目錄。
+- 把 debug 手段混入 runtime hot path。
 
 ### 2. 將便宜狀態和完整稽核拆開
 
 `config_status` 預設已經很輕量。同樣原則也應該套用到 `routing_explain`。
 
-可能做法：
+修正後狀態：
+
+- `routing_explain` 在目前真機配置已降到 537-880ms。
+- 目前不再是首要 CPU 熱點。
+
+仍可保留的產品方向：
 
 - `routing_explain` 預設模式應使用既有的持久化 metadata，避免完整 selector resolution。
 - 為昂貴的完整證明加入 `detail=true` 或 `resolve=true`。
@@ -420,12 +510,13 @@ CPU 觀察：
 
 ## 立即下一步
 
-最高價值的下一個工程步驟，是對 `localconfig.Resolve` 加入觀測點並進行 profile。
+最高價值的下一個工程步驟已不再是 pack resolution。`index.gob` 已經把主要
+localClash CPU 熱點降到可接受範圍。
 
-原因：
+下一步建議：
 
-- 它解釋了 `routing_explain`、`subscriptions_refresh`、`config_render`、`config_patch_create` 和 `config_patch_apply` 的 CPU 尖峰。
-- 它是 localClash 擁有的程式碼。
-- 優化它會同時改善 Agent 體驗與 LuCI 響應性。
-
-第二步是為 Mihomo `-t` 設計驗證快取，因為它是 `run_runtime` 和 `restart_runtime` 的主要成本。
+1. 修正訂閱 source artifact 狀態，避免 `.runtime/subscriptions/sub1.yaml`
+   缺失時長期 fallback 到 `subscription.yaml`。
+2. 為 Mihomo `-t` 設計驗證快取，因為它仍是 `run_runtime` 和
+   `restart_runtime` 的主要成本。
+3. 建立可重複的 MCP performance smoke 腳本，把本報告中的真機測試流程固定下來。
