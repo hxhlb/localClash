@@ -1,52 +1,47 @@
-# MCP Tool CPU Report - 2026-05-25
+# MCP 工具 CPU 報告 - 2026-05-25
 
-This report records the real-router MCP tool coverage and CPU observations from
-the 2026-05-25 test pass.
+這份報告記錄 2026-05-25 測試輪次中的真實路由器 MCP 工具覆蓋情況與 CPU 觀察結果。
 
-Target router:
+目標路由器：
 
-- Host: `root@192.168.6.1`
-- MCP endpoint: `http://192.168.6.1:8765/mcp`
-- Tested binary SHA-256:
+- 主機：`root@192.168.6.1`
+- MCP endpoint：`http://192.168.6.1:8765/mcp`
+- 測試二進位 SHA-256:
   `0ade115d24e0d7595018e11ac97094dfcb9b581c320499a954b23b41bc182a21`
 - Commit: `85c8f42 Add staged logs for MCP execution tools`
 
-Safety boundary:
+安全邊界：
 
-- `router_takeover_apply` and `router_takeover_stop` were tested with
-  `dry_run=true` only.
-- No real router takeover was applied.
-- Runtime tests used `/tmp/localclash-mcp-tooltest`, not the active
-  `/root/localclash` runtime directory.
-- The test runtime was stopped at the end.
+- `router_takeover_apply` 和 `router_takeover_stop` 只以 `dry_run=true` 測試。
+- 沒有實際套用路由器接管。
+- Runtime 測試使用 `/tmp/localclash-mcp-tooltest`，不是目前使用中的
+  `/root/localclash` runtime 目錄。
+- 測試用 runtime 已在最後停止。
 
-## Summary
+## 摘要
 
-33 MCP tools were exercised successfully.
+共成功測試 33 個 MCP 工具。
 
-The current CPU problem is not evenly distributed across all MCP tools. It is
-concentrated in two families:
+目前的 CPU 問題並不是平均分散在所有 MCP 工具上，而是集中在兩類路徑：
 
-1. localClash config-resolution paths, especially `localconfig.Resolve`.
-2. Mihomo config validation, especially `mihomo -t`.
+1. localClash 的設定解析路徑，尤其是 `localconfig.Resolve`。
+2. Mihomo 設定驗證，尤其是 `mihomo -t`。
 
-After test cleanup, the MCP server returned to idle:
+測試清理完成後，MCP 伺服器回到閒置狀態：
 
-- `localclash` state: sleeping
-- RSS: about 40 MB
-- sample CPU idle: about 93.6%
+- `localclash` 狀態：sleeping
+- RSS：約 40 MB
+- 採樣 CPU 閒置率：約 93.6%
 
-So this test did not reproduce a persistent idle 100% localClash process. It did
-reproduce high CPU during specific MCP operations.
+因此，這次測試沒有重現 localClash 程序持續閒置卻佔用 100% CPU 的問題；但有重現特定 MCP 操作期間的高 CPU。
 
-## Tool Coverage
+## 工具覆蓋
 
-### Fast Read and Builder Tools
+### 快速讀取與建構工具
 
-These tools completed in about 0.7s to 2.2s and did not show sustained
-localClash CPU pressure in the sampled windows:
+這些工具在約 0.7s 到 2.2s 內完成，採樣窗口中沒有看到持續的 localClash CPU 壓力：
 
-| Tool | Time |
+| 工具 | 時間 |
 | --- | ---: |
 | `config_configure` | 747ms |
 | `tools_list` | 929ms |
@@ -72,38 +67,35 @@ localClash CPU pressure in the sampled windows:
 | `doctor` | 1136ms |
 | `environment_inspect` | 1332ms |
 
-### Slow Read Tool
+### 慢速讀取工具
 
-`routing_explain` completed successfully but is too expensive for an ordinary
-read path.
+`routing_explain` 成功完成，但對一般讀取路徑來說成本過高。
 
-Observed time:
+觀察到的時間：
 
-- First matrix run: 16756ms
-- Focused rerun: 26888ms
+- 第一次矩陣執行：16756ms
+- 聚焦重跑：26888ms
 
-Focused CPU samples showed `localclash` between about 83% and 136% while the
-request was running.
+聚焦 CPU 採樣顯示，請求執行期間 `localclash` 約在 83% 到 136% 之間。
 
-Interpretation:
+解讀：
 
-- `routing_explain` is currently doing heavy config intent resolution work.
-- It should not behave like a cheap status/read tool on thin routers.
+- `routing_explain` 目前正在執行很重的設定意圖解析工作。
+- 它不應該在資源受限的路由器上表現得像便宜的狀態/讀取工具。
 
-## Stage-Logged Execution Tools
+## 帶階段日誌的執行工具
 
-The new staged task logs worked. Long-running tools now show where time is
-spent instead of only reporting final `done`.
+新的階段式任務日誌有效。長時間執行的工具現在會顯示時間花在哪裡，而不是只回報最後的 `done`。
 
 ### `subscriptions_refresh`
 
-Observed time:
+觀察到的時間：
 
 - 21900ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `fetch_source` for `sub1` | 2504ms |
 | `write_source_artifact` for `sub1` | 143ms |
@@ -114,344 +106,326 @@ Important stages:
 | `load_subscription_nodes_after` | 244ms |
 | `evaluate_localclash_impact` | 15481ms |
 
-CPU observation:
+CPU 觀察：
 
-- `localclash` peaked around 127% during this tool.
+- 這個工具執行期間，`localclash` 峰值約 127%。
 
-Interpretation:
+解讀：
 
-- Network fetch and YAML writes were not the primary bottleneck.
-- The expensive stage was post-refresh localClash impact evaluation.
-- This points back to config resolution rather than subscription download.
+- 網路抓取和 YAML 寫入不是主要瓶頸。
+- 昂貴的階段是刷新後的 localClash 影響評估。
+- 這指向設定解析，而不是訂閱下載。
 
 ### `config_render`
 
-Observed time:
+觀察到的時間：
 
 - 16828ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `resolve_localclash_config` | 15024ms |
 | `render_generated_config` | 526ms |
 | `render_generated_config.render_pack_selection` | 471ms |
 | `render_generated_config.write_output` | 29ms |
 
-CPU observation:
+CPU 觀察：
 
-- `localclash` peaked around 108%.
+- `localclash` 峰值約 108%。
 
-Interpretation:
+解讀：
 
-- Rendering itself is relatively cheap.
-- Resolving `localclash.yaml` into selected packs, proxy groups, policy groups,
-  and custom rules is the dominant cost.
+- 渲染本身相對便宜。
+- 將 `localclash.yaml` 解析成已選 pack、proxy group、policy group 和 custom rule 是主要成本。
 
 ### `config_patch_create`
 
-Observed time:
+觀察到的時間：
 
 - 16905ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `resolve_candidate_config` | 15051ms |
 | `render_candidate` | 568ms |
 | `render_candidate.render_pack_selection` | 513ms |
 | `write_summary` | 1ms |
 
-CPU observation:
+CPU 觀察：
 
-- `localclash` peaked around 125%.
+- `localclash` 峰值約 125%。
 
-Interpretation:
+解讀：
 
-- Patch creation has the same resolution bottleneck as `config_render`.
-- Candidate render and summary writes are not the problem.
+- 建立 patch 和 `config_render` 有相同的解析瓶頸。
+- 候選渲染和摘要寫入不是問題。
 
 ### `config_patch_apply`
 
-Observed time:
+觀察到的時間：
 
 - 16681ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `resolve_apply_config` | 14964ms |
 | `render_candidate` | 531ms |
 | `backup_apply_targets` | 1ms |
 | `write_active_config` | 14ms |
 
-CPU observation:
+CPU 觀察：
 
-- `localclash` peaked around 118%.
+- `localclash` 峰值約 118%。
 
-Interpretation:
+解讀：
 
-- Apply has the same resolution bottleneck.
-- The file write and backup operations are not material contributors.
+- 套用 patch 有相同的解析瓶頸。
+- 檔案寫入與備份操作不是主要貢獻者。
 
 ### `run_runtime`
 
-Observed time:
+觀察到的時間：
 
 - 37273ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `config_test` | 35941ms |
 | `start_process` | 1ms |
 
-CPU observation:
+CPU 觀察：
 
-- `mihomo-meta` peaked around 183%.
+- `mihomo-meta` 峰值約 183%。
 
-Interpretation:
+解讀：
 
-- Runtime start is fast after validation.
-- The slow operation is Mihomo config validation.
+- 驗證完成後，runtime 啟動很快。
+- 慢的操作是 Mihomo 設定驗證。
 
 ### `restart_runtime`
 
-Observed time:
+觀察到的時間：
 
 - 33316ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `config_test` | 32527ms |
 | `stop` | 1ms |
 | `start` | 2ms |
 | `status` | 1ms |
 
-CPU observation:
+CPU 觀察：
 
-- `mihomo-meta` peaked around 192%.
+- `mihomo-meta` 峰值約 192%。
 
-Interpretation:
+解讀：
 
-- Restart is no longer a mystery path.
-- Stop/start/status are effectively negligible.
-- `mihomo -t` is the dominant cost.
+- 重啟已經不再是神祕路徑。
+- 停止/啟動/狀態查詢幾乎可以忽略。
+- `mihomo -t` 是主要成本。
 
-### Router Takeover Dry Runs
+### 路由器接管 Dry Run
 
-Observed times:
+觀察到的時間：
 
 - `router_takeover_apply`: 1890ms
 - `router_takeover_stop`: 1875ms
 
-Important stage:
+重要階段：
 
 - `read_runtime_profile`: 3ms
 
-Interpretation:
+解讀：
 
-- In `dry_run=true` with `runtime_profile=normal`, these tools return early.
-- This does not validate real firewall mutation cost.
-- Real takeover testing still belongs in isolated OpenWrt only.
+- 在 `dry_run=true` 且 `runtime_profile=normal` 時，這些工具會提早返回。
+- 這不驗證真實防火牆修改成本。
+- 真實接管測試仍應只放在隔離的 OpenWrt 環境。
 
 ### `stop_runtime`
 
-Observed time:
+觀察到的時間：
 
 - 1877ms
 
-Important stages:
+重要階段：
 
-| Stage | Time |
+| 階段 | 時間 |
 | --- | ---: |
 | `takeover_guard_status` | 744ms |
 | `stop_runtime` | 31ms |
 
-Interpretation:
+解讀：
 
-- Stop itself is cheap.
-- Guard status is measurable but not severe in this run.
+- 停止本身很便宜。
+- Guard status 可量測，但在這輪中不嚴重。
 
-## CPU Findings
+## CPU 發現
 
 ### localClash CPU
 
-Observed hot paths:
+觀察到的熱點路徑：
 
 - `routing_explain`
-- `subscriptions_refresh` stage `evaluate_localclash_impact`
-- `config_render` stage `resolve_localclash_config`
-- `config_patch_create` stage `resolve_candidate_config`
-- `config_patch_apply` stage `resolve_apply_config`
+- `subscriptions_refresh` 階段 `evaluate_localclash_impact`
+- `config_render` 階段 `resolve_localclash_config`
+- `config_patch_create` 階段 `resolve_candidate_config`
+- `config_patch_apply` 階段 `resolve_apply_config`
 
-Working hypothesis:
+工作假設：
 
-- `localconfig.Resolve` is doing repeated expensive work over the same
-  subscription/config/rule-pack data.
-- The cost is large enough to occupy more than one CPU worth of time on the
-  router.
+- `localconfig.Resolve` 正在對相同的訂閱、設定和 rule pack 資料重複執行昂貴工作。
+- 這個成本大到足以在路由器上佔用超過一顆 CPU 的時間。
 
-This is now bounded enough to stop treating the issue as "MCP server is
-generally expensive".
+現在範圍已經收斂到足以停止把問題視為「MCP 伺服器普遍很貴」。
 
 ### Mihomo CPU
 
-Observed hot paths:
+觀察到的熱點路徑：
 
-- `run_runtime` stage `config_test`
-- `restart_runtime` stage `config_test`
+- `run_runtime` 階段 `config_test`
+- `restart_runtime` 階段 `config_test`
 
-Working hypothesis:
+工作假設：
 
-- Mihomo config validation is expensive for the generated config, subscription
-  size, and rule/provider structure.
-- localClash currently pays this cost before runtime start/restart.
+- 對目前生成設定、訂閱規模和 rule/provider 結構來說，Mihomo 設定驗證很昂貴。
+- localClash 目前會在 runtime 啟動/重啟之前支付這個成本。
 
-This is a separate problem from localClash's own config-resolution CPU.
+這是和 localClash 自身設定解析 CPU 不同的另一個問題。
 
-### OpenClash / Background Noise
+### OpenClash / 背景雜訊
 
-The router's existing OpenClash `clash` process showed background spikes during
-sampling, sometimes above 90%. This is not proof that localClash caused those
-spikes.
+採樣期間，路由器上既有的 OpenClash `clash` 程序出現背景尖峰，有時超過 90%。這不能證明那些尖峰是 localClash 造成的。
 
-The useful comparison is:
+有用的比較是：
 
-- localClash CPU during specific MCP calls
-- localClash idle CPU after those calls finish
-- Mihomo CPU during config validation or runtime warm-up
+- 特定 MCP 呼叫期間的 localClash CPU
+- 這些呼叫完成後的 localClash 閒置 CPU
+- 設定驗證或 runtime 預熱期間的 Mihomo CPU
 
-## Product Impact
+## 產品影響
 
-The current staged logs are a necessary improvement because they let an Agent
-answer:
+目前的階段式日誌是必要改善，因為它讓 Agent 可以回答：
 
-- which stage is currently running
-- which stage failed
-- how long each stage took
-- whether the long wait is localClash resolution or Mihomo validation
+- 目前正在執行哪個階段
+- 哪個階段失敗
+- 每個階段花了多久
+- 長時間等待是 localClash 解析還是 Mihomo 驗證
 
-But staged logs are not enough by themselves. Several user-facing operations are
-still too expensive for a thin-client router:
+但階段式日誌本身還不夠。幾個面向使用者的操作對資源受限的路由器來說仍然太昂貴：
 
-- "explain routing" can take over 20 seconds.
-- "render config" takes about 17 seconds mostly before actual render.
-- "patch create/apply" takes about 17 seconds mostly before actual render/write.
-- "run/restart runtime" takes over 30 seconds mostly in Mihomo `-t`.
+- "explain routing" 可能超過 20 秒。
+- "render config" 約 17 秒，而且大多花在真正渲染之前。
+- "patch create/apply" 約 17 秒，而且大多花在真正渲染/寫入之前。
+- "run/restart runtime" 超過 30 秒，而且大多花在 Mihomo `-t`。
 
-## Recommended Discussion Points
+## 建議討論點
 
-### 1. Optimize or Cache `localconfig.Resolve`
+### 1. 優化或快取 `localconfig.Resolve`
 
-Likely work:
+可能工作：
 
-- Profile `localconfig.Resolve` directly with a copied real-router config.
-- Add per-stage timing inside `localconfig.Resolve`.
-- Identify whether the cost is subscription parsing, selector matching,
-  policy-group expansion, rule-pack resolution, YAML marshal/unmarshal, or
-  repeated file reads.
-- Reuse resolved subscription node indexes across:
+- 使用複製的真實路由器設定直接 profile `localconfig.Resolve`。
+- 在 `localconfig.Resolve` 裡加入分階段耗時記錄。
+- 確認成本來自訂閱解析、selector matching、policy-group 展開、rule-pack resolution、YAML marshal/unmarshal，還是重複讀檔。
+- 在以下路徑間重用已解析的訂閱節點索引：
   - `routing_explain`
   - `config_render`
   - `config_patch_create`
   - `config_patch_apply`
-  - `subscriptions_refresh` impact evaluation
+  - `subscriptions_refresh` 影響評估
 
-Success target:
+成功目標：
 
-- Common resolve path under 2s on the real router.
+- 真實路由器上的常見 resolve 路徑低於 2s。
 
-### 2. Split Cheap Status From Full Audit
+### 2. 將便宜狀態和完整稽核拆開
 
-`config_status` is already lightweight by default. The same principle should
-apply to `routing_explain`.
+`config_status` 預設已經很輕量。同樣原則也應該套用到 `routing_explain`。
 
-Possible approach:
+可能做法：
 
-- `routing_explain` default mode should use existing durable metadata and avoid
-  full selector resolution.
-- Add `detail=true` or `resolve=true` for expensive full proof.
-- Return a clear `resolve_skipped` marker when it avoids heavy work.
+- `routing_explain` 預設模式應使用既有的持久化 metadata，避免完整 selector resolution。
+- 為昂貴的完整證明加入 `detail=true` 或 `resolve=true`。
+- 在避開重工作時回傳清楚的 `resolve_skipped` 標記。
 
-Success target:
+成功目標：
 
-- Basic routing explanation under 2s.
-- Full evidence mode can remain slower but must be explicit.
+- 基本 routing explanation 低於 2s。
+- 完整證據模式可以仍然較慢，但必須明確。
 
-### 3. Reconsider When `mihomo -t` Is Required
+### 3. 重新考慮何時需要 `mihomo -t`
 
-The current preflight is safe but expensive.
+目前的 preflight 安全，但昂貴。
 
-Possible approach:
+可能做法：
 
-- Keep `mihomo -t` for config changes.
-- Skip repeated `-t` when generated config hash has already passed validation.
-- Store validation metadata:
+- 設定變更時保留 `mihomo -t`。
+- 如果 generated config hash 已經通過驗證，就跳過重複的 `-t`。
+- 儲存驗證 metadata：
   - config SHA-256
   - core type/version
   - validation time
   - result
-- `restart_runtime` can reuse validation if generated config and core did not
-  change.
+- 如果 generated config 和 core 都沒有變，`restart_runtime` 可以重用驗證結果。
 
-Success target:
+成功目標：
 
-- Restart unchanged runtime in under 3s.
-- First validation after config change can still take 30s, but the task log must
-  say it is validating Mihomo config.
+- 未變更 runtime 的 restart 低於 3s。
+- 設定變更後的第一次驗證仍可花 30s，但任務日誌必須說明正在驗證 Mihomo 設定。
 
-### 4. Keep Runtime Mutation Separate From Router Takeover
+### 4. 保持 Runtime Mutation 和 Router Takeover 分離
 
-This remains correct:
+這仍然是正確的：
 
-- `run_runtime` starts Mihomo only.
-- `restart_runtime` restarts Mihomo only.
-- `router_takeover_apply` mutates firewall/DNS/policy-routing state.
-- `router_takeover_stop` reverts takeover state.
+- `run_runtime` 只啟動 Mihomo。
+- `restart_runtime` 只重啟 Mihomo。
+- `router_takeover_apply` 修改 firewall/DNS/policy-routing 狀態。
+- `router_takeover_stop` 還原 takeover 狀態。
 
-Do not collapse these into one opaque action without stage logs.
+不要在沒有階段日誌的情況下，把它們合併成一個不透明動作。
 
-### 5. Add a Repeatable Performance Harness
+### 5. 加入可重複的效能 Harness
 
-The ad hoc script should become a repo script.
+這個臨時腳本應該變成 repo 腳本。
 
-Suggested script:
+建議腳本：
 
 - `scripts/mcp-tool-perf-smoke.mjs`
 
-It should collect:
+它應該收集：
 
-- tool name
-- elapsed time
-- task status
-- stage timings
+- 工具名稱
+- 經過時間
+- 任務狀態
+- 階段耗時
 - `localclash` max CPU
 - `mihomo` max CPU
 - `clash` background max CPU
 - output JSON artifact
 
-Success target:
+成功目標：
 
-- One command can reproduce this report against a router or test OpenWrt VM.
+- 一條命令可以對路由器或測試 OpenWrt VM 重現這份報告。
 
-## Immediate Next Step
+## 立即下一步
 
-The highest-value next engineering step is to instrument and profile
-`localconfig.Resolve`.
+最高價值的下一個工程步驟，是對 `localconfig.Resolve` 加入觀測點並進行 profile。
 
-Reason:
+原因：
 
-- It explains the `routing_explain`, `subscriptions_refresh`,
-  `config_render`, `config_patch_create`, and `config_patch_apply` CPU spikes.
-- It is localClash-owned code.
-- Optimizing it will improve both Agent experience and LuCI responsiveness.
+- 它解釋了 `routing_explain`、`subscriptions_refresh`、`config_render`、`config_patch_create` 和 `config_patch_apply` 的 CPU 尖峰。
+- 它是 localClash 擁有的程式碼。
+- 優化它會同時改善 Agent 體驗與 LuCI 響應性。
 
-The second step is validation-cache design for Mihomo `-t`, because that is the
-dominant cost in `run_runtime` and `restart_runtime`.
+第二步是為 Mihomo `-t` 設計驗證快取，因為它是 `run_runtime` 和 `restart_runtime` 的主要成本。
