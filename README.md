@@ -30,6 +30,18 @@ localClash should expose:
 New users should start with [First Use](docs/first-use.md) for the shortest
 path from a fresh checkout to a running local Mihomo runtime.
 
+## Release And LuCI Boundary
+
+localClash core releases publish Linux binaries, base assets, checksums, and a
+`localclash-release-manifest.json` file. OpenWrt LuCI consumes that manifest
+from the latest core release when the user installs or updates the core from the
+router UI.
+
+The LuCI package is a separate UI/integration channel. A new core release does
+not require a LuCI package release unless the LuCI frontend, rpcd helper, ACL,
+menu metadata, or package files changed. Users with a current LuCI package can
+pull a newer localClash core through the LuCI "install/update core" flow.
+
 ## Main Bootstrap
 
 Every localClash process builds a shared runtime bootstrap state before serving
@@ -350,6 +362,12 @@ MCP runtime tool:
   router takeover. If `router_takeover_status.effective` is true, call
   `router_takeover_stop` first, or pass `force: true` only after explicit user
   confirmation.
+
+`runtime_status` and `stop_runtime` do not trust the pid file alone. They also
+scan for matching orphan Mihomo processes that use the configured core, runtime
+directory, and generated config. When an orphan is found, `runtime_status`
+reports `orphan_runtime` and `orphan_pids`, and `stop_runtime` stops the
+matching orphan processes together with the recorded pid-file runtime.
 
 `run_runtime` and `restart_runtime` are `confirm_required`. localClash does not
 implement an interactive yes/no prompt inside the tool; the Agent SDK or MCP
