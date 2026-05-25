@@ -171,6 +171,7 @@ ssh_opts=(
   -o ConnectTimeout="${ssh_connect_timeout}"
   -o LogLevel="${ssh_log_level}"
 )
+scp_opts=(-O "${ssh_opts[@]}")
 
 if [[ "${mcp_addr}" != *:* ]]; then
   die "--mcp-addr must include a port, for example 0.0.0.0:8765"
@@ -186,6 +187,8 @@ router_arch="$(
 )"
 case "${router_arch}:${target_arch}" in
   aarch64:arm64 | arm64:arm64)
+    ;;
+  x86_64:amd64)
     ;;
   *)
     die "router arch is ${router_arch}, but build target is ${target_arch}; pass --arch if this is intentional"
@@ -204,7 +207,7 @@ GOOS="${target_os}" GOARCH="${target_arch}" CGO_ENABLED=0 \
 
 local_sha="$(sha256_file "${local_bin}")"
 log "uploading binary to ${router_ssh}:${remote_tmp}"
-scp "${ssh_opts[@]}" "${local_bin}" "${router_ssh}:${remote_tmp}"
+scp "${scp_opts[@]}" "${local_bin}" "${router_ssh}:${remote_tmp}"
 
 log "installing binary at ${remote_bin}"
 ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_tmp}" "${remote_bin}" "${remote_link}" "${remote_workdir}" <<'EOS'
@@ -288,7 +291,7 @@ COPYFILE_DISABLE=1 tar \
   --exclude='.DS_Store' \
   --exclude='*/.DS_Store' \
   -czf "${assets_archive}" policies policy-templates rule-sources
-scp "${ssh_opts[@]}" "${assets_archive}" "${router_ssh}:${remote_assets_tmp}"
+scp "${scp_opts[@]}" "${assets_archive}" "${router_ssh}:${remote_assets_tmp}"
 
 log "installing missing base assets under ${remote_workdir}"
 ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_assets_tmp}" "${remote_workdir}" <<'EOS'
@@ -358,7 +361,7 @@ start_service() {
 EOF
 
 log "installing procd service ${service_path}"
-scp "${ssh_opts[@]}" "${init_file}" "${router_ssh}:${remote_init_tmp}"
+scp "${scp_opts[@]}" "${init_file}" "${router_ssh}:${remote_init_tmp}"
 ssh "${ssh_opts[@]}" "${router_ssh}" 'sh -s' -- "${remote_init_tmp}" "${service_path}" "${remote_workdir}" "${mcp_log}" <<'EOS'
 set -eu
 remote_init_tmp="$1"

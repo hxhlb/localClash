@@ -195,6 +195,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.yaml."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
 				"force":                map[string]any{"type": "boolean", "description": "Overwrite generated output. Defaults to true because generated/mihomo.yaml is a build artifact."},
+				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "routing_explain":
@@ -237,6 +239,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true. Setting false bypasses Mihomo validation and should only be used after explicit user confirmation."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
+				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "nl_file":
@@ -412,6 +416,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test. Defaults to true. Setting false bypasses Mihomo validation and should only be used after explicit user confirmation."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
+				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 				"overlay": map[string]any{
 					"type":                 "object",
 					"description":          "Desired localClash overlay. If a target references a proxy group or policy group that is not already in durable localclash.yaml, include it in overlay.proxy_groups or overlay.policy_groups in this same call. policy_groups are business-layer entries whose exits point to proxy_groups or built-in targets.",
@@ -437,6 +443,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path. Defaults to the active runtime profile core path."},
 				"foreground":  map[string]any{"type": "boolean", "description": "Foreground mode is not supported by MCP run_runtime; use CLI run for foreground execution."},
 				"log_file":    map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
+				"background":  map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
+				"wait":        map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "restart_runtime":
@@ -450,6 +458,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"log_file":    map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"timeout_ms":  map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
 				"force":       map[string]any{"type": "boolean", "description": "Send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
+				"background":  map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
+				"wait":        map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "runtime_profile_status":
@@ -485,6 +495,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"redir_port":      map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo redir-port. Defaults to the router profile redir-port or 7892."},
 				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device name. Defaults to the router profile TUN device or utun."},
 				"dry_run":         map[string]any{"type": "boolean", "description": "Return the shell script without applying changes. Supported by router_takeover_apply and router_takeover_stop."},
+				"background":      map[string]any{"type": "boolean", "description": "Run apply/stop as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools; ignored by router_takeover_status."},
+				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false; ignored by router_takeover_status."},
 			},
 		}
 	case "stop_runtime":
@@ -503,6 +515,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device used for takeover detection. Defaults to router profile TUN device or utun."},
 				"timeout_ms":      map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
 				"force":           map[string]any{"type": "boolean", "description": "Bypass the active router takeover guard and send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
+				"background":      map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
+				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "subscriptions_status":
@@ -573,6 +587,8 @@ func inputSchemaForTool(name string) map[string]any {
 				"rules_cache":       map[string]any{"type": "string", "description": "Rule pack cache directory used when auto-rendering after selector refresh."},
 				"runtime_profile":   map[string]any{"type": "string", "description": "Runtime profile YAML path used when auto-rendering after selector refresh. Defaults to localclash-runtime.yaml."},
 				"output":            map[string]any{"type": "string", "description": "Generated Mihomo config path to update when selector refresh succeeds. Defaults to generated/mihomo.yaml."},
+				"background":        map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may perform network downloads."},
+				"wait":              map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "packs_list":

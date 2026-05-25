@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"localclash/internal/appinit"
 	"localclash/internal/routertakeover"
@@ -476,7 +477,7 @@ func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testi
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "config_render",
-			"arguments": map[string]any{},
+			"arguments": map[string]any{"background": false},
 		},
 	})
 	if resp.Error != nil {
@@ -511,7 +512,7 @@ func TestToolsCallConfigRenderReportsMissingSubscription(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "config_render",
-			"arguments": map[string]any{},
+			"arguments": map[string]any{"background": false},
 		},
 	})
 	if resp.Error != nil {
@@ -547,6 +548,7 @@ func TestToolsCallConfigRenderReportsMissingPolicyAsBaseAssetsProblem(t *testing
 				"subscription": paths.subscription,
 				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
+				"background":   false,
 			},
 		},
 	})
@@ -754,6 +756,7 @@ func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
 				"config":      paths.config,
 				"runtime_dir": paths.runtimeDir,
 				"merged":      paths.merged,
+				"background":  false,
 			},
 		},
 	})
@@ -833,6 +836,7 @@ packs:
 				"policy":            paths.policy,
 				"rules_cache":       paths.cache,
 				"output":            generated,
+				"background":        false,
 			},
 		},
 	})
@@ -945,6 +949,7 @@ packs:
 				"rules_cache":  paths.cache,
 				"selection":    selection,
 				"output":       generated,
+				"background":   false,
 			},
 		},
 	})
@@ -1016,6 +1021,7 @@ packs:
 				"policy":            paths.policy,
 				"rules_cache":       paths.cache,
 				"output":            generated,
+				"background":        false,
 			},
 		},
 	})
@@ -1124,6 +1130,7 @@ func TestToolsCallConfigPatchCreateReturnsSerializableResult(t *testing.T) {
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
+				"background":   false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
 						{"id": "blackmatrix7_OpenAI", "target": "AI"},
@@ -1166,6 +1173,7 @@ func TestToolsCallConfigPatchCreateSupportsPolicyGroups(t *testing.T) {
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
+				"background":   false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
 						{"id": "blackmatrix7_OpenAI", "target": "AI"},
@@ -1342,6 +1350,7 @@ func TestToolsCallConfigPatchCreateSupportsCustomRulesWithoutPacks(t *testing.T)
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
+				"background":   false,
 				"overlay": map[string]any{
 					"custom_rules": []map[string]any{
 						{
@@ -1388,6 +1397,7 @@ func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
+				"background":   false,
 				"overlay": map[string]any{
 					"rule_providers": []map[string]any{
 						{
@@ -1434,6 +1444,7 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
+				"background":   false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
 						{"id": "blackmatrix7_OpenAI", "target": "AI"},
@@ -1460,6 +1471,7 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 				"patch_id":    plan["patch_id"],
 				"patches_dir": paths.outputDir,
 				"test":        false,
+				"background":  false,
 			},
 		},
 	})
@@ -1500,6 +1512,7 @@ func TestToolsCallConfigPatchCreateInvalidInputReturnsError(t *testing.T) {
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
+				"background":   false,
 				"overlay": map[string]any{
 					"packs": []map[string]any{
 						{"id": "missing_pack", "target": "DIRECT"},
@@ -1954,6 +1967,7 @@ sleep 30
 				"config":      config,
 				"runtime_dir": workDir,
 				"log_file":    filepath.Join(workDir, "mihomo.log"),
+				"background":  false,
 			},
 		},
 	})
@@ -1982,7 +1996,8 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"config": filepath.Join(t.TempDir(), "missing.yaml"),
+				"config":     filepath.Join(t.TempDir(), "missing.yaml"),
+				"background": false,
 			},
 		},
 	})
@@ -1993,6 +2008,58 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 	content := result.StructuredContent.(map[string]any)
 	if content["started"] != false || content["error"] == "" {
 		t.Fatalf("content = %+v, want started false error", content)
+	}
+}
+
+func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "run_runtime",
+			"arguments": map[string]any{
+				"config": "missing.yaml",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("run_runtime returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["queued"] != true || content["task_id"] == "" || content["log_file"] == "" {
+		t.Fatalf("content = %+v, want queued task with log file", content)
+	}
+	nextActions := content["next_actions"].([]any)
+	if len(nextActions) == 0 || !strings.Contains(nextActions[0].(string), "nl_file") {
+		t.Fatalf("next_actions = %+v, want nl_file guidance", nextActions)
+	}
+	logFile := content["log_file"].(string)
+	statusFile := content["status_file"].(string)
+	var statusText []byte
+	for i := 0; i < 50; i++ {
+		data, err := os.ReadFile(statusFile)
+		if err == nil && (strings.Contains(string(data), `"status": "done"`) || strings.Contains(string(data), `"status": "error"`)) {
+			statusText = data
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(statusText) == 0 {
+		t.Fatalf("task status did not finish; status_file=%s", statusFile)
+	}
+	if !strings.Contains(string(statusText), `"status": "error"`) {
+		t.Fatalf("status = %s, want error for missing runtime inputs", statusText)
+	}
+	logText, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if !strings.Contains(string(logText), `"event":"queued"`) || !strings.Contains(string(logText), `"event":"error"`) {
+		t.Fatalf("log = %s, want queued and error events", logText)
 	}
 }
 
@@ -2075,6 +2142,7 @@ sleep 30
 				"config":      config,
 				"runtime_dir": workDir,
 				"log_file":    filepath.Join(workDir, "mihomo.log"),
+				"background":  false,
 			},
 		},
 	})
@@ -2097,6 +2165,7 @@ sleep 30
 				"config":      config,
 				"runtime_dir": workDir,
 				"timeout_ms":  2000,
+				"background":  false,
 			},
 		},
 	})
@@ -2143,6 +2212,7 @@ func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
 			"arguments": map[string]any{
 				"runtime_profile": filepath.Join(dir, "localclash-runtime.yaml"),
 				"runtime_dir":     workDir,
+				"background":      false,
 			},
 		},
 	})
@@ -2178,7 +2248,7 @@ func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "run_runtime",
-			"arguments": map[string]any{},
+			"arguments": map[string]any{"background": false},
 		},
 	})
 	if resp.Error != nil {
@@ -2234,7 +2304,7 @@ sleep 30
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "run_runtime",
-			"arguments": map[string]any{},
+			"arguments": map[string]any{"background": false},
 		},
 	})
 	if resp.Error != nil {

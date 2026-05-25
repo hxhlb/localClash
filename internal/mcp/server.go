@@ -412,11 +412,13 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "config_configure":
 		return s.callConfigConfigure(args)
 	case "config_render":
-		return s.callConfigRender(args)
+		return s.callMaybeAsyncTool(ctx, "config_render", args, func(_ context.Context, args json.RawMessage) (toolResult, error) {
+			return s.callConfigRender(args)
+		})
 	case "config_patch_apply":
-		return s.callConfigPatchApply(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "config_patch_apply", args, s.callConfigPatchApply)
 	case "config_patch_create":
-		return s.callConfigPatchCreate(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "config_patch_create", args, s.callConfigPatchCreate)
 	case "doctor":
 		return s.callDoctor(ctx, args)
 	case "environment_inspect":
@@ -452,7 +454,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "subscriptions_configure":
 		return s.callSubscriptionsConfigure(args)
 	case "subscriptions_refresh":
-		return s.callSubscriptionsRefresh(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "subscriptions_refresh", args, s.callSubscriptionsRefresh)
 	case "proxy_group_build":
 		return s.callProxyGroupBuild(args)
 	case "policy_group_build":
@@ -462,17 +464,17 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "rule_provider_build":
 		return callRuleProviderBuild(args)
 	case "run_runtime":
-		return s.callRunRuntime(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "run_runtime", args, s.callRunRuntimeSync)
 	case "restart_runtime":
-		return s.callRestartRuntime(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "restart_runtime", args, s.callRestartRuntimeSync)
 	case "router_takeover_apply":
-		return s.callRouterTakeoverApply(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "router_takeover_apply", args, s.callRouterTakeoverApplySync)
 	case "router_takeover_stop":
-		return s.callRouterTakeoverStop(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "router_takeover_stop", args, s.callRouterTakeoverStopSync)
 	case "sed_file":
 		return callSedFile(args)
 	case "stop_runtime":
-		return s.callStopRuntime(ctx, args)
+		return s.callMaybeAsyncTool(ctx, "stop_runtime", args, s.callStopRuntimeSync)
 	default:
 		return toolResult{}, fmt.Errorf("unknown tool %q", call.Name)
 	}
@@ -2053,7 +2055,7 @@ func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessag
 	return jsonToolResult(result)
 }
 
-func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string `json:"config"`
 		RuntimeDir string `json:"runtime_dir"`
@@ -2104,7 +2106,7 @@ func (s *Server) callRunRuntime(ctx context.Context, args json.RawMessage) (tool
 	return jsonToolResult(result)
 }
 
-func (s *Server) callRestartRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config     string `json:"config"`
 		RuntimeDir string `json:"runtime_dir"`
@@ -2562,7 +2564,7 @@ func (s *Server) callRouterTakeoverStatus(ctx context.Context, args json.RawMess
 	return jsonToolResult(result)
 }
 
-func (s *Server) callRouterTakeoverApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callRouterTakeoverApplySync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	opts, err := s.routerTakeoverOptions(args)
 	if err != nil {
 		return toolResult{}, err
@@ -2574,7 +2576,7 @@ func (s *Server) callRouterTakeoverApply(ctx context.Context, args json.RawMessa
 	return jsonToolResult(result)
 }
 
-func (s *Server) callRouterTakeoverStop(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callRouterTakeoverStopSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	opts, err := s.routerTakeoverOptions(args)
 	if err != nil {
 		return toolResult{}, err
@@ -2586,7 +2588,7 @@ func (s *Server) callRouterTakeoverStop(ctx context.Context, args json.RawMessag
 	return jsonToolResult(result)
 }
 
-func (s *Server) callStopRuntime(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
 		RuntimeProfile string `json:"runtime_profile"`
 		Config         string `json:"config"`
