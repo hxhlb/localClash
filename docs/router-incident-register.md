@@ -1,0 +1,161 @@
+# Router Incident Register
+
+This document records router-facing usability and performance incidents that
+must be investigated with evidence. Do not treat post-removal or wrong-window
+samples as proof for an incident.
+
+## 2026-05-25 CPU and Runtime Incidents
+
+### localClash CPU Occupancy
+
+Observed symptom:
+
+- On the real router, localClash was reported to sometimes hold CPU near 100%.
+- The router became difficult to operate, and localClash had to be removed to
+  restore normal network usage.
+
+Evidence boundary:
+
+- A CPU sample taken after localClash had already been removed or stopped is not
+  valid evidence for this incident.
+- Docker OpenWrt did not reproduce the same severe CPU behavior, so the issue is
+  likely tied to real-router workload, hardware, process supervision, traffic,
+  filesystem, DNS, or request behavior.
+
+Open questions:
+
+- Which process name and PID owned the CPU during the incident?
+- Was the hot path MCP HTTP request handling, config rendering, subscription
+  refresh, runtime control, DNS interaction, file IO, or a retry loop?
+- Did LuCI ubus requests wait on localClash long enough to stack pressure on a
+  slow router?
+
+Required evidence for the next reproduction:
+
+- timestamped `top` or `ps` samples with PID, command, `%CPU`, `%MEM`, RSS, and
+  full command line
+- localClash MCP request summaries with tool name, duration, result, and error
+- runtime state transition logs around start, stop, restart, takeover apply, and
+  takeover stop
+- process supervision logs showing restarts, exits, or respawn loops
+
+### Mihomo CPU and Warning Volume
+
+Observed symptom:
+
+- Mihomo CPU was reported to reach about 14% on the real router.
+- The router also showed a large volume of Mihomo warning logs during the
+  localClash-managed network period.
+
+Evidence boundary:
+
+- The warning batch was not fully captured before the network environment was
+  switched back to OpenClash.
+- A previous partial local sample saw warning classes around direct match
+  reports, Telegram IP timeouts, and `8.8.8.8:853` DNS connection failures, but
+  that sample must be treated as partial evidence, not a complete diagnosis.
+
+Open questions:
+
+- Are warnings caused by rule mismatch, unreachable upstream DNS, direct routing
+  of blocked destinations, retry amplification, or dashboard/API polling?
+- Does warning rate correlate with Mihomo CPU, localClash CPU, or DNS latency?
+- Are the warnings materially affecting forwarding latency, or only producing
+  logging overhead?
+
+Required evidence for the next reproduction:
+
+- warning rate by class over time
+- Mihomo CPU samples in the same timestamp window
+- active generated `mihomo.yaml` rule count and provider count
+- DNS upstream errors and rule match samples for Telegram and other affected
+  services
+
+### OpenClash Baseline
+
+Observed baseline:
+
+- The user reported OpenClash-managed Clash usually runs around 6% to 10% CPU,
+  with occasional spikes around 56%.
+
+Evidence boundary:
+
+- A single sample outside the incident window is not enough to compare
+  localClash with OpenClash.
+
+Required baseline:
+
+- collect 5 to 10 minutes of process samples under the same traffic pattern
+- record process command, CPU, memory, and warning/error rate
+- compare with localClash using the same router, subscription, traffic, and DNS
+  state
+
+### Telegram Regression
+
+Observed symptom:
+
+- An older localClash core-only or minimal configuration path could cover
+  Telegram automatically.
+- The newer ACL4SSR-like default configuration failed for Telegram in real use.
+
+Current explanation:
+
+- The new default relied on GEOSITE category routing for Telegram. Telegram
+  clients can connect directly to Telegram IP ranges without exposing a domain
+  or SNI that `GEOSITE,telegram` can match.
+- The default template now adds explicit Telegram IPv4/IPv6 CIDR custom rules
+  targeting the communication policy group.
+
+Required verification:
+
+- render the default patch set
+- confirm generated Mihomo rules include the Telegram CIDRs before fallback
+- run Telegram traffic and confirm it matches the expected communication group
+
+### Logging Gap
+
+Observed gap:
+
+- localClash incidents could not be answered from durable logs on the real
+  router.
+- `/Volumes/Data/Github/localClash/.runtime/logs/claude-code-localclash-observe.log`
+  is a Claude Code client debug log. It records Claude/MCP client setup and
+  transport behavior, not localClash server-side runtime decisions.
+
+Existing logging:
+
+- The MCP HTTP server already writes concise `mcp_http` request summaries to
+  stderr, including method, path, tool, redacted arguments, HTTP status,
+  response status, and duration.
+- `scripts/deploy-router.sh` installs a procd service that redirects MCP
+  stdout/stderr to `.runtime/logs/localclash-mcp.log`.
+
+Integration gap:
+
+- The LuCI-installed service path does not currently persist MCP stdout/stderr
+  to a bounded router log, so the existing MCP request logs can be lost.
+- Runtime operations, config rendering, takeover state transitions, and Mihomo
+  warning summaries need durable router-side observability during development.
+
+Product requirement:
+
+- Development and diagnosis builds should make router-side evidence easy to
+  collect.
+- Release defaults must stay cheap for thin clients: no unbounded hot-path logs,
+  no verbose logs by default, and no expensive polling.
+
+### Duplicate Log-File Direction
+
+Decision:
+
+- Do not add a second generic MCP `--log-file` mechanism to the core CLI just to
+  solve this incident.
+- The better fix is to make deployment paths consistently preserve existing
+  stderr request logs and add targeted, bounded observability for runtime and
+  config operations.
+
+Reason:
+
+- MCP service logging already exists at the server stderr layer.
+- The observed gap is deployment integration and missing runtime diagnostics,
+  not a lack of another CLI flag.
