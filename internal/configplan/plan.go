@@ -3,6 +3,7 @@ package configplan
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,6 +57,7 @@ type ApplyOptions struct {
 	WorkDir             string
 	BackupDir           string
 	Test                bool
+	TestExplicit        bool
 	Now                 time.Time
 }
 
@@ -140,9 +142,13 @@ type BackupResult struct {
 }
 
 type MihomoTestResult struct {
-	Enabled bool   `json:"enabled"`
-	Passed  bool   `json:"passed"`
-	Output  string `json:"output"`
+	Enabled    bool   `json:"enabled"`
+	Passed     bool   `json:"passed"`
+	Output     string `json:"output"`
+	Error      string `json:"error,omitempty"`
+	TimedOut   bool   `json:"timed_out,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+	ExitCode   int    `json:"exit_code,omitempty"`
 }
 
 type OverlaySummary struct {
@@ -290,8 +296,11 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		},
 	}
 	if opts.Test {
-		result.MihomoTest.Passed, result.MihomoTest.Output = runMihomoTest(ctx, opts, outputPath)
+		result.MihomoTest = runMihomoTest(ctx, opts, outputPath)
 		result.Valid = result.MihomoTest.Passed
+		if !result.Valid {
+			result.NextActions = mihomoTestFailureNextActions(result.MihomoTest)
+		}
 	}
 	if err := writeSummary(summaryPath, result); err != nil {
 		return Result{}, err
@@ -314,6 +323,9 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	}
 	if opts.PlanID == "" {
 		opts.PlanID = plan.PlanID
+	}
+	if !opts.TestExplicit && !plan.MihomoTest.Enabled {
+		opts.Test = false
 	}
 	opts = normalizeApplyOptions(applyPlanInputDefaults(opts, plan.Inputs))
 
@@ -379,12 +391,13 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	result.Warnings = append(result.Warnings, warnings...)
 	result.Render.OutputPath = opts.OutputPath
 	if opts.Test {
-		result.MihomoTest.Passed, result.MihomoTest.Output = runMihomoTest(ctx, Options{
+		result.MihomoTest = runMihomoTest(ctx, Options{
 			CorePath: opts.CorePath,
 			WorkDir:  opts.WorkDir,
 		}, tempOutput)
 		result.Valid = result.MihomoTest.Passed
 		if !result.Valid {
+			result.NextActions = mihomoTestFailureNextActions(result.MihomoTest)
 			return result, nil
 		}
 	}
@@ -1200,12 +1213,31 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, data, 0o644)
 }
 
-func runMihomoTest(ctx context.Context, opts Options, configPath string) (bool, string) {
+func runMihomoTest(ctx context.Context, opts Options, configPath string) MihomoTestResult {
 	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, opts.CorePath, "-d", opts.WorkDir, "-f", configPath, "-t")
+	start := time.Now()
 	output, err := cmd.CombinedOutput()
-	return err == nil, compactOutput(output, err)
+	result := MihomoTestResult{
+		Enabled:    true,
+		Passed:     err == nil,
+		Output:     compactOutput(output, err),
+		DurationMS: time.Since(start).Milliseconds(),
+	}
+	if err == nil {
+		return result
+	}
+	result.Error = err.Error()
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		result.TimedOut = true
+		result.Error = "mihomo config test timed out after 90s: " + err.Error()
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		result.ExitCode = exitErr.ExitCode()
+	}
+	return result
 }
 
 func compactOutput(output []byte, err error) string {
@@ -1220,7 +1252,25 @@ func compactOutput(output []byte, err error) string {
 	if len(lines) > maxLines {
 		lines = lines[len(lines)-maxLines:]
 	}
+	if err != nil {
+		lines = append(lines, "error: "+err.Error())
+	}
 	return strings.Join(lines, "\n")
+}
+
+func mihomoTestFailureNextActions(test MihomoTestResult) []string {
+	actions := []string{
+		"Do not apply this patch until the Mihomo config test failure is understood.",
+		"Inspect mihomo_test.error, mihomo_test.timed_out, mihomo_test.duration_ms, and mihomo_test.output.",
+	}
+	if test.TimedOut {
+		actions = append(actions, "The test timed out; retry on the router, inspect CPU/disk pressure, or reduce GEOSITE/rule loading cost before bypassing validation.")
+	}
+	actions = append(actions,
+		"Only recreate with test=false after the user explicitly accepts bypassing Mihomo validation.",
+		"After a validated patch applies, call config_status to verify durable intent and generated overlay.",
+	)
+	return actions
 }
 
 func buildPlanID(name string, now time.Time) string {

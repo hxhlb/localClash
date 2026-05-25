@@ -385,6 +385,9 @@ func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {
 	writeStartExecutable(t, core, `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
+    count_file="$(dirname "$0")/config-test-count"
+    count="$(cat "$count_file" 2>/dev/null || echo 0)"
+    expr "$count" + 1 > "$count_file"
     echo configuration test is successful
     exit 0
   fi
@@ -406,6 +409,16 @@ sleep 30
 	defer killProcess(result.Start.PID)
 	if !result.Restarted || !result.Stop.Stopped || !result.Start.Started || result.Start.PID == old.Process.Pid {
 		t.Fatalf("restart = %+v, want stopped old pid %d and started new pid", result, old.Process.Pid)
+	}
+	if !result.Start.ConfigTestSkipped {
+		t.Fatalf("restart start = %+v, want second config test skipped after pretest", result.Start)
+	}
+	count, err := os.ReadFile(filepath.Join(dir, "config-test-count"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(count)) != "1" {
+		t.Fatalf("config test count = %q, want one pre-stop validation", strings.TrimSpace(string(count)))
 	}
 	select {
 	case <-oldDone:

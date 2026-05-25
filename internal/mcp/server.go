@@ -1402,6 +1402,7 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 		WorkDir:             in.RuntimeDir,
 		BackupDir:           in.BackupDir,
 		Test:                test,
+		TestExplicit:        in.Test != nil,
 	})
 	if err != nil {
 		return toolResult{}, err

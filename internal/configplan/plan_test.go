@@ -374,6 +374,42 @@ func TestRenderMihomoTestUsesRuntimeProfileCore(t *testing.T) {
 	}
 }
 
+func TestRunMihomoTestFailureIncludesErrorMetadata(t *testing.T) {
+	dir := t.TempDir()
+	corePath := filepath.Join(dir, "mihomo")
+	writeExecutable(t, corePath, "#!/bin/sh\nfor n in 1 2 3 4 5 6 7 8 9 10; do echo line-$n; done\nexit 42\n")
+	configPath := filepath.Join(dir, "mihomo.yaml")
+	writeFile(t, configPath, "mode: rule\n")
+
+	result := runMihomoTest(context.Background(), Options{
+		CorePath: corePath,
+		WorkDir:  dir,
+	}, configPath)
+
+	if !result.Enabled || result.Passed {
+		t.Fatalf("mihomo test = %+v, want enabled failure", result)
+	}
+	if result.ExitCode != 42 || result.Error == "" || result.DurationMS < 0 {
+		t.Fatalf("mihomo test metadata = %+v, want exit code, error, and duration", result)
+	}
+	outputLines := strings.Split(result.Output, "\n")
+	if len(outputLines) < 2 || outputLines[0] != "line-3" || outputLines[len(outputLines)-2] != "line-10" {
+		t.Fatalf("output = %q, want compact tail", result.Output)
+	}
+	if !strings.Contains(result.Output, "error:") {
+		t.Fatalf("output = %q, want appended command error", result.Output)
+	}
+}
+
+func TestMihomoTestFailureNextActionsWarnBeforeBypass(t *testing.T) {
+	actions := strings.Join(mihomoTestFailureNextActions(MihomoTestResult{TimedOut: true}), "\n")
+	for _, want := range []string{"Do not apply this patch", "timed out", "test=false", "explicitly accepts"} {
+		if !strings.Contains(actions, want) {
+			t.Fatalf("actions = %q, missing %q", actions, want)
+		}
+	}
+}
+
 func TestRenderProxyGroupMatchPlanWritesCandidateLocalClashConfig(t *testing.T) {
 	paths := writePlanFixture(t)
 
@@ -480,6 +516,48 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 	}
 	if strings.Contains(readFile(t, generated), "sentinel") {
 		t.Fatalf("generated config was not replaced: %s", readFile(t, generated))
+	}
+}
+
+func TestApplyPlanInheritsDisabledMihomoTestWhenNotExplicit(t *testing.T) {
+	paths := writePlanFixture(t)
+	plan, err := Render(context.Background(), Options{
+		PlanName:     "ai-sg",
+		Subscription: paths.subscription,
+		Policy:       paths.policy,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"SG 01"}, Mode: "manual"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := Apply(context.Background(), ApplyOptions{
+		PlanID:        plan.PlanID,
+		PlansDir:      paths.planDir,
+		Subscription:  paths.subscription,
+		Policy:        paths.policy,
+		RulesCache:    paths.cacheDir,
+		SelectionPath: filepath.Join(paths.dir, "localclash-packs.yaml"),
+		OutputPath:    filepath.Join(paths.dir, "generated", "mihomo.yaml"),
+		Test:          true,
+		Now:           fixedPlanTime(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.MihomoTest.Enabled {
+		t.Fatalf("apply mihomo test = %+v, want inherited disabled test from patch summary", result.MihomoTest)
+	}
+	if !result.Applied || !result.Valid {
+		t.Fatalf("apply result = %+v, want applied valid plan", result)
 	}
 }
 

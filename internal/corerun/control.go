@@ -154,10 +154,11 @@ func Status(opts StatusOptions) StatusResult {
 
 func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 	startOpts := normalizeStartOptions(StartOptions{
-		CorePath:   opts.CorePath,
-		ConfigPath: opts.ConfigPath,
-		WorkDir:    opts.WorkDir,
-		LogPath:    opts.LogPath,
+		CorePath:       opts.CorePath,
+		ConfigPath:     opts.ConfigPath,
+		WorkDir:        opts.WorkDir,
+		LogPath:        opts.LogPath,
+		SkipConfigTest: true,
 	})
 	runOpts := normalizeOptions(Options{
 		CorePath:   startOpts.CorePath,

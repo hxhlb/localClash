@@ -19,11 +19,12 @@ import (
 )
 
 type StartOptions struct {
-	CorePath   string
-	ConfigPath string
-	WorkDir    string
-	LogPath    string
-	Foreground bool
+	CorePath       string
+	ConfigPath     string
+	WorkDir        string
+	LogPath        string
+	Foreground     bool
+	SkipConfigTest bool
 }
 
 type StartResult struct {
@@ -35,6 +36,7 @@ type StartResult struct {
 	LogFile            string   `json:"log_file"`
 	ExternalController string   `json:"external_controller,omitempty"`
 	ExternalUIURL      string   `json:"external_ui_url,omitempty"`
+	ConfigTestSkipped  bool     `json:"config_test_skipped,omitempty"`
 	Warnings           []string `json:"warnings"`
 	NextActions        []string `json:"next_actions,omitempty"`
 }
@@ -91,7 +93,9 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 			return baseResult, nil
 		}
 	}
-	if err := testConfig(ctx, runOpts); err != nil {
+	if opts.SkipConfigTest {
+		baseResult.ConfigTestSkipped = true
+	} else if err := testConfig(ctx, runOpts); err != nil {
 		return StartResult{}, err
 	}
 
