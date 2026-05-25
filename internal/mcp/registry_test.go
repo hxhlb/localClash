@@ -42,6 +42,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["router_takeover_status"].SafetyLevel != SafeRead {
 		t.Fatalf("router_takeover_status safety = %q, want %q", byName["router_takeover_status"].SafetyLevel, SafeRead)
 	}
+	if byName["routing_explain"].SafetyLevel != SafeRead {
+		t.Fatalf("routing_explain safety = %q, want %q", byName["routing_explain"].SafetyLevel, SafeRead)
+	}
 	if byName["tools_list"].SafetyLevel != SafeRead {
 		t.Fatalf("tools_list safety = %q, want %q", byName["tools_list"].SafetyLevel, SafeRead)
 	}

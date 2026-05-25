@@ -250,6 +250,12 @@ MCP config tools:
   `localclash.yaml`, subscription, policy, and runtime profile. If
   `localclash.yaml` does not exist, it renders the base config without an
   overlay. It ignores patches and does not start Mihomo.
+- `routing_explain`: read-only routing discovery for questions like
+  "what handles Steam?", "what routes openai.com?", or "how would I route
+  ChatGPT through Singapore?". It reads durable `localclash.yaml` intent,
+  active packs, business policy groups, reusable exit groups, and optional
+  cached rule matches, then returns the safe patch path instead of mutating
+  config.
 - `config_patch_create`: create a reviewable patch with candidate
   `localclash.yaml` and `mihomo.yaml` under `.runtime/patches/<patch-id>/`.
 - `config_patch_apply`: apply a reviewed patch by writing `localclash.yaml`,

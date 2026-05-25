@@ -247,15 +247,14 @@ Current code now has:
 - MCP patch tools for proxy groups, custom rules, external rule-providers,
   reviewed config apply, and atomic generated config rendering
 
-Current code does not yet have:
+Current code still does not yet have:
 
 - standalone local rule pack files
 - UI support for base policy and rule pack selection
 - doctor checks for custom rule or external provider schema and target
   references
-- an Agent-oriented routing catalog for default template discovery
 
-## Known MCP Gap: Default Routing Discovery
+## MCP Routing Discovery
 
 `config_status` exposes the factual source of truth for default routing:
 
@@ -270,24 +269,28 @@ business -> exit -> node model created by default patches, for example
 `default.steam.v1` contributing `v2fly_dlc_steam` targeting `🎮 Steam`, whose
 exits include direct, manual, automatic, and regional groups.
 
-The current MCP surface is still weak for ordinary execution Agents. If an
-Agent looks only at `generated_summary.rules_sample`, it can miss the default
-business routing because that sample is intentionally truncated and dominated by
-the local safety baseline. The Agent must know to read `intent.packs`,
-`intent.policy_groups`, and `overlay.rules`; the protocol does not yet provide a
-compact "routing catalog" or "explain this route" tool.
+Agents should not infer active default rules from
+`generated_summary.rules_sample` alone because that sample is intentionally
+truncated and often dominated by the local safety baseline.
 
-The intended future shape is a read-only MCP discovery layer such as:
+Use the read-only MCP `routing_explain` tool for compact routing discovery.
+It reads durable `localclash.yaml` intent and returns matching packs, policy
+groups, reusable exit groups, optional cached provider-rule evidence, and the
+safe reviewed patch path. Example queries:
 
-- `routing_catalog`: summarize active business groups, aliases, rule packs,
-  default or first exits, available exits, and reusable region groups
-- `routing_explain(query)`: answer questions such as "what handles Steam?" or
-  "how would I route ChatGPT through Singapore?" with the matching packs,
-  policy group, exits, and the safe patch path
+- `routing_explain(query: "Steam")`: explains the active Steam pack, the
+  Dashboard-facing Steam policy group, and its exits.
+- `routing_explain(query: "ChatGPT through Singapore")`: surfaces matching
+  business groups and reusable Singapore exits so an Agent can build a reviewed
+  policy-group patch.
+- `routing_explain(query: "openai.com")`: can include cached provider-rule
+  matches when provider-cache coverage exists; if cache is incomplete, the tool
+  still reports durable intent and says which prefetch/read path to use.
 
-Until that exists, Agents should treat `config_status` as the authoritative
-entry point for default routing discovery and must not infer active default
-rules from `generated_summary.rules_sample` alone.
+`routing_explain` is not a mutation tool. For changes, follow its
+`patch_guidance`: `config_status` -> optional `proxy_group_build` /
+`policy_group_build` -> `config_patch_create` -> review -> `config_patch_apply`
+-> verification.
 
 ## Development Sequence
 

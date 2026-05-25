@@ -73,10 +73,12 @@ intent.
   broader `🧠 AI` category.
 
 MCP `config_status` exposes this template through `intent.packs`,
-`intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. A known MCP
-gap remains: there is not yet a compact Agent-facing routing catalog or
-`routing_explain` tool, so Agents must not infer the default template from the
-truncated `generated_summary.rules_sample` alone. See `docs/rule-model.md`.
+`intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. For a compact
+Agent-facing answer, use the read-only `routing_explain` tool; it explains a
+service/domain/group query with the matching packs, business policy group,
+available exits, optional cached rule evidence, and safe patch path. Agents must
+not infer the default template from the truncated
+`generated_summary.rules_sample` alone. See `docs/rule-model.md`.
 
 ## Starter Base Policy
 

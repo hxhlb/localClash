@@ -65,6 +65,7 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file without changing runtime state."},
 		{Name: "router_takeover_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned OpenWrt router takeover runtime state: runtime profile, Mihomo runtime, fw4/nft chains, DNS hijack, fwmark route, and TUN device."},
+		{Name: "routing_explain", SafetyLevel: SafeRead, Description: "Explain active durable routing intent for a service, domain, pack, policy group, or exit query. Reads localclash.yaml, active packs, policy groups, proxy groups, custom rules, and cached rule matches; does not modify config or start runtime."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
 		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config patch by writing localclash.yaml, deriving localclash-packs.yaml, and regenerating generated/mihomo.yaml without starting the runtime. Use the exact patch_id returned by config_patch_create."},
 		{Name: "config_patch_create", SafetyLevel: SafeWrite, Description: "Create a reviewable config patch and candidate Mihomo config from proxy groups, packs, and custom rules. It does not modify active localclash.yaml or generated/mihomo.yaml; apply the returned patch_id only after review."},
@@ -194,6 +195,24 @@ func inputSchemaForTool(name string) map[string]any {
 				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.yaml."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
 				"force":                map[string]any{"type": "boolean", "description": "Overwrite generated output. Defaults to true because generated/mihomo.yaml is a build artifact."},
+			},
+		}
+	case "routing_explain":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"query"},
+			"properties": map[string]any{
+				"query":                map[string]any{"type": "string", "description": "Service, app, domain, pack id/name, policy group, or exit to explain, for example Steam, ChatGPT, openai.com, or Singapore."},
+				"config":               map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash.yaml."},
+				"subscription":         map[string]any{"type": "string", "description": "Subscription YAML path used only for optional selector resolution. Defaults to subscription.yaml."},
+				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.yaml."},
+				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
+				"rule_sources":         map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be adapted. Defaults to rule-sources."},
+				"provider_cache":       map[string]any{"type": "string", "description": "Local provider-cache directory for optional domain/rule matching. Defaults to .runtime/rules/provider-cache."},
+				"include_rule_matches": map[string]any{"type": "boolean", "description": "Search cached rule/provider contents for the query. Defaults to true; does not download missing provider rules."},
+				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum matches per section. Defaults to 20."},
 			},
 		}
 	case "config_patch_apply":

@@ -110,7 +110,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -139,6 +139,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"runtime_status":            SafeRead,
 		"runtime_profile_status":    SafeRead,
 		"router_takeover_status":    SafeRead,
+		"routing_explain":           SafeRead,
 		"subscriptions_status":      SafeRead,
 		"tools_list":                SafeRead,
 		"config_configure":          SafeWrite,
@@ -349,6 +350,108 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 		if !strings.Contains(config, want) {
 			t.Fatalf("localclash.yaml missing %q:\n%s", want, config)
 		}
+	}
+}
+
+func TestToolsCallRoutingExplainExplainsLayeredDefaultRoute(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash.yaml")
+	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
+	writeMCPFile(t, configPath, `version: 2
+policy_template: localclash-default
+proxy_groups:
+  HK:
+    mode: auto
+    match:
+      type: name_regex
+      pattern: (香港|HK)
+    optional: true
+    reason: Hong Kong exit group.
+    boundary: name_based_region_selector
+  DIRECT-EXIT:
+    mode: direct
+    reason: Dashboard-visible direct exit.
+    boundary: builtin_direct_exit
+policy_groups:
+  Steam:
+    mode: manual
+    exits:
+      - DIRECT-EXIT
+      - HK
+      - AUTO
+    reason: Steam defaults to direct with fallback exits.
+    boundary: business_to_exit_layer
+packs:
+  - id: v2fly_dlc_steam
+    type: geosite
+    target: Steam
+    reason: Route Steam domains to the Steam business group.
+`)
+	writeMCPFile(t, filepath.Join(cacheDir, "v2fly-dlc.yaml"), `version: 1
+source: v2fly-dlc
+adapter: v2fly-dlc
+renderable: true
+packs:
+  - id: steam
+    name: Steam
+    target: Steam
+    renderable: true
+    components:
+      - id: domain
+        behavior: v2fly-dlc
+        format: text
+        order_class: domain
+        url: https://example.com/steam
+        path: ./rule-packs/v2fly-dlc/steam.txt
+`)
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir:       cacheDir,
+			SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.yaml"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+	})
+
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "routing_explain",
+			"arguments": map[string]any{
+				"query":                "Steam",
+				"config":               configPath,
+				"include_rule_matches": false,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("routing_explain returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["policy_template"] != "localclash-default" {
+		t.Fatalf("content = %+v, want localclash-default", content)
+	}
+	if content["resolved"] != false || content["resolve_error"] == "" {
+		t.Fatalf("content = %+v, want intent explanation despite missing subscription", content)
+	}
+	routes := content["active_routes"].([]any)
+	if len(routes) == 0 {
+		t.Fatalf("active_routes missing in %+v", content)
+	}
+	route := routes[0].(map[string]any)
+	if route["target"] != "Steam" || route["target_kind"] != "policy_group" {
+		t.Fatalf("route = %+v, want Steam policy group route", route)
+	}
+	policy := route["policy_group"].(map[string]any)
+	exits := policy["exits"].([]any)
+	if len(exits) != 3 || exits[0] != "DIRECT-EXIT" || exits[1] != "HK" || exits[2] != "AUTO" {
+		t.Fatalf("policy exits = %+v, want layered exits", exits)
+	}
+	if _, err := json.Marshal(result.StructuredContent); err != nil {
+		t.Fatalf("routing_explain structured content is not serializable: %v", err)
 	}
 }
 

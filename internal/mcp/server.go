@@ -443,6 +443,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callRuntimeProfileStatus(args)
 	case "router_takeover_status":
 		return s.callRouterTakeoverStatus(ctx, args)
+	case "routing_explain":
+		return s.callRoutingExplain(ctx, args)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "tools_list":
