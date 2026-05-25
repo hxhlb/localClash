@@ -141,6 +141,7 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	config := writeStartConfig(t, dir)
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -153,8 +154,9 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
 
-	result, err := Stop(StopOptions{WorkDir: workDir, Timeout: 2 * time.Second})
+	result, err := Stop(StopOptions{CorePath: "mihomo", ConfigPath: config, WorkDir: workDir, Timeout: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,6 +392,7 @@ done
 sleep 30
 `)
 	config := writeStartConfig(t, dir)
+	stubProcessCommandLine(t, old.Process.Pid, []string{core, "-d", workDir, "-f", config})
 
 	result, err := Restart(context.Background(), RestartOptions{
 		CorePath:    core,

@@ -2093,6 +2093,8 @@ sleep 30
 		"params": map[string]any{
 			"name": "stop_runtime",
 			"arguments": map[string]any{
+				"core":        core,
+				"config":      config,
 				"runtime_dir": workDir,
 				"timeout_ms":  2000,
 			},
