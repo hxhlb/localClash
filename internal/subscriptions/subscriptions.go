@@ -3,6 +3,8 @@ package subscriptions
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -13,12 +15,16 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 const DefaultUserAgent = "clash-verge/v1.5.1"
+const sourceIDPrefix = "S-"
+const sourceIDHashLength = 8
+const refreshFetchConcurrency = 4
 
 type Source struct {
 	ID  string `json:"id" yaml:"id"`
@@ -167,19 +173,11 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 	if len(opts.Sources) == 0 {
 		return ConfigureResult{}, fmt.Errorf("sources is required")
 	}
-	seen := map[string]bool{}
-	for i := range opts.Sources {
-		opts.Sources[i].ID = strings.TrimSpace(opts.Sources[i].ID)
-		opts.Sources[i].URL = strings.TrimSpace(opts.Sources[i].URL)
-		if err := validateSource(opts.Sources[i]); err != nil {
-			return ConfigureResult{}, err
-		}
-		if seen[opts.Sources[i].ID] {
-			return ConfigureResult{}, fmt.Errorf("duplicate subscription source id %q", opts.Sources[i].ID)
-		}
-		seen[opts.Sources[i].ID] = true
+	sources, err := normalizeSources(opts.Sources)
+	if err != nil {
+		return ConfigureResult{}, err
 	}
-	config := Config{Version: 1, Sources: opts.Sources}
+	config := Config{Version: 1, Sources: sources}
 	if err := writeConfig(opts.ConfigPath, config); err != nil {
 		return ConfigureResult{}, err
 	}
@@ -188,10 +186,22 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 		Configured: true,
 		Message:    "Subscription sources configured. Run subscriptions_refresh to update local artifacts.",
 	}
-	for _, source := range opts.Sources {
+	for _, source := range sources {
 		result.Sources = append(result.Sources, ConfiguredSource{ID: source.ID, URL: MaskURL(source.URL)})
 	}
 	return result, nil
+}
+
+func SourcesFromURLs(rawURLs []string) ([]Source, error) {
+	sources := make([]Source, 0, len(rawURLs))
+	for i, raw := range rawURLs {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return nil, fmt.Errorf("urls[%d] must not be empty", i)
+		}
+		sources = append(sources, Source{URL: trimmed})
+	}
+	return normalizeSources(sources)
 }
 
 func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
@@ -244,31 +254,9 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	}
 	finish(nil, nil)
 
-	refreshed := map[string]bool{}
-	for _, source := range config.Sources {
-		if !selected[source.ID] {
-			continue
-		}
-		finish = stage("fetch_source", map[string]any{"source_id": source.ID, "url": MaskURL(source.URL)})
-		doc, err := fetchSource(ctx, source, opts.UserAgent)
-		if err != nil {
-			finish(err, nil)
-			return RefreshResult{}, err
-		}
-		finish(nil, nil)
-		artifact := artifactPath(opts.RuntimeDir, source.ID)
-		finish = stage("write_source_artifact", map[string]any{"source_id": source.ID, "artifact": artifact})
-		if err := writeSubscriptionArtifact(artifactPath(opts.RuntimeDir, source.ID), doc.Data); err != nil {
-			finish(err, nil)
-			return RefreshResult{}, err
-		}
-		summary := summarizeMap(doc.Data)
-		finish(nil, map[string]any{
-			"proxies":      summary.ProxiesCount,
-			"proxy_groups": summary.ProxyGroupsCount,
-			"rules":        summary.RulesCount,
-		})
-		refreshed[source.ID] = true
+	refreshed, err := refreshSelectedSources(ctx, config.Sources, selected, opts, stage)
+	if err != nil {
+		return RefreshResult{}, err
 	}
 
 	finish = stage("read_artifacts", nil)
@@ -333,13 +321,122 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	return result, nil
 }
 
+type sourceRefreshOutcome struct {
+	sourceID  string
+	refreshed bool
+	err       error
+}
+
+func refreshSelectedSources(ctx context.Context, sources []Source, selected map[string]bool, opts RefreshOptions, stage func(string, map[string]any) func(error, map[string]any)) (map[string]bool, error) {
+	selectedCount := 0
+	for _, source := range sources {
+		if selected[source.ID] {
+			selectedCount++
+		}
+	}
+	if selectedCount == 0 {
+		return map[string]bool{}, nil
+	}
+	workerCount := refreshFetchConcurrency
+	if selectedCount < workerCount {
+		workerCount = selectedCount
+	}
+
+	jobs := make(chan Source)
+	results := make(chan sourceRefreshOutcome, selectedCount)
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for source := range jobs {
+				results <- refreshOneSource(ctx, source, opts, stage)
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for _, source := range sources {
+			if !selected[source.ID] {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- source:
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	outcomes := map[string]sourceRefreshOutcome{}
+	for result := range results {
+		outcomes[result.sourceID] = result
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for _, source := range sources {
+		if !selected[source.ID] {
+			continue
+		}
+		outcome, ok := outcomes[source.ID]
+		if !ok {
+			return nil, fmt.Errorf("source %q was not refreshed", source.ID)
+		}
+		if outcome.err != nil {
+			return nil, outcome.err
+		}
+	}
+	refreshed := map[string]bool{}
+	for _, source := range sources {
+		if outcome, ok := outcomes[source.ID]; ok && outcome.refreshed {
+			refreshed[source.ID] = true
+		}
+	}
+	return refreshed, nil
+}
+
+func refreshOneSource(ctx context.Context, source Source, opts RefreshOptions, stage func(string, map[string]any) func(error, map[string]any)) sourceRefreshOutcome {
+	finish := stage("fetch_source", map[string]any{"source_id": source.ID, "url": MaskURL(source.URL)})
+	doc, err := fetchSource(ctx, source, opts.UserAgent)
+	if err != nil {
+		finish(err, nil)
+		return sourceRefreshOutcome{sourceID: source.ID, err: err}
+	}
+	finish(nil, nil)
+
+	artifact := artifactPath(opts.RuntimeDir, source.ID)
+	finish = stage("write_source_artifact", map[string]any{"source_id": source.ID, "artifact": artifact})
+	if err := writeSubscriptionArtifact(artifact, doc.Data); err != nil {
+		finish(err, nil)
+		return sourceRefreshOutcome{sourceID: source.ID, err: err}
+	}
+	summary := summarizeMap(doc.Data)
+	finish(nil, map[string]any{
+		"proxies":      summary.ProxiesCount,
+		"proxy_groups": summary.ProxyGroupsCount,
+		"rules":        summary.RulesCount,
+	})
+	return sourceRefreshOutcome{sourceID: source.ID, refreshed: true}
+}
+
 func subscriptionStageEmitter(callback func(StageEvent)) func(string, map[string]any) func(error, map[string]any) {
+	var mu sync.Mutex
+	emit := func(event StageEvent) {
+		mu.Lock()
+		defer mu.Unlock()
+		callback(event)
+	}
 	return func(stage string, fields map[string]any) func(error, map[string]any) {
 		if callback == nil {
 			return func(error, map[string]any) {}
 		}
 		started := time.Now()
-		callback(StageEvent{Stage: stage, Event: "started", Fields: fields})
+		emit(StageEvent{Stage: stage, Event: "started", Fields: fields})
 		return func(err error, doneFields map[string]any) {
 			event := StageEvent{
 				Stage:      stage,
@@ -351,7 +448,7 @@ func subscriptionStageEmitter(callback func(StageEvent)) func(string, map[string
 				event.Event = "error"
 				event.Error = err.Error()
 			}
-			callback(event)
+			emit(event)
 		}
 	}
 }
@@ -413,6 +510,66 @@ func writeConfig(path string, config Config) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o600)
+}
+
+func normalizeSources(sources []Source) ([]Source, error) {
+	normalized := make([]Source, 0, len(sources))
+	seenCanonicalURL := map[string]bool{}
+	usedIDs := map[string]bool{}
+	canonicalURLs := make([]string, 0, len(sources))
+	for i, source := range sources {
+		rawURL := strings.TrimSpace(source.URL)
+		canonicalURL, err := canonicalSubscriptionURL(rawURL)
+		if err != nil {
+			return nil, fmt.Errorf("sources[%d] %w", i, err)
+		}
+		if seenCanonicalURL[canonicalURL] {
+			return nil, fmt.Errorf("duplicate subscription URL at sources[%d]", i)
+		}
+		seenCanonicalURL[canonicalURL] = true
+		canonicalURLs = append(canonicalURLs, canonicalURL)
+	}
+	for i, source := range sources {
+		id := sourceIDFromCanonicalURL(canonicalURLs[i], usedIDs)
+		usedIDs[id] = true
+		normalized = append(normalized, Source{
+			ID:  id,
+			URL: strings.TrimSpace(source.URL),
+		})
+	}
+	return normalized, nil
+}
+
+func canonicalSubscriptionURL(rawURL string) (string, error) {
+	if rawURL == "" {
+		return "", fmt.Errorf("url is required")
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("url is invalid")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("url must use http or https")
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("url must include a host")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func sourceIDFromCanonicalURL(canonicalURL string, used map[string]bool) string {
+	sum := sha256.Sum256([]byte(canonicalURL))
+	encoded := hex.EncodeToString(sum[:])
+	for length := sourceIDHashLength; length <= len(encoded); length += 2 {
+		id := sourceIDPrefix + encoded[:length]
+		if !used[id] {
+			return id
+		}
+	}
+	return sourceIDPrefix + encoded
 }
 
 func validateSource(source Source) error {

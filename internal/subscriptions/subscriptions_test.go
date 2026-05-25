@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStatusNoConfig(t *testing.T) {
@@ -69,13 +70,15 @@ rules:
 func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	dir := t.TempDir()
 	replace := true
+	url1 := "https://example.com/sub?token=secret-token"
+	url2 := "https://example.net/path/profile?token=backup-secret"
 
 	result, err := Configure(ConfigureOptions{
 		ConfigPath: filepath.Join(dir, "localclash-subscriptions.yaml"),
 		Replace:    &replace,
 		Sources: []Source{
-			{ID: "primary", URL: "https://example.com/sub?token=secret-token"},
-			{ID: "backup_1", URL: "https://example.net/path/profile?token=backup-secret"},
+			{ID: "primary", URL: url1},
+			{ID: "backup_1", URL: url2},
 		},
 	})
 	if err != nil {
@@ -83,6 +86,12 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	}
 	if !result.Configured || len(result.Sources) != 2 {
 		t.Fatalf("result = %+v, want two configured sources", result)
+	}
+	if result.Sources[0].ID != mustSourceID(t, url1) || result.Sources[1].ID != mustSourceID(t, url2) {
+		t.Fatalf("source ids = %+v, want generated short hash ids", result.Sources)
+	}
+	if result.Sources[0].ID == "primary" || result.Sources[1].ID == "backup_1" {
+		t.Fatalf("configure should ignore caller supplied ids: %+v", result.Sources)
 	}
 	data := readTestFile(t, filepath.Join(dir, "localclash-subscriptions.yaml"))
 	if !strings.Contains(data, "secret-token") {
@@ -98,8 +107,8 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 		sources []Source
 	}{
 		{name: "empty", sources: nil},
-		{name: "bad id", sources: []Source{{ID: "../bad", URL: "https://example.com/sub"}}},
-		{name: "bad scheme", sources: []Source{{ID: "primary", URL: "file:///tmp/sub.yaml"}}},
+		{name: "duplicate url", sources: []Source{{URL: "https://example.com/sub"}, {URL: "https://example.com/sub"}}},
+		{name: "bad scheme", sources: []Source{{URL: "file:///tmp/sub.yaml"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,9 +124,9 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 }
 
 func TestRefreshFetchesArtifactsAndPrefixesMultiSourceNodes(t *testing.T) {
-	var gotUA string
+	userAgents := make(chan string, 2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotUA = r.UserAgent()
+		userAgents <- r.UserAgent()
 		switch r.URL.Path {
 		case "/primary":
 			_, _ = w.Write([]byte(`proxies:
@@ -147,9 +156,13 @@ rules:
 		}
 	}))
 	defer server.Close()
+	primaryURL := server.URL + "/primary?token=primary-secret"
+	backupURL := server.URL + "/backup?token=backup-secret"
+	primaryID := mustSourceID(t, primaryURL)
+	backupID := mustSourceID(t, backupURL)
 	paths := writeRefreshConfig(t, []Source{
-		{ID: "primary", URL: server.URL + "/primary?token=primary-secret"},
-		{ID: "backup", URL: server.URL + "/backup?token=backup-secret"},
+		{ID: "primary", URL: primaryURL},
+		{ID: "backup", URL: backupURL},
 	})
 
 	result, err := Refresh(context.Background(), RefreshOptions{
@@ -161,25 +174,75 @@ rules:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotUA != "test-clash-ua" {
-		t.Fatalf("User-Agent = %q, want test-clash-ua", gotUA)
+	for i := 0; i < 2; i++ {
+		if gotUA := <-userAgents; gotUA != "test-clash-ua" {
+			t.Fatalf("User-Agent = %q, want test-clash-ua", gotUA)
+		}
 	}
 	if len(result.Sources) != 2 {
 		t.Fatalf("sources = %+v, want two summaries", result.Sources)
 	}
-	assertFileExists(t, filepath.Join(paths.runtimeDir, "primary.yaml"))
-	assertFileExists(t, filepath.Join(paths.runtimeDir, "backup.yaml"))
+	assertFileExists(t, filepath.Join(paths.runtimeDir, primaryID+".yaml"))
+	assertFileExists(t, filepath.Join(paths.runtimeDir, backupID+".yaml"))
 	assertFileExists(t, paths.merged)
 	if result.Merged.ProxiesCount != 3 || result.Merged.RenamedProxiesCount != 3 {
 		t.Fatalf("merged = %+v, want 3 proxies and 3 renamed", result.Merged)
 	}
 	merged := readTestFile(t, paths.merged)
-	for _, want := range []string{"[primary] Same", "[backup] Same", "[backup] Unique"} {
+	for _, want := range []string{"[" + primaryID + "] Same", "[" + backupID + "] Same", "[" + backupID + "] Unique"} {
 		if !strings.Contains(merged, want) {
 			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
 		}
 	}
 	assertNoTokenLeak(t, result)
+}
+
+func TestRefreshFetchesSelectedSourcesInParallel(t *testing.T) {
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- r.URL.Path
+		<-release
+		_, _ = w.Write([]byte(`proxies:
+  - name: ` + strings.TrimPrefix(r.URL.Path, "/") + `
+    type: ss
+    server: example.com
+    password: secret
+`))
+	}))
+	defer server.Close()
+	paths := writeRefreshConfig(t, []Source{
+		{URL: server.URL + "/first?token=primary-secret"},
+		{URL: server.URL + "/second?token=backup-secret"},
+	})
+
+	errs := make(chan error, 1)
+	go func() {
+		_, err := Refresh(context.Background(), RefreshOptions{
+			ConfigPath: paths.config,
+			RuntimeDir: paths.runtimeDir,
+			MergedPath: paths.merged,
+		})
+		errs <- err
+	}()
+
+	got := map[string]bool{}
+	for len(got) < 2 {
+		select {
+		case path := <-started:
+			got[path] = true
+		case <-time.After(2 * time.Second):
+			close(release)
+			t.Fatalf("timed out waiting for both fetches to start, got %v", got)
+		}
+	}
+	close(release)
+	if err := <-errs; err != nil {
+		t.Fatal(err)
+	}
+	if !got["/first"] || !got["/second"] {
+		t.Fatalf("started paths = %v, want both sources", got)
+	}
 }
 
 func TestRefreshSingleSourcePreservesNodeNames(t *testing.T) {
@@ -313,6 +376,15 @@ func assertFileExists(t *testing.T, path string) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func mustSourceID(t *testing.T, rawURL string) string {
+	t.Helper()
+	canonicalURL, err := canonicalSubscriptionURL(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sourceIDFromCanonicalURL(canonicalURL, map[string]bool{})
 }
 
 func assertNoTokenLeak(t *testing.T, value any) {

@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -822,24 +821,7 @@ func parseJSONOnly(name string, args []string) error {
 }
 
 func sourcesFromURLs(rawURLs []string) ([]subscriptions.Source, error) {
-	seen := map[string]bool{}
-	sources := make([]subscriptions.Source, 0, len(rawURLs))
-	for i, raw := range rawURLs {
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" {
-			return nil, fmt.Errorf("urls[%d] must not be empty", i)
-		}
-		parsed, err := url.Parse(trimmed)
-		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-			return nil, fmt.Errorf("urls[%d] must be an absolute http or https URL", i)
-		}
-		if seen[trimmed] {
-			return nil, fmt.Errorf("duplicate subscription URL at urls[%d]", i)
-		}
-		seen[trimmed] = true
-		sources = append(sources, subscriptions.Source{ID: fmt.Sprintf("sub-%d", i+1), URL: trimmed})
-	}
-	return sources, nil
+	return subscriptions.SourcesFromURLs(rawURLs)
 }
 
 func productStatus(state appinit.RuntimeState) (map[string]any, []string) {
