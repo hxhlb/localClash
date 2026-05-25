@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"localclash/internal/rules"
 )
 
 func TestRunResetDoesNotBootstrapRuntimeFirst(t *testing.T) {
@@ -191,6 +193,7 @@ custom_rules:
       - type: DOMAIN
         value: example.ai
 `)
+	writeMainTestPackIndex(t, filepath.Join(".runtime", "rules", "packs"))
 
 	output := captureStdout(t, func() error {
 		return run([]string{"config", "render", "--json"})
@@ -305,6 +308,34 @@ func writeMainTestFile(t *testing.T, path string, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMainTestPackIndex(t *testing.T, cacheDir string) {
+	t.Helper()
+	if err := rules.WritePackIndex(rules.PackIndexPath(cacheDir), map[string]rules.PackCache{
+		"blackmatrix7": {
+			Version:    1,
+			Source:     "blackmatrix7",
+			Adapter:    "blackmatrix7",
+			Renderable: true,
+			Packs: []rules.Pack{{
+				ID:         "OpenAI",
+				Name:       "OpenAI",
+				Target:     "AI",
+				Renderable: true,
+				Components: []rules.Component{{
+					ID:         "OpenAI",
+					Behavior:   "classical",
+					Format:     "yaml",
+					OrderClass: "mixed",
+					URL:        "https://example.com/OpenAI.yaml",
+					Path:       "./rule-packs/blackmatrix7/OpenAI.yaml",
+				}},
+			}},
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

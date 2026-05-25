@@ -52,6 +52,7 @@ Legacy/internal commands still available during the CLI rewrite:
   localclash subscription download --url <url> [flags]
   localclash dashboard download [flags]
   localclash rules adapt [flags]
+  localclash rules index-dump [flags]
   localclash rules render [flags]
   localclash run [flags]
   localclash doctor [flags]
@@ -102,6 +103,11 @@ Flags for config render:
 Flags for rules adapt:
   --sources string  rule source YAML directory (default "rule-sources")
   --cache string    runtime pack cache directory (default ".runtime/rules/packs")
+
+Flags for rules index-dump:
+  --cache string    runtime pack cache directory (default ".runtime/rules/packs")
+  --format string   dump format: json or yaml (default "json")
+  --output string   output path, or "-" for stdout (default "-")
 
 Flags for rules render:
   --selection string  packs selection YAML (default "localclash-packs.yaml")
@@ -384,11 +390,13 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 
 func runRules(args []string, state appinit.RuntimeState) error {
 	if len(args) == 0 {
-		return fmt.Errorf("rules subcommand is required: adapt or render")
+		return fmt.Errorf("rules subcommand is required: adapt, index-dump, or render")
 	}
 	switch args[0] {
 	case "adapt":
 		return runRulesAdapt(args[1:], state)
+	case "index-dump":
+		return runRulesIndexDump(args[1:], state)
 	case "render":
 		return runRulesRender(args[1:], state)
 	default:
@@ -421,6 +429,39 @@ func runRulesAdapt(args []string, state appinit.RuntimeState) error {
 		fmt.Printf("adapted %s (%s): %d packs\n", cache.Source, cache.Adapter, len(cache.Packs))
 	}
 	return nil
+}
+
+func runRulesIndexDump(args []string, state appinit.RuntimeState) error {
+	fs := flag.NewFlagSet("rules index-dump", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	cacheDir := state.Paths.RulesCacheDir
+	format := "json"
+	output := "-"
+	fs.StringVar(&cacheDir, "cache", cacheDir, "runtime pack cache directory")
+	fs.StringVar(&format, "format", format, "dump format: json or yaml")
+	fs.StringVar(&output, "output", output, "output path, or - for stdout")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+
+	data, err := rules.DumpPackIndex(rules.PackIndexPath(cacheDir), format)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if output == "" || output == "-" {
+		_, err = os.Stdout.Write(data)
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(output, data, 0o644)
 }
 
 func runRulesRender(args []string, state appinit.RuntimeState) error {

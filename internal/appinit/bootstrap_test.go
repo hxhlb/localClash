@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"localclash/internal/rules"
 )
 
 func TestBootstrapBuildsRuntimeStateFromLocalArtifacts(t *testing.T) {
@@ -48,23 +50,7 @@ modes:
         target: direct
 `, 0o644)
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
-	writeAppinitFile(t, filepath.Join(cacheDir, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: OpenAI
-    name: OpenAI
-    target: AI
-    renderable: true
-    components:
-      - id: OpenAI
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/OpenAI.yaml
-        path: ./rule-packs/blackmatrix7/OpenAI.yaml
-`, 0o644)
+	writeAppinitPackIndex(t, cacheDir)
 
 	state := Bootstrap(context.Background(), Options{
 		RuntimeRoot:        filepath.Join(dir, ".runtime"),
@@ -212,6 +198,34 @@ func writeAppinitFile(t *testing.T, path, content string, mode os.FileMode) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeAppinitPackIndex(t *testing.T, cacheDir string) {
+	t.Helper()
+	if err := rules.WritePackIndex(rules.PackIndexPath(cacheDir), map[string]rules.PackCache{
+		"blackmatrix7": {
+			Version:    1,
+			Source:     "blackmatrix7",
+			Adapter:    "blackmatrix7",
+			Renderable: true,
+			Packs: []rules.Pack{{
+				ID:         "OpenAI",
+				Name:       "OpenAI",
+				Target:     "AI",
+				Renderable: true,
+				Components: []rules.Component{{
+					ID:         "OpenAI",
+					Behavior:   "classical",
+					Format:     "yaml",
+					OrderClass: "mixed",
+					URL:        "https://example.com/OpenAI.yaml",
+					Path:       "./rule-packs/blackmatrix7/OpenAI.yaml",
+				}},
+			}},
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

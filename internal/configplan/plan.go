@@ -242,6 +242,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		SubscriptionConfig:  opts.SubscriptionConfig,
 		SubscriptionRuntime: opts.SubscriptionRuntime,
 		RulesCache:          opts.RulesCache,
+		OnStage:             nestedLocalConfigStage(opts.OnStage, "resolve_candidate_config"),
 	})
 	if err != nil {
 		finish(err, nil)
@@ -393,6 +394,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		SubscriptionConfig:  opts.SubscriptionConfig,
 		SubscriptionRuntime: opts.SubscriptionRuntime,
 		RulesCache:          opts.RulesCache,
+		OnStage:             nestedLocalConfigStage(opts.OnStage, "resolve_apply_config"),
 	})
 	if err != nil {
 		finish(err, nil)
@@ -533,6 +535,21 @@ func nestedConfigRenderStage(callback func(StageEvent), parent string) func(conf
 		return nil
 	}
 	return func(event configrender.StageEvent) {
+		callback(StageEvent{
+			Stage:      parent + "." + event.Stage,
+			Event:      event.Event,
+			DurationMS: event.DurationMS,
+			Error:      event.Error,
+			Fields:     event.Fields,
+		})
+	}
+}
+
+func nestedLocalConfigStage(callback func(StageEvent), parent string) func(localconfig.StageEvent) {
+	if callback == nil {
+		return nil
+	}
+	return func(event localconfig.StageEvent) {
 		callback(StageEvent{
 			Stage:      parent + "." + event.Stage,
 			Event:      event.Event,
@@ -897,15 +914,22 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 	for _, item := range full.Packs {
 		packsByID[item.ID] = item
 	}
+	var packIndex *rules.PackIndex
+	if len(overlay.Packs) > 0 {
+		packIndex, _ = rules.LoadPackIndex(rules.PackIndexPath(rulesCache))
+	}
 	for _, item := range overlay.Packs {
 		id := strings.TrimSpace(item.ID)
 		if found, ok := packsByID[id]; ok {
 			summary.Packs = append(summary.Packs, found)
 			continue
 		}
-		if ref, err := rules.ResolvePackRef(rulesCache, id); err == nil {
-			summary.Packs = append(summary.Packs, OverlayPackSummary{ID: ref.ID, Type: ref.Type, Target: item.Target, Reason: item.Reason})
-			continue
+		if packIndex != nil {
+			ref, err := packIndex.ResolvePackRef(id)
+			if err == nil {
+				summary.Packs = append(summary.Packs, OverlayPackSummary{ID: ref.ID, Type: ref.Type, Target: item.Target, Reason: item.Reason})
+				continue
+			}
 		}
 		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: item.ID, Type: item.Type, Target: item.Target, Reason: item.Reason})
 	}
@@ -992,8 +1016,16 @@ func loadApplyConfig(opts ApplyOptions, plan Result) (localconfig.Config, error)
 func buildSelection(opts Options, proxyNames []string) (rules.Selection, OverlaySummary, []string, error) {
 	selected := make([]rules.SelectedPack, 0, len(opts.Overlay.Packs))
 	overlayPacks := make([]OverlayPackSummary, 0, len(opts.Overlay.Packs))
+	var packIndex *rules.PackIndex
+	if len(opts.Overlay.Packs) > 0 {
+		var err error
+		packIndex, err = rules.LoadPackIndex(rules.PackIndexPath(opts.RulesCache))
+		if err != nil {
+			return rules.Selection{}, OverlaySummary{}, nil, err
+		}
+	}
 	for _, pack := range opts.Overlay.Packs {
-		ref, err := rules.ResolvePackRef(opts.RulesCache, pack.ID)
+		ref, err := packIndex.ResolvePackRef(pack.ID)
 		if err != nil {
 			return rules.Selection{}, OverlaySummary{}, nil, err
 		}

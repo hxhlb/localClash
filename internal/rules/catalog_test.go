@@ -184,7 +184,11 @@ func TestResolvePackRefAcceptsGeoSiteAttribute(t *testing.T) {
 		},
 	})
 
-	ref, err := ResolvePackRef(cacheDir, "v2fly_dlc_category_games@cn")
+	index, err := LoadPackIndex(PackIndexPath(cacheDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := index.ResolvePackRef("v2fly_dlc_category_games@cn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +208,11 @@ func TestGetPackUnknownIDReturnsError(t *testing.T) {
 func TestResolvePackRefAcceptsCatalogAndProviderIDs(t *testing.T) {
 	cacheDir := writeCatalogTestCaches(t)
 
-	ref, err := ResolvePackRef(cacheDir, "blackmatrix7_OpenAI")
+	index, err := LoadPackIndex(PackIndexPath(cacheDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := index.ResolvePackRef("blackmatrix7_OpenAI")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +244,11 @@ func TestResolvePackRefAcceptsCatalogAndProviderIDs(t *testing.T) {
 			},
 		},
 	})
-	ref, err = ResolvePackRef(cacheDir, "sukkaw_ai_non_ip")
+	index, err = LoadPackIndex(PackIndexPath(cacheDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err = index.ResolvePackRef("sukkaw_ai_non_ip")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +292,16 @@ func writeCatalogTestCaches(t *testing.T) string {
 
 func writeCatalogTestCache(t *testing.T, cacheDir string, cache PackCache) {
 	t.Helper()
-	if err := WritePackCache(cacheDir, cache); err != nil {
+	caches := map[string]PackCache{}
+	if _, err := os.Stat(PackIndexPath(cacheDir)); err == nil {
+		index, err := LoadPackIndex(PackIndexPath(cacheDir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		caches = copyPackCaches(index.Caches)
+	}
+	caches[cache.Source] = cache
+	if err := WritePackIndex(PackIndexPath(cacheDir), caches); err != nil {
 		t.Fatal(err)
 	}
 }

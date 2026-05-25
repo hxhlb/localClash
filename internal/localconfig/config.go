@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"localclash/internal/rules"
 
@@ -88,6 +89,15 @@ type ResolveOptions struct {
 	SubscriptionConfig  string
 	SubscriptionRuntime string
 	RulesCache          string
+	OnStage             func(StageEvent) `json:"-"`
+}
+
+type StageEvent struct {
+	Stage      string         `json:"stage"`
+	Event      string         `json:"event"`
+	DurationMS int64          `json:"duration_ms,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Fields     map[string]any `json:"fields,omitempty"`
 }
 
 type Resolved struct {
@@ -211,17 +221,26 @@ func WriteSelection(path string, selection rules.Selection) error {
 
 func Resolve(opts ResolveOptions) (Resolved, error) {
 	opts = normalizeResolveOptions(opts)
+	stage := localConfigStageEmitter(opts.OnStage)
 	if opts.Config.Version == 0 {
 		opts.Config.Version = 1
 	}
+	finish := stage("load_subscription_nodes", map[string]any{
+		"subscription":         opts.SubscriptionPath,
+		"subscription_config":  opts.SubscriptionConfig,
+		"subscription_runtime": opts.SubscriptionRuntime,
+	})
 	nodes, err := LoadSubscriptionNodes(SubscriptionNodeOptions{
 		SubscriptionPath:    opts.SubscriptionPath,
 		SubscriptionConfig:  opts.SubscriptionConfig,
 		SubscriptionRuntime: opts.SubscriptionRuntime,
+		OnStage:             nestedLocalConfigStage(opts.OnStage, "load_subscription_nodes"),
 	})
 	if err != nil {
+		finish(err, nil)
 		return Resolved{}, err
 	}
+	finish(nil, map[string]any{"node_count": len(nodes)})
 	selection := rules.Selection{
 		Version:      1,
 		ProxyGroups:  map[string]rules.ProxyGroup{},
@@ -240,21 +259,37 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	}
 	sort.Strings(groupIDs)
 	var groupResults []ProxyGroupResult
+	finish = stage("resolve_proxy_groups", map[string]any{"proxy_group_count": len(groupIDs), "node_count": len(nodes)})
 	for _, id := range groupIDs {
 		group := resolvedConfig.ProxyGroups[id]
 		mode := strings.ToLower(strings.TrimSpace(group.Mode))
 		var selected []string
 		var err error
+		finishGroup := stage("resolve_proxy_group", map[string]any{
+			"group_id":     id,
+			"mode":         mode,
+			"has_match":    group.Match != nil,
+			"node_refs":    len(group.Nodes),
+			"optional":     group.Optional,
+			"total_nodes":  len(nodes),
+			"source_scope": matchSourceScope(group.Match),
+		})
 		if mode == "direct" {
 			if group.Match != nil || len(group.Nodes) > 0 {
-				return Resolved{}, fmt.Errorf("proxy group %q direct mode cannot use match or nodes", id)
+				err := fmt.Errorf("proxy group %q direct mode cannot use match or nodes", id)
+				finishGroup(err, nil)
+				finish(err, nil)
+				return Resolved{}, err
 			}
 		} else {
 			selected, err = resolveProxyGroup(id, group, nodes)
 			if err != nil {
+				finishGroup(err, nil)
+				finish(err, nil)
 				return Resolved{}, err
 			}
 		}
+		finishGroup(nil, map[string]any{"selected_nodes": len(selected)})
 		group.Mode = mode
 		group.SelectedNodes = selected
 		resolvedConfig.ProxyGroups[id] = group
@@ -269,7 +304,9 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		case "direct":
 			ruleGroup.Direct = true
 		default:
-			return Resolved{}, fmt.Errorf("proxy group %q mode must be manual, auto, smart, or direct", id)
+			err := fmt.Errorf("proxy group %q mode must be manual, auto, smart, or direct", id)
+			finish(err, nil)
+			return Resolved{}, err
 		}
 		selection.ProxyGroups[id] = ruleGroup
 		groupResults = append(groupResults, ProxyGroupResult{
@@ -283,19 +320,24 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 			Boundary:      group.Boundary,
 		})
 	}
+	finish(nil, map[string]any{"resolved_proxy_groups": len(groupResults)})
 	policyIDs := make([]string, 0, len(resolvedConfig.PolicyGroups))
 	for id := range resolvedConfig.PolicyGroups {
 		if _, exists := resolvedConfig.ProxyGroups[id]; exists {
-			return Resolved{}, fmt.Errorf("policy group %q conflicts with a proxy group id", id)
+			err := fmt.Errorf("policy group %q conflicts with a proxy group id", id)
+			stage("resolve_policy_groups", nil)(err, nil)
+			return Resolved{}, err
 		}
 		policyIDs = append(policyIDs, id)
 	}
 	sort.Strings(policyIDs)
 	var policyResults []PolicyGroupResult
+	finish = stage("resolve_policy_groups", map[string]any{"policy_group_count": len(policyIDs), "proxy_group_count": len(selection.ProxyGroups)})
 	for _, id := range policyIDs {
 		group := resolvedConfig.PolicyGroups[id]
 		mode := strings.ToLower(strings.TrimSpace(group.Mode))
 		ruleGroup := rules.PolicyGroup{Exits: normalizePolicyGroupExits(group.Exits)}
+		finishGroup := stage("resolve_policy_group", map[string]any{"group_id": id, "mode": mode, "exit_count": len(ruleGroup.Exits)})
 		switch mode {
 		case "manual":
 			ruleGroup.Manual = true
@@ -304,11 +346,17 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		case "smart":
 			ruleGroup.Smart = true
 		default:
-			return Resolved{}, fmt.Errorf("policy group %q mode must be manual, auto, or smart", id)
-		}
-		if err := validatePolicyGroupExits(id, ruleGroup.Exits, selection.ProxyGroups); err != nil {
+			err := fmt.Errorf("policy group %q mode must be manual, auto, or smart", id)
+			finishGroup(err, nil)
+			finish(err, nil)
 			return Resolved{}, err
 		}
+		if err := validatePolicyGroupExits(id, ruleGroup.Exits, selection.ProxyGroups); err != nil {
+			finishGroup(err, nil)
+			finish(err, nil)
+			return Resolved{}, err
+		}
+		finishGroup(nil, map[string]any{"exits": len(ruleGroup.Exits)})
 		group.Mode = mode
 		group.Exits = append([]string{}, ruleGroup.Exits...)
 		resolvedConfig.PolicyGroups[id] = group
@@ -322,38 +370,70 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 			Boundary:  group.Boundary,
 		})
 	}
+	finish(nil, map[string]any{"resolved_policy_groups": len(policyResults)})
 	resolvedPacks := make([]Pack, 0, len(resolvedConfig.Packs))
 	packResults := make([]PackResult, 0, len(resolvedConfig.Packs))
-	for _, pack := range resolvedConfig.Packs {
-		ref, err := rules.ResolvePackRef(opts.RulesCache, pack.ID)
+	finish = stage("resolve_packs", map[string]any{"pack_count": len(resolvedConfig.Packs), "rules_cache": opts.RulesCache})
+	var packIndex *rules.PackIndex
+	if len(resolvedConfig.Packs) > 0 {
+		finishIndex := stage("load_pack_index", map[string]any{"index": rules.PackIndexPath(opts.RulesCache)})
+		packIndex, err = rules.LoadPackIndex(rules.PackIndexPath(opts.RulesCache))
 		if err != nil {
+			finishIndex(err, nil)
+			finish(err, nil)
+			return Resolved{}, err
+		}
+		finishIndex(nil, map[string]any{"pack_count": len(packIndex.Catalog.Packs), "ref_count": len(packIndex.Refs)})
+	}
+	for _, pack := range resolvedConfig.Packs {
+		finishPack := stage("resolve_pack", map[string]any{"pack_id": pack.ID, "target": pack.Target, "declared_type": pack.Type})
+		ref, err := packIndex.ResolvePackRef(pack.ID)
+		if err != nil {
+			finishPack(err, nil)
+			finish(err, nil)
 			return Resolved{}, err
 		}
 		if err := assertPackType(pack.ID, pack.Type, ref.Type); err != nil {
+			finishPack(err, map[string]any{"resolved_type": ref.Type})
+			finish(err, nil)
 			return Resolved{}, err
 		}
 		target := strings.TrimSpace(pack.Target)
 		if target == "" {
-			return Resolved{}, fmt.Errorf("pack %q target is required", pack.ID)
+			err := fmt.Errorf("pack %q target is required", pack.ID)
+			finishPack(err, map[string]any{"resolved_type": ref.Type})
+			finish(err, nil)
+			return Resolved{}, err
 		}
 		if !isKnownTarget(target, selection.ProxyGroups, selection.PolicyGroups) {
-			return Resolved{}, fmt.Errorf("pack target %q requires a matching proxy group or policy group", target)
+			err := fmt.Errorf("pack target %q requires a matching proxy group or policy group", target)
+			finishPack(err, map[string]any{"resolved_type": ref.Type})
+			finish(err, nil)
+			return Resolved{}, err
 		}
 		selection.EnabledPack = append(selection.EnabledPack, rules.SelectedPack{Source: ref.Source, Pack: ref.Pack, Target: target})
 		resolvedPacks = append(resolvedPacks, Pack{ID: ref.ID, Type: ref.Type, Target: target, Reason: pack.Reason})
 		packResults = append(packResults, PackResult{ID: ref.ID, Type: ref.Type, Target: target, Reason: pack.Reason})
+		finishPack(nil, map[string]any{"resolved_id": ref.ID, "resolved_type": ref.Type, "source": ref.Source, "pack": ref.Pack})
 	}
+	finish(nil, map[string]any{"resolved_packs": len(packResults)})
 	resolvedConfig.Packs = resolvedPacks
+	finish = stage("resolve_custom_rules", map[string]any{"custom_rule_count": len(resolvedConfig.CustomRules)})
 	resolvedCustomRules, customRuleResults, err := resolveCustomRules(resolvedConfig.CustomRules, selection.ProxyGroups, selection.PolicyGroups)
 	if err != nil {
+		finish(err, nil)
 		return Resolved{}, err
 	}
+	finish(nil, map[string]any{"resolved_custom_rules": len(customRuleResults)})
 	resolvedConfig.CustomRules = resolvedCustomRules
 	selection.CustomRules = customRulesForSelection(resolvedCustomRules)
+	finish = stage("resolve_rule_providers", map[string]any{"rule_provider_count": len(resolvedConfig.RuleProviders)})
 	resolvedRuleProviders, ruleProviderResults, err := resolveRuleProviders(resolvedConfig.RuleProviders, selection.ProxyGroups, selection.PolicyGroups)
 	if err != nil {
+		finish(err, nil)
 		return Resolved{}, err
 	}
+	finish(nil, map[string]any{"resolved_rule_providers": len(ruleProviderResults)})
 	resolvedConfig.RuleProviders = resolvedRuleProviders
 	selection.RuleProviders = ruleProvidersForSelection(resolvedRuleProviders)
 	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, PolicyGroups: policyResults, CustomRules: customRuleResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
@@ -373,23 +453,99 @@ func assertPackType(id, declared, actual string) error {
 	return nil
 }
 
+type localConfigStageFunc func(string, map[string]any) func(error, map[string]any)
+
+func localConfigStageEmitter(callback func(StageEvent)) localConfigStageFunc {
+	return func(stage string, fields map[string]any) func(error, map[string]any) {
+		if callback == nil {
+			return func(error, map[string]any) {}
+		}
+		started := time.Now()
+		callback(StageEvent{Stage: stage, Event: "started", Fields: fields})
+		return func(err error, doneFields map[string]any) {
+			event := StageEvent{
+				Stage:      stage,
+				Event:      "done",
+				DurationMS: time.Since(started).Milliseconds(),
+				Fields:     doneFields,
+			}
+			if err != nil {
+				event.Event = "error"
+				event.Error = err.Error()
+			}
+			callback(event)
+		}
+	}
+}
+
+func nestedLocalConfigStage(callback func(StageEvent), parent string) func(StageEvent) {
+	if callback == nil {
+		return nil
+	}
+	return func(event StageEvent) {
+		stage := event.Stage
+		if parent != "" {
+			stage = parent + "." + stage
+		}
+		callback(StageEvent{
+			Stage:      stage,
+			Event:      event.Event,
+			DurationMS: event.DurationMS,
+			Error:      event.Error,
+			Fields:     event.Fields,
+		})
+	}
+}
+
+func matchSourceScope(match *Match) int {
+	if match == nil {
+		return 0
+	}
+	count := 0
+	for _, sourceID := range match.SourceIDs {
+		if strings.TrimSpace(sourceID) != "" {
+			count++
+		}
+	}
+	return count
+}
+
 type SubscriptionNodeOptions struct {
 	SubscriptionPath    string
 	SubscriptionConfig  string
 	SubscriptionRuntime string
+	OnStage             func(StageEvent) `json:"-"`
 }
 
 func LoadSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNode, error) {
 	opts = normalizeSubscriptionNodeOptions(opts)
+	stage := localConfigStageEmitter(opts.OnStage)
+	finish := stage("load_source_subscription_nodes", map[string]any{
+		"subscription_config":  opts.SubscriptionConfig,
+		"subscription_runtime": opts.SubscriptionRuntime,
+	})
 	sourceNodes, err := loadSourceSubscriptionNodes(opts)
 	if err == nil && len(sourceNodes) > 0 {
+		finish(nil, map[string]any{"node_count": len(sourceNodes), "used": true})
 		return sourceNodes, nil
 	}
-	return loadMergedSubscriptionNodes(opts.SubscriptionPath)
+	fields := map[string]any{"node_count": len(sourceNodes), "used": false}
+	if err != nil {
+		fields["fallback_reason"] = err.Error()
+	}
+	finish(nil, fields)
+	finish = stage("load_merged_subscription_nodes", map[string]any{"subscription": opts.SubscriptionPath})
+	nodes, err := loadMergedSubscriptionNodes(opts.SubscriptionPath, stage)
+	if err != nil {
+		finish(err, nil)
+		return nil, err
+	}
+	finish(nil, map[string]any{"node_count": len(nodes)})
+	return nodes, nil
 }
 
-func loadMergedSubscriptionNodes(path string) ([]SubscriptionNode, error) {
-	doc, err := readYAMLMap(path)
+func loadMergedSubscriptionNodes(path string, stage localConfigStageFunc) ([]SubscriptionNode, error) {
+	doc, err := readYAMLMapObserved(path, stage, "merged_subscription", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -408,29 +564,41 @@ func loadMergedSubscriptionNodes(path string) ([]SubscriptionNode, error) {
 }
 
 func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNode, error) {
+	stage := localConfigStageEmitter(opts.OnStage)
+	finish := stage("read_subscription_config", map[string]any{"path": opts.SubscriptionConfig})
 	data, err := os.ReadFile(opts.SubscriptionConfig)
 	if err != nil {
+		finish(err, nil)
 		return nil, err
 	}
+	finish(nil, map[string]any{"bytes": len(data)})
 	var sources subscriptionSources
+	finish = stage("parse_subscription_config", map[string]any{"path": opts.SubscriptionConfig, "bytes": len(data)})
 	if err := yaml.Unmarshal(data, &sources); err != nil {
+		finish(err, nil)
 		return nil, err
 	}
+	finish(nil, map[string]any{"source_count": len(sources.Sources)})
 	sourceDocs := map[string][]map[string]any{}
 	for _, source := range sources.Sources {
 		if source.ID == "" {
 			continue
 		}
-		doc, err := readYAMLMap(filepath.Join(opts.SubscriptionRuntime, source.ID+".yaml"))
+		path := filepath.Join(opts.SubscriptionRuntime, source.ID+".yaml")
+		finish := stage("read_subscription_source_artifact", map[string]any{"source_id": source.ID, "path": path})
+		doc, err := readYAMLMapObserved(path, stage, "subscription_source_artifact", map[string]any{"source_id": source.ID})
 		if err != nil {
+			finish(err, nil)
 			return nil, err
 		}
 		proxies := anyMapSlice(doc["proxies"])
+		finish(nil, map[string]any{"proxy_count": len(proxies)})
 		sourceDocs[source.ID] = proxies
 	}
 	prefixSource := len(sourceDocs) > 1
 	usedNames := map[string]bool{}
 	var nodes []SubscriptionNode
+	finish = stage("build_subscription_nodes", map[string]any{"source_count": len(sourceDocs), "prefix_source": prefixSource})
 	for _, source := range sources.Sources {
 		for _, proxy := range sourceDocs[source.ID] {
 			name := stringValue(proxy["name"])
@@ -442,7 +610,35 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 			nodes = append(nodes, SubscriptionNode{Name: name, Type: stringValue(proxy["type"]), SourceID: source.ID})
 		}
 	}
+	finish(nil, map[string]any{"node_count": len(nodes)})
 	return nodes, nil
+}
+
+func readYAMLMapObserved(path string, stage localConfigStageFunc, prefix string, fields map[string]any) (map[string]any, error) {
+	readFields := map[string]any{"path": path}
+	for key, value := range fields {
+		readFields[key] = value
+	}
+	finish := stage(prefix+".read_file", readFields)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		finish(err, nil)
+		return nil, err
+	}
+	finish(nil, map[string]any{"bytes": len(data)})
+
+	parseFields := map[string]any{"path": path, "bytes": len(data)}
+	for key, value := range fields {
+		parseFields[key] = value
+	}
+	finish = stage(prefix+".parse_yaml", parseFields)
+	var doc map[string]any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		finish(err, nil)
+		return nil, err
+	}
+	finish(nil, map[string]any{"top_level_keys": len(doc)})
+	return doc, nil
 }
 
 func resolveProxyGroup(id string, group ProxyGroup, nodes []SubscriptionNode) ([]string, error) {

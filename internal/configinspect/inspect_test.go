@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"localclash/internal/rules"
 )
 
 func TestInspectBaseReturnsBaseSummary(t *testing.T) {
@@ -151,16 +153,22 @@ packs:
     server: sg.example.com
     password: secret
 `)
-	writeInspectFile(t, filepath.Join(rulesCache, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: OpenAI
-    name: OpenAI
-    target: AI
-    renderable: true
-`)
+	if err := rules.WritePackIndex(rules.PackIndexPath(rulesCache), map[string]rules.PackCache{
+		"blackmatrix7": {
+			Version:    1,
+			Source:     "blackmatrix7",
+			Adapter:    "blackmatrix7",
+			Renderable: true,
+			Packs: []rules.Pack{{
+				ID:         "OpenAI",
+				Name:       "OpenAI",
+				Target:     "AI",
+				Renderable: true,
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := InspectIntent(IntentOptions{ConfigPath: configPath, Subscription: subscriptionPath, RulesCache: rulesCache})
 	if err != nil {

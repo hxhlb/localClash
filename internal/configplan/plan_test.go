@@ -738,63 +738,64 @@ enabled_packs: []
 	if err := os.MkdirAll(paths.cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(paths.cacheDir, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: Epic
-    name: Epic
-    target: DIRECT
-    renderable: true
-    components:
-      - id: Epic
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/Epic.yaml
-        path: ./rule-packs/blackmatrix7/Epic.yaml
-  - id: OpenAI
-    name: OpenAI
-    target: AI
-    renderable: true
-    components:
-      - id: OpenAI
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/OpenAI.yaml
-        path: ./rule-packs/blackmatrix7/OpenAI.yaml
-  - id: Steam
-    name: Steam
-    target: DIRECT
-    renderable: true
-    components:
-      - id: Steam
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/Steam.yaml
-        path: ./rule-packs/blackmatrix7/Steam.yaml
-`)
-	writeFile(t, filepath.Join(paths.cacheDir, "sukkaw.yaml"), `version: 1
-source: sukkaw
-adapter: sukkaw
-renderable: true
-packs:
-  - id: ai
-    name: AI
-    target: AI
-    renderable: true
-    components:
-      - id: non_ip
-        behavior: classical
-        format: text
-        order_class: non_ip
-        url: https://ruleset.skk.moe/Clash/non_ip/ai.txt
-        path: ./rule-packs/sukkaw/ai_non_ip.txt
-`)
+	writePlanPackIndex(t, paths.cacheDir)
 	return paths
+}
+
+func writePlanPackIndex(t *testing.T, cacheDir string) {
+	t.Helper()
+	if err := rules.WritePackIndex(rules.PackIndexPath(cacheDir), map[string]rules.PackCache{
+		"blackmatrix7": {
+			Version:    1,
+			Source:     "blackmatrix7",
+			Adapter:    "blackmatrix7",
+			Renderable: true,
+			Packs: []rules.Pack{
+				planPack("Epic", "DIRECT"),
+				planPack("OpenAI", "AI"),
+				planPack("Steam", "DIRECT"),
+			},
+		},
+		"sukkaw": {
+			Version:    1,
+			Source:     "sukkaw",
+			Adapter:    "sukkaw",
+			Renderable: true,
+			Packs: []rules.Pack{{
+				ID:         "ai",
+				Name:       "AI",
+				Target:     "AI",
+				Renderable: true,
+				Components: []rules.Component{{
+					ID:         "non_ip",
+					Behavior:   "classical",
+					Format:     "text",
+					OrderClass: "non_ip",
+					URL:        "https://ruleset.skk.moe/Clash/non_ip/ai.txt",
+					Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+				}},
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func planPack(id, target string) rules.Pack {
+	return rules.Pack{
+		ID:         id,
+		Name:       id,
+		Target:     target,
+		Renderable: true,
+		Components: []rules.Component{{
+			ID:         id,
+			Behavior:   "classical",
+			Format:     "yaml",
+			OrderClass: "mixed",
+			URL:        "https://example.com/" + id + ".yaml",
+			Path:       "./rule-packs/blackmatrix7/" + id + ".yaml",
+		}},
+	}
 }
 
 func fixedPlanTime() time.Time {

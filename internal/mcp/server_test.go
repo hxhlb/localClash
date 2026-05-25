@@ -388,23 +388,13 @@ packs:
     target: Steam
     reason: Route Steam domains to the Steam business group.
 `)
-	writeMCPFile(t, filepath.Join(cacheDir, "v2fly-dlc.yaml"), `version: 1
-source: v2fly-dlc
-adapter: v2fly-dlc
-renderable: true
-packs:
-  - id: steam
-    name: Steam
-    target: Steam
-    renderable: true
-    components:
-      - id: domain
-        behavior: v2fly-dlc
-        format: text
-        order_class: domain
-        url: https://example.com/steam
-        path: ./rule-packs/v2fly-dlc/steam.txt
-`)
+	writeMCPPackIndex(t, cacheDir, rules.PackCache{
+		Version:    1,
+		Source:     "v2fly-dlc",
+		Adapter:    "v2fly-dlc",
+		Renderable: true,
+		Packs:      []rules.Pack{mcpV2FlyPack("steam", "Steam")},
+	})
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			RulesCacheDir:       cacheDir,
@@ -1628,8 +1618,8 @@ func TestToolsCallPacksListReturnsCurrentCatalogError(t *testing.T) {
 			"arguments": map[string]any{},
 		},
 	})
-	if resp.Error == nil || !strings.Contains(resp.Error.Message, ".runtime") {
-		t.Fatalf("response error = %+v, want current cache error", resp.Error)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "pack index not found: run localclash rules adapt") {
+		t.Fatalf("response error = %+v, want missing pack index hard fail", resp.Error)
 	}
 }
 
@@ -2459,27 +2449,13 @@ func setupMCPPackCache(t *testing.T) {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte(`
-version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: OpenAI
-    name: OpenAI
-    target: AI
-    renderable: true
-    components:
-      - id: OpenAI
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/OpenAI.yaml
-        path: ./rule-packs/blackmatrix7/OpenAI.yaml
-`)
-	if err := os.WriteFile(filepath.Join(cacheDir, "blackmatrix7.yaml"), data, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeMCPPackIndex(t, cacheDir, rules.PackCache{
+		Version:    1,
+		Source:     "blackmatrix7",
+		Adapter:    "blackmatrix7",
+		Renderable: true,
+		Packs:      []rules.Pack{mcpBlackmatrixPack("OpenAI", "AI")},
+	})
 	providerPath := filepath.Join(dir, ".runtime", "mihomo", "rule-packs", "blackmatrix7", "OpenAI.yaml")
 	if err := os.MkdirAll(filepath.Dir(providerPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -2504,21 +2480,62 @@ func writeMCPV2FlyTemplateCache(t *testing.T, cacheDir string) {
 		"category-dev",
 		"category-games",
 	}
-	var b strings.Builder
-	b.WriteString("version: 1\nsource: v2fly-dlc\nadapter: v2fly-dlc\nrenderable: true\npacks:\n")
+	packs := make([]rules.Pack, 0, len(ids))
 	for _, id := range ids {
-		b.WriteString("  - id: " + id + "\n")
-		b.WriteString("    name: " + id + "\n")
-		b.WriteString("    renderable: true\n")
-		b.WriteString("    components:\n")
-		b.WriteString("      - id: domain\n")
-		b.WriteString("        behavior: v2fly-dlc\n")
-		b.WriteString("        format: text\n")
-		b.WriteString("        order_class: domain\n")
-		b.WriteString("        url: https://example.com/" + id + "\n")
-		b.WriteString("        path: ./rule-packs/v2fly-dlc/" + id + ".txt\n")
+		packs = append(packs, mcpV2FlyPack(id, id))
 	}
-	writeMCPFile(t, filepath.Join(cacheDir, "v2fly-dlc.yaml"), b.String())
+	writeMCPPackIndex(t, cacheDir, rules.PackCache{
+		Version:    1,
+		Source:     "v2fly-dlc",
+		Adapter:    "v2fly-dlc",
+		Renderable: true,
+		Packs:      packs,
+	})
+}
+
+func writeMCPPackIndex(t *testing.T, cacheDir string, caches ...rules.PackCache) {
+	t.Helper()
+	bySource := make(map[string]rules.PackCache, len(caches))
+	for _, cache := range caches {
+		bySource[cache.Source] = cache
+	}
+	if err := rules.WritePackIndex(rules.PackIndexPath(cacheDir), bySource); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mcpV2FlyPack(id, target string) rules.Pack {
+	return rules.Pack{
+		ID:         id,
+		Name:       id,
+		Target:     target,
+		Renderable: true,
+		Components: []rules.Component{{
+			ID:         "domain",
+			Behavior:   "v2fly-dlc",
+			Format:     "text",
+			OrderClass: "domain",
+			URL:        "https://example.com/" + id,
+			Path:       "./rule-packs/v2fly-dlc/" + id + ".txt",
+		}},
+	}
+}
+
+func mcpBlackmatrixPack(id, target string) rules.Pack {
+	return rules.Pack{
+		ID:         id,
+		Name:       id,
+		Target:     target,
+		Renderable: true,
+		Components: []rules.Component{{
+			ID:         id,
+			Behavior:   "classical",
+			Format:     "yaml",
+			OrderClass: "mixed",
+			URL:        "https://example.com/" + id + ".yaml",
+			Path:       "./rule-packs/blackmatrix7/" + id + ".yaml",
+		}},
+	}
 }
 
 func writeMCPPolicyTemplateFixture(t *testing.T, dir string) {
@@ -2566,25 +2583,27 @@ func setupMCPPackRulesFixture(t *testing.T, providerBody string) (string, string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(providerBody))
 	}))
-	if err := rules.WritePackCache(cacheDir, rules.PackCache{
-		Version:    1,
-		Source:     "sukkaw",
-		Adapter:    "sukkaw",
-		Renderable: true,
-		Packs: []rules.Pack{
-			{
-				ID:         "ai",
-				Name:       "ai",
-				Target:     "AI",
-				Renderable: true,
-				Components: []rules.Component{
-					{
-						ID:         "non_ip",
-						Behavior:   "classical",
-						Format:     "text",
-						OrderClass: "non_ip",
-						URL:        server.URL + "/ai.txt",
-						Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+	if err := rules.WritePackIndex(rules.PackIndexPath(cacheDir), map[string]rules.PackCache{
+		"sukkaw": {
+			Version:    1,
+			Source:     "sukkaw",
+			Adapter:    "sukkaw",
+			Renderable: true,
+			Packs: []rules.Pack{
+				{
+					ID:         "ai",
+					Name:       "ai",
+					Target:     "AI",
+					Renderable: true,
+					Components: []rules.Component{
+						{
+							ID:         "non_ip",
+							Behavior:   "classical",
+							Format:     "text",
+							OrderClass: "non_ip",
+							URL:        server.URL + "/ai.txt",
+							Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+						},
 					},
 				},
 			},
@@ -2703,23 +2722,13 @@ modes:
 proxy_groups: {}
 enabled_packs: []
 `)
-	writeMCPFile(t, filepath.Join(paths.cache, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: OpenAI
-    name: OpenAI
-    target: AI
-    renderable: true
-    components:
-      - id: OpenAI
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/OpenAI.yaml
-        path: ./rule-packs/blackmatrix7/OpenAI.yaml
-`)
+	writeMCPPackIndex(t, paths.cache, rules.PackCache{
+		Version:    1,
+		Source:     "blackmatrix7",
+		Adapter:    "blackmatrix7",
+		Renderable: true,
+		Packs:      []rules.Pack{mcpBlackmatrixPack("OpenAI", "AI")},
+	})
 	return paths
 }
 

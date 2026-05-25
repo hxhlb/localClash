@@ -1245,6 +1245,7 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 			SubscriptionConfig:  in.SubscriptionConfig,
 			SubscriptionRuntime: in.SubscriptionRuntime,
 			RulesCache:          in.RulesCache,
+			OnStage:             localConfigTaskLogger(ctx, "resolve_localclash_config"),
 		})
 		if err != nil {
 			finishTaskStage(finish, err, nil)
@@ -1782,6 +1783,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		SubscriptionPath:    in.Merged,
 		SubscriptionConfig:  in.Config,
 		SubscriptionRuntime: in.RuntimeDir,
+		OnStage:             localConfigTaskLogger(ctx, "load_subscription_nodes_before"),
 	})
 	finishTaskStage(finish, nil, map[string]any{"node_count": len(beforeNodes)})
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
@@ -1803,6 +1805,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		SubscriptionPath:    in.Merged,
 		SubscriptionConfig:  in.Config,
 		SubscriptionRuntime: in.RuntimeDir,
+		OnStage:             localConfigTaskLogger(ctx, "load_subscription_nodes_after"),
 	})
 	finishTaskStage(finish, nil, map[string]any{"node_count": len(afterNodes)})
 	toolResultValue := subscriptionsRefreshToolResult{
@@ -1810,7 +1813,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
 	}
 	finish = startTaskStage(ctx, "evaluate_localclash_impact", map[string]any{"config": in.LocalClashConfig})
-	impact := s.evaluateLocalClashAfterRefresh(in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output)
+	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output)
 	finishTaskStage(finish, nil, map[string]any{"exists": impact.Exists, "state": impact.State, "valid": impact.Valid})
 	if impact.Exists {
 		toolResultValue.LocalClash = &impact
@@ -1899,7 +1902,7 @@ func buildNodeDiff(before, after []localconfig.SubscriptionNode) nodeDiff {
 	return diff
 }
 
-func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string) localClashRefreshImpact {
+func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string) localClashRefreshImpact {
 	impact := localClashRefreshImpact{ConfigPath: configPath, GeneratedConfig: outputPath, SelectionPath: selectionPath}
 	config, err := localconfig.Load(configPath)
 	if err != nil {
@@ -1918,6 +1921,7 @@ func (s *Server) evaluateLocalClashAfterRefresh(configPath, selectionPath, subsc
 		SubscriptionConfig:  subscriptionConfig,
 		SubscriptionRuntime: subscriptionRuntime,
 		RulesCache:          rulesCache,
+		OnStage:             localConfigTaskLogger(ctx, "evaluate_localclash_impact"),
 	})
 	if err != nil {
 		var missingNodes *localconfig.MissingNodesError
@@ -2261,6 +2265,16 @@ func configPlanTaskLogger(ctx context.Context) func(configplan.StageEvent) {
 	}
 }
 
+func localConfigTaskLogger(ctx context.Context, parent string) func(localconfig.StageEvent) {
+	return func(event localconfig.StageEvent) {
+		stage := event.Stage
+		if parent != "" {
+			stage = parent + "." + stage
+		}
+		logGenericStage(ctx, stage, event.Event, event.DurationMS, event.Error, event.Fields)
+	}
+}
+
 func subscriptionsTaskLogger(ctx context.Context) func(subscriptions.StageEvent) {
 	return func(event subscriptions.StageEvent) {
 		logGenericStage(ctx, event.Stage, event.Event, event.DurationMS, event.Error, event.Fields)
@@ -2559,8 +2573,16 @@ type configConfigureResult struct {
 }
 
 func validatePolicyTemplateConfig(config localconfig.Config, rulesCache string) error {
+	var packIndex *rules.PackIndex
+	if len(config.Packs) > 0 {
+		var err error
+		packIndex, err = rules.LoadPackIndex(rules.PackIndexPath(rulesCache))
+		if err != nil {
+			return err
+		}
+	}
 	for _, pack := range config.Packs {
-		ref, err := rules.ResolvePackRef(rulesCache, pack.ID)
+		ref, err := packIndex.ResolvePackRef(pack.ID)
 		if err != nil {
 			return fmt.Errorf("policy_template references unavailable pack %q: %w", pack.ID, err)
 		}

@@ -171,10 +171,13 @@ func Adapt(ctx context.Context, opts Options) ([]PackCache, error) {
 		if err != nil {
 			return nil, fmt.Errorf("adapt %s: %w", source.ID, err)
 		}
-		if err := WritePackCache(opts.CacheDir, cache); err != nil {
-			return nil, err
-		}
 		caches = append(caches, cache)
+	}
+	if err := WritePackIndex(PackIndexPath(opts.CacheDir), packCachesBySource(caches)); err != nil {
+		return nil, err
+	}
+	if err := removeLegacyPackCacheYAML(opts.CacheDir); err != nil {
+		return nil, err
 	}
 	return caches, nil
 }
@@ -185,7 +188,7 @@ func Render(opts Options) (Fragment, error) {
 	if err != nil {
 		return Fragment{}, err
 	}
-	caches, err := LoadPackCaches(opts.CacheDir)
+	index, err := LoadPackIndex(PackIndexPath(opts.CacheDir))
 	if err != nil {
 		return Fragment{}, err
 	}
@@ -193,7 +196,7 @@ func Render(opts Options) (Fragment, error) {
 	if err != nil {
 		return Fragment{}, err
 	}
-	return RenderFragment(selection, caches, proxyNames)
+	return RenderFragment(selection, index.Caches, proxyNames)
 }
 
 func LoadSources(dir string) ([]Source, error) {
@@ -247,41 +250,6 @@ func validateSource(source Source) error {
 		return fmt.Errorf("unknown adapter %q", source.Adapter)
 	}
 	return nil
-}
-
-func WritePackCache(dir string, cache PackCache) error {
-	data, err := yaml.Marshal(cache)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, cache.Source+".yaml"), data, 0o644)
-}
-
-func LoadPackCaches(dir string) (map[string]PackCache, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	caches := map[string]PackCache{}
-	for _, entry := range entries {
-		if shouldSkipYAMLFile(entry.Name(), entry.IsDir()) {
-			continue
-		}
-		path := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		var cache PackCache
-		if err := yaml.Unmarshal(data, &cache); err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		if cache.Source == "" {
-			return nil, fmt.Errorf("%s: source is required", path)
-		}
-		caches[cache.Source] = cache
-	}
-	return caches, nil
 }
 
 func shouldSkipYAMLFile(name string, isDir bool) bool {

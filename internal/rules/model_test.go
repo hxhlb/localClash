@@ -3,6 +3,7 @@ package rules
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -162,24 +163,42 @@ raw_base_url: https://example.com/raw
 	}
 }
 
-func TestLoadPackCachesIgnoresMacOSMetadataFiles(t *testing.T) {
+func TestLoadPackIndexReadsGobIndexOnly(t *testing.T) {
 	dir := t.TempDir()
-	if err := WritePackCache(dir, PackCache{Source: "blackmatrix7", Adapter: "blackmatrix7"}); err != nil {
+	if err := WritePackIndex(PackIndexPath(dir), map[string]PackCache{
+		"blackmatrix7": {
+			Source:  "blackmatrix7",
+			Adapter: "blackmatrix7",
+			Packs: []Pack{{
+				ID:         "OpenAI",
+				Name:       "OpenAI",
+				Target:     "AI",
+				Renderable: true,
+			}},
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "._blackmatrix7.yaml"), []byte{0, 5, 'b', 'a', 'd'}, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "blackmatrix7.yaml"), []byte("not valid cache yaml"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	caches, err := LoadPackCaches(dir)
+	index, err := LoadPackIndex(PackIndexPath(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(caches) != 1 {
-		t.Fatalf("caches = %+v, want one cache", caches)
+	if len(index.Caches) != 1 {
+		t.Fatalf("caches = %+v, want one cache", index.Caches)
 	}
-	if _, ok := caches["blackmatrix7"]; !ok {
-		t.Fatalf("caches = %+v, want blackmatrix7", caches)
+	if _, ok := index.Caches["blackmatrix7"]; !ok {
+		t.Fatalf("caches = %+v, want blackmatrix7", index.Caches)
+	}
+}
+
+func TestLoadPackIndexMissingGobIndexHardFailsFromCacheDir(t *testing.T) {
+	_, err := LoadPackIndex(PackIndexPath(t.TempDir()))
+	if err == nil || !strings.Contains(err.Error(), "pack index not found: run localclash rules adapt") {
+		t.Fatalf("err = %v, want missing pack index hard fail", err)
 	}
 }
 

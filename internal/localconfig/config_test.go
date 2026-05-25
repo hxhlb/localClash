@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"localclash/internal/rules"
 )
 
 func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
@@ -27,16 +30,7 @@ func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
     type: ss
 `)
 	rulesCache := filepath.Join(dir, "rules")
-	writeTestFile(t, filepath.Join(rulesCache, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: Steam
-    name: Steam
-    target: DIRECT
-    renderable: true
-`)
+	writeTestPackCache(t, rulesCache, "blackmatrix7", "blackmatrix7", testRulePack("Steam", "DIRECT"))
 
 	resolved, err := Resolve(ResolveOptions{
 		Config: Config{
@@ -182,16 +176,7 @@ func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
     type: ss
 `)
 	rulesCache := filepath.Join(dir, "rules")
-	writeTestFile(t, filepath.Join(rulesCache, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: Steam
-    name: Steam
-    target: DIRECT
-    renderable: true
-`)
+	writeTestPackCache(t, rulesCache, "blackmatrix7", "blackmatrix7", testRulePack("Steam", "DIRECT"))
 
 	resolved, err := Resolve(ResolveOptions{
 		Config: Config{
@@ -228,21 +213,18 @@ func TestResolveOptionalProxyGroupCanBeEmpty(t *testing.T) {
     type: ss
 `)
 	rulesCache := filepath.Join(dir, "rules")
-	writeTestFile(t, filepath.Join(rulesCache, "v2fly-dlc.yaml"), `version: 1
-source: v2fly-dlc
-adapter: v2fly-dlc
-renderable: true
-packs:
-  - id: steam
-    renderable: true
-    components:
-      - id: domain
-        behavior: v2fly-dlc
-        format: text
-        order_class: domain
-        url: https://example.com/steam
-        path: ./rule-packs/v2fly-dlc/steam.txt
-`)
+	writeTestPackCache(t, rulesCache, "v2fly-dlc", "v2fly-dlc", rules.Pack{
+		ID:         "steam",
+		Renderable: true,
+		Components: []rules.Component{{
+			ID:         "domain",
+			Behavior:   "v2fly-dlc",
+			Format:     "text",
+			OrderClass: "domain",
+			URL:        "https://example.com/steam",
+			Path:       "./rule-packs/v2fly-dlc/steam.txt",
+		}},
+	})
 
 	resolved, err := Resolve(ResolveOptions{
 		Config: Config{
@@ -317,6 +299,96 @@ func TestResolveProxyGroupRejectsAmbiguousMatchAndNodes(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Resolve succeeded, want ambiguous match/nodes error")
+	}
+}
+
+func TestResolveEmitsStageTimings(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash-subscriptions.yaml")
+	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
+	writeTestFile(t, configPath, `sources:
+  - id: main
+`)
+	writeTestFile(t, filepath.Join(runtimeDir, "main.yaml"), `proxies:
+  - name: HK 01
+    type: ss
+`)
+	rulesCache := filepath.Join(dir, "rules")
+	writeTestPackCache(t, rulesCache, "blackmatrix7", "blackmatrix7", testRulePack("Steam", "DIRECT"))
+
+	var events []StageEvent
+	_, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"香港节点": {Mode: "manual", Match: &Match{Type: "name_regex", Pattern: "HK"}},
+			},
+			PolicyGroups: map[string]PolicyGroup{
+				"Steam": {Mode: "manual", Exits: []string{"香港节点", "direct"}},
+			},
+			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "Steam"}},
+		},
+		SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
+		SubscriptionConfig:  configPath,
+		SubscriptionRuntime: runtimeDir,
+		RulesCache:          rulesCache,
+		OnStage: func(event StageEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	assertStageEvent(t, events, "load_subscription_nodes", "done")
+	assertStageEvent(t, events, "load_subscription_nodes.read_subscription_source_artifact", "done")
+	assertStageEvent(t, events, "resolve_proxy_group", "done")
+	assertStageEvent(t, events, "resolve_policy_group", "done")
+	assertStageEvent(t, events, "resolve_pack", "done")
+	assertStageEvent(t, events, "resolve_rule_providers", "done")
+}
+
+func assertStageEvent(t *testing.T, events []StageEvent, stage, event string) {
+	t.Helper()
+	for _, got := range events {
+		if got.Stage == stage && got.Event == event {
+			return
+		}
+	}
+	names := make([]string, 0, len(events))
+	for _, got := range events {
+		names = append(names, got.Stage+":"+got.Event)
+	}
+	t.Fatalf("missing stage event %s:%s in %s", stage, event, strings.Join(names, ", "))
+}
+
+func testRulePack(id, target string) rules.Pack {
+	return rules.Pack{
+		ID:         id,
+		Name:       id,
+		Target:     target,
+		Renderable: true,
+		Components: []rules.Component{{
+			ID:         id,
+			Behavior:   "classical",
+			Format:     "yaml",
+			OrderClass: "mixed",
+			URL:        "https://example.com/" + id + ".yaml",
+			Path:       "./rule-packs/test/" + id + ".yaml",
+		}},
+	}
+}
+
+func writeTestPackCache(t *testing.T, dir, source, adapter string, packs ...rules.Pack) {
+	t.Helper()
+	if err := rules.WritePackIndex(rules.PackIndexPath(dir), map[string]rules.PackCache{
+		source: {
+			Version:    1,
+			Source:     source,
+			Adapter:    adapter,
+			Renderable: true,
+			Packs:      packs,
+		},
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

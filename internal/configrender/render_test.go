@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"localclash/internal/configmeta"
+	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 )
 
@@ -573,36 +574,7 @@ modes:
 	if err := os.MkdirAll(paths.cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(paths.cacheDir, "sukkaw.yaml"), `version: 1
-source: sukkaw
-adapter: sukkaw
-renderable: true
-packs:
-  - id: ai
-    renderable: true
-    components:
-      - id: non_ip
-        behavior: classical
-        format: text
-        order_class: non_ip
-        url: https://ruleset.skk.moe/Clash/non_ip/ai.txt
-        path: ./rule-packs/sukkaw/ai_non_ip.txt
-`)
-	writeFile(t, filepath.Join(paths.cacheDir, "blackmatrix7.yaml"), `version: 1
-source: blackmatrix7
-adapter: blackmatrix7
-renderable: true
-packs:
-  - id: OpenAI
-    renderable: true
-    components:
-      - id: OpenAI
-        behavior: classical
-        format: yaml
-        order_class: mixed
-        url: https://example.com/OpenAI.yaml
-        path: ./rule-packs/blackmatrix7/OpenAI.yaml
-`)
+	writeRenderPackIndex(t, paths.cacheDir)
 	writeFile(t, paths.selection, `version: 1
 proxy_groups:
   AI:
@@ -618,6 +590,50 @@ enabled_packs:
     target: AI
 `)
 	return paths
+}
+
+func writeRenderPackIndex(t *testing.T, cacheDir string) {
+	t.Helper()
+	if err := rules.WritePackIndex(rules.PackIndexPath(cacheDir), map[string]rules.PackCache{
+		"sukkaw": {
+			Version:    1,
+			Source:     "sukkaw",
+			Adapter:    "sukkaw",
+			Renderable: true,
+			Packs: []rules.Pack{{
+				ID:         "ai",
+				Renderable: true,
+				Components: []rules.Component{{
+					ID:         "non_ip",
+					Behavior:   "classical",
+					Format:     "text",
+					OrderClass: "non_ip",
+					URL:        "https://ruleset.skk.moe/Clash/non_ip/ai.txt",
+					Path:       "./rule-packs/sukkaw/ai_non_ip.txt",
+				}},
+			}},
+		},
+		"blackmatrix7": {
+			Version:    1,
+			Source:     "blackmatrix7",
+			Adapter:    "blackmatrix7",
+			Renderable: true,
+			Packs: []rules.Pack{{
+				ID:         "OpenAI",
+				Renderable: true,
+				Components: []rules.Component{{
+					ID:         "OpenAI",
+					Behavior:   "classical",
+					Format:     "yaml",
+					OrderClass: "mixed",
+					URL:        "https://example.com/OpenAI.yaml",
+					Path:       "./rule-packs/blackmatrix7/OpenAI.yaml",
+				}},
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func writeFile(t *testing.T, path string, content string) {

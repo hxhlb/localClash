@@ -2,7 +2,6 @@ package rules
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -177,98 +176,37 @@ func AnnotatePackRuntime(detail PackDetail, runtimeDir string) PackDetail {
 }
 
 func LoadPackCatalog(cacheDir string) (PackCatalog, error) {
-	entries, err := loadCatalogEntries(cacheDir)
+	index, err := LoadPackIndex(PackIndexPath(cacheDir))
 	if err != nil {
 		return PackCatalog{}, err
 	}
-	catalog := PackCatalog{Details: map[string]PackDetail{}}
-	for _, entry := range entries {
-		summary := packSummary(entry)
-		detail := packDetail(entry)
-		catalog.Packs = append(catalog.Packs, summary)
-		catalog.Details[summary.ID] = detail
-	}
-	return catalog, nil
+	return index.Catalog, nil
 }
 
-func ResolvePackRef(cacheDir, id string) (PackRef, error) {
-	trimmed := strings.TrimSpace(id)
-	if trimmed == "" {
-		return PackRef{}, fmt.Errorf("pack id is required")
-	}
-	lookupID := trimmed
-	attr := ""
-	if base, suffix, ok := strings.Cut(trimmed, "@"); ok {
-		lookupID = base
-		attr = suffix
-		if err := validateGeoSiteAttr(attr); err != nil {
-			return PackRef{}, err
-		}
-	}
-	entries, err := loadCatalogEntries(cacheDir)
-	if err != nil {
-		return PackRef{}, err
-	}
-	for _, entry := range entries {
-		id := catalogPackID(entry.Cache.Source, entry.Pack.ID)
-		if packIDLookupEqual(id, lookupID) {
-			if attr == "" {
-				return packRef(entry), nil
-			}
-			if !packIsGeoSite(entry.Pack) {
-				return PackRef{}, fmt.Errorf("pack %q does not support geosite attribute %q", lookupID, attr)
-			}
-			ref := packRef(entry)
-			ref.ID = trimmed
-			ref.Pack = entry.Pack.ID + "@" + attr
-			ref.Name = ref.Pack
-			ref.RenderRuleTemplate = fmt.Sprintf("GEOSITE,%s,<target>", ref.Pack)
-			return ref, nil
-		}
-		for _, component := range entry.Pack.Components {
-			if providerName(entry.Cache.Source, entry.Pack.ID, component.ID) == trimmed {
-				return packRef(entry), nil
-			}
-		}
-	}
-	return PackRef{}, fmt.Errorf("pack %q not found in pack cache", trimmed)
-}
-
-func loadCatalogEntries(cacheDir string) ([]catalogEntry, error) {
-	normalized := NormalizeOptions(Options{CacheDir: cacheDir})
-	caches, err := LoadPackCaches(normalized.CacheDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("pack cache directory %q does not exist; run rules adapt first", normalized.CacheDir)
-		}
-		return nil, err
-	}
-
-	sources := make([]string, 0, len(caches))
-	for source := range caches {
-		sources = append(sources, source)
-	}
-	sort.Strings(sources)
-
+func catalogEntriesFromCaches(caches map[string]PackCache) ([]catalogEntry, error) {
 	var entries []catalogEntry
-	for _, source := range sources {
+	for _, source := range sortedPackCacheSources(caches) {
 		cache := caches[source]
 		packs := append([]Pack(nil), cache.Packs...)
-		sort.Slice(packs, func(i, j int) bool {
-			left, right := packDisplayName(packs[i]), packDisplayName(packs[j])
-			if left == right {
-				return packs[i].ID < packs[j].ID
-			}
-			return left < right
-		})
+		sortPacksByDisplay(packs)
 		for _, pack := range packs {
 			entries = append(entries, catalogEntry{Cache: cache, Pack: pack})
 		}
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("no packs found in %q; run rules adapt first", normalized.CacheDir)
+		return nil, fmt.Errorf("no packs found in pack cache; run rules adapt first")
 	}
 	return entries, nil
+}
+
+func sortPacksByDisplay(packs []Pack) {
+	sort.Slice(packs, func(i, j int) bool {
+		left, right := packDisplayName(packs[i]), packDisplayName(packs[j])
+		if left == right {
+			return packs[i].ID < packs[j].ID
+		}
+		return left < right
+	})
 }
 
 func packSummary(entry catalogEntry) PackSummary {

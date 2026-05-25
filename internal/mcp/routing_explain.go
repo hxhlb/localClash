@@ -161,6 +161,7 @@ func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (
 		SubscriptionConfig:  in.SubscriptionConfig,
 		SubscriptionRuntime: in.SubscriptionRuntime,
 		RulesCache:          in.RulesCache,
+		OnStage:             localConfigTaskLogger(ctx, "routing_explain.resolve_config"),
 	})
 	if resolveErr == nil {
 		result.Resolved = true
