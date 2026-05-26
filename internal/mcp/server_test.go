@@ -2053,7 +2053,7 @@ func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["queued"] != true || content["task_id"] == "" || content["log_file"] == "" {
+	if content["queued"] != true || content["task_id"] == "" || content["log_file"] == "" || content["diagnostics_dir"] == "" {
 		t.Fatalf("content = %+v, want queued task with log file", content)
 	}
 	nextActions := content["next_actions"].([]any)
@@ -2081,8 +2081,11 @@ func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}
-	if !strings.Contains(string(logText), `"event":"queued"`) || !strings.Contains(string(logText), `"event":"error"`) || !strings.Contains(string(logText), `"event":"stage_started"`) {
-		t.Fatalf("log = %s, want queued, stage_started, and error events", logText)
+	if !strings.Contains(string(logText), `"event":"queued"`) ||
+		!strings.Contains(string(logText), `"event":"error"`) ||
+		!strings.Contains(string(logText), `"event":"stage_started"`) ||
+		!strings.Contains(string(logText), `"event":"task_monitor_summary"`) {
+		t.Fatalf("log = %s, want queued, stage_started, task_monitor_summary, and error events", logText)
 	}
 }
 

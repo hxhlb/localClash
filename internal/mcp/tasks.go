@@ -20,12 +20,16 @@ type asyncToolInput struct {
 type taskLogContextKey struct{}
 
 type taskLogger struct {
-	tool string
-	path string
+	tool    string
+	path    string
+	monitor *taskMonitor
 }
 
 func (logger taskLogger) Append(event string, fields map[string]any) {
 	appendTaskLog(logger.path, event, logger.tool, fields)
+	if logger.monitor != nil {
+		logger.monitor.Record(event, fields)
+	}
 }
 
 func taskLoggerFromContext(ctx context.Context) (taskLogger, bool) {
@@ -73,24 +77,26 @@ func finishTaskStage(finish func(string, map[string]any), err error, fields map[
 }
 
 type asyncTaskResult struct {
-	Queued      bool     `json:"queued"`
-	TaskID      string   `json:"task_id"`
-	Tool        string   `json:"tool"`
-	Status      string   `json:"status"`
-	LogFile     string   `json:"log_file"`
-	StatusFile  string   `json:"status_file"`
-	StartedAt   string   `json:"started_at"`
-	NextActions []string `json:"next_actions"`
+	Queued         bool     `json:"queued"`
+	TaskID         string   `json:"task_id"`
+	Tool           string   `json:"tool"`
+	Status         string   `json:"status"`
+	LogFile        string   `json:"log_file"`
+	StatusFile     string   `json:"status_file"`
+	DiagnosticsDir string   `json:"diagnostics_dir"`
+	StartedAt      string   `json:"started_at"`
+	NextActions    []string `json:"next_actions"`
 }
 
 type asyncTaskStatus struct {
-	TaskID     string `json:"task_id"`
-	Tool       string `json:"tool"`
-	Status     string `json:"status"`
-	StartedAt  string `json:"started_at"`
-	FinishedAt string `json:"finished_at,omitempty"`
-	LogFile    string `json:"log_file"`
-	Error      string `json:"error,omitempty"`
+	TaskID         string `json:"task_id"`
+	Tool           string `json:"tool"`
+	Status         string `json:"status"`
+	StartedAt      string `json:"started_at"`
+	FinishedAt     string `json:"finished_at,omitempty"`
+	LogFile        string `json:"log_file"`
+	DiagnosticsDir string `json:"diagnostics_dir"`
+	Error          string `json:"error,omitempty"`
 }
 
 func (s *Server) callMaybeAsyncTool(ctx context.Context, tool string, args json.RawMessage, run asyncToolFunc) (toolResult, error) {
@@ -127,12 +133,14 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 	}
 	logFile := filepath.Join(dir, taskID+".log")
 	statusFile := filepath.Join(dir, taskID+".json")
+	diagnosticsDir := s.taskDiagnosticsDir(taskID)
 	status := asyncTaskStatus{
-		TaskID:    taskID,
-		Tool:      tool,
-		Status:    "queued",
-		StartedAt: now.Format(time.RFC3339),
-		LogFile:   logFile,
+		TaskID:         taskID,
+		Tool:           tool,
+		Status:         "queued",
+		StartedAt:      now.Format(time.RFC3339),
+		LogFile:        logFile,
+		DiagnosticsDir: diagnosticsDir,
 	}
 	if err := writeTaskStatus(statusFile, status); err != nil {
 		return asyncTaskResult{}, err
@@ -140,15 +148,24 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 	appendTaskLog(logFile, "queued", tool, nil)
 
 	go func() {
+		monitor := newTaskMonitor(taskMonitorOptions{
+			TaskID:         taskID,
+			Tool:           tool,
+			LogFile:        logFile,
+			DiagnosticsDir: diagnosticsDir,
+		})
+		monitor.Start()
+		defer monitor.Stop()
 		status.Status = "running"
 		_ = writeTaskStatus(statusFile, status)
 		appendTaskLog(logFile, "started", tool, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		ctx = context.WithValue(ctx, taskLogContextKey{}, taskLogger{tool: tool, path: logFile})
+		ctx = context.WithValue(ctx, taskLogContextKey{}, taskLogger{tool: tool, path: logFile, monitor: monitor})
 		result, err := run(ctx, args)
 		finished := time.Now().UTC()
 		status.FinishedAt = finished.Format(time.RFC3339)
+		appendTaskLog(logFile, "task_monitor_summary", tool, monitor.SummaryFields())
 		if err != nil {
 			status.Status = "error"
 			status.Error = err.Error()
@@ -175,16 +192,18 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 	}()
 
 	return asyncTaskResult{
-		Queued:     true,
-		TaskID:     taskID,
-		Tool:       tool,
-		Status:     "queued",
-		LogFile:    logFile,
-		StatusFile: statusFile,
-		StartedAt:  status.StartedAt,
+		Queued:         true,
+		TaskID:         taskID,
+		Tool:           tool,
+		Status:         "queued",
+		LogFile:        logFile,
+		StatusFile:     statusFile,
+		DiagnosticsDir: diagnosticsDir,
+		StartedAt:      status.StartedAt,
 		NextActions: []string{
 			fmt.Sprintf("call nl_file with path %q to watch readable task progress", logFile),
 			fmt.Sprintf("call nl_file with path %q to read machine-readable task status", statusFile),
+			fmt.Sprintf("if task log reports diagnostics_written=true, inspect files under %q", diagnosticsDir),
 			"do not assume the operation is complete until the task log says done or error",
 		},
 	}, nil
@@ -201,6 +220,15 @@ func (s *Server) taskLogDir() string {
 		}
 	}
 	return filepath.Join(".runtime", "mcp-tasks")
+}
+
+func (s *Server) taskDiagnosticsDir(taskID string) string {
+	logDir := s.taskLogDir()
+	parent := filepath.Dir(logDir)
+	if parent == "." || parent == "" {
+		parent = ".runtime"
+	}
+	return filepath.Join(parent, "diagnostics", taskID)
 }
 
 func sanitizeTaskTool(tool string) string {
