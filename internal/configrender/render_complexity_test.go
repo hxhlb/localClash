@@ -15,7 +15,7 @@ func TestRenderEmitsSelectionComplexityCounters(t *testing.T) {
 			map[string]any{"name": "JP 01", "type": "ss"},
 		},
 	}
-	policyPath := filepath.Join(dir, "policy.yaml")
+	policyPath := filepath.Join(dir, "policy.json")
 	writeFile(t, policyPath, `groups:
   manual: MANUAL
   auto: AUTO
@@ -34,7 +34,7 @@ modes:
   blacklist:
     fallback: direct
 `)
-	runtimePath := filepath.Join(dir, "runtime.yaml")
+	runtimePath := filepath.Join(dir, "runtime.json")
 	writeFile(t, runtimePath, `version: 1
 mode: router
 core: meta
@@ -56,7 +56,7 @@ meta:
 	var events []StageEvent
 
 	_, err := Render(Options{
-		SourcePath:         filepath.Join(dir, "subscription.yaml"),
+		SourcePath:         filepath.Join(dir, "subscription.gob"),
 		Source:             source,
 		PolicyPath:         policyPath,
 		OutputPath:         filepath.Join(dir, "generated", "mihomo.yaml"),

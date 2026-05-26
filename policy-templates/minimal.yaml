@@ -1,9 +1,0 @@
-id: minimal
-name: Minimal
-description: Use localClash safety baseline and base policy only; intended for advanced manual customization.
-config:
-  version: 1
-  policy_template: minimal
-  proxy_groups: {}
-  packs: []
-

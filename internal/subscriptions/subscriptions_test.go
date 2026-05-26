@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,14 +11,16 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestStatusNoConfig(t *testing.T) {
 	dir := t.TempDir()
 
 	result, err := Status(StatusOptions{
-		ConfigPath: filepath.Join(dir, "localclash-subscriptions.yaml"),
-		MergedPath: filepath.Join(dir, "subscription.yaml"),
+		ConfigPath: filepath.Join(dir, "localclash-subscriptions.json"),
+		MergedPath: filepath.Join(dir, "subscription.gob"),
 		RuntimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
 	})
 	if err != nil {
@@ -33,8 +36,8 @@ func TestStatusNoConfig(t *testing.T) {
 
 func TestStatusConfigExistsArtifactsMissingAndMergedCounts(t *testing.T) {
 	dir := t.TempDir()
-	config := filepath.Join(dir, "localclash-subscriptions.yaml")
-	merged := filepath.Join(dir, "subscription.yaml")
+	config := filepath.Join(dir, "localclash-subscriptions.json")
+	merged := filepath.Join(dir, "subscription.gob")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
 	writeTestFile(t, config, `version: 1
 sources:
@@ -74,7 +77,7 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	url2 := "https://example.net/path/profile?token=backup-secret"
 
 	result, err := Configure(ConfigureOptions{
-		ConfigPath: filepath.Join(dir, "localclash-subscriptions.yaml"),
+		ConfigPath: filepath.Join(dir, "localclash-subscriptions.json"),
 		Replace:    &replace,
 		URLs:       []string{url1, url2},
 	})
@@ -87,7 +90,7 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	if result.Sources[0].ID != mustSourceID(t, url1) || result.Sources[1].ID != mustSourceID(t, url2) {
 		t.Fatalf("source ids = %+v, want generated short hash ids", result.Sources)
 	}
-	data := readTestFile(t, filepath.Join(dir, "localclash-subscriptions.yaml"))
+	data := readTestFile(t, filepath.Join(dir, "localclash-subscriptions.json"))
 	if !strings.Contains(data, "secret-token") {
 		t.Fatal("config should contain the real URL token on disk")
 	}
@@ -102,12 +105,12 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 	}{
 		{name: "empty", urls: nil},
 		{name: "duplicate url", urls: []string{"https://example.com/sub", "https://example.com/sub"}},
-		{name: "bad scheme", urls: []string{"file:///tmp/sub.yaml"}},
+		{name: "bad scheme", urls: []string{"file:///tmp/sub.json"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Configure(ConfigureOptions{
-				ConfigPath: filepath.Join(dir, tt.name+".yaml"),
+				ConfigPath: filepath.Join(dir, tt.name+".gob"),
 				URLs:       tt.urls,
 			})
 			if err == nil {
@@ -176,8 +179,8 @@ rules:
 	if len(result.Sources) != 2 {
 		t.Fatalf("sources = %+v, want two summaries", result.Sources)
 	}
-	assertFileExists(t, filepath.Join(paths.runtimeDir, primaryID+".yaml"))
-	assertFileExists(t, filepath.Join(paths.runtimeDir, backupID+".yaml"))
+	assertFileExists(t, filepath.Join(paths.runtimeDir, primaryID+".gob"))
+	assertFileExists(t, filepath.Join(paths.runtimeDir, backupID+".gob"))
 	assertFileExists(t, paths.merged)
 	if result.Merged.ProxiesCount != 3 || result.Merged.RenamedProxiesCount != 3 {
 		t.Fatalf("merged = %+v, want 3 proxies and 3 renamed", result.Merged)
@@ -267,7 +270,7 @@ proxies:
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifact := readTestFile(t, filepath.Join(paths.runtimeDir, id+".yaml"))
+	artifact := readTestFile(t, filepath.Join(paths.runtimeDir, id+".gob"))
 	if !strings.Contains(artifact, "# raw marker should be preserved") {
 		t.Fatalf("artifact did not preserve raw subscription body:\n%s", artifact)
 	}
@@ -380,9 +383,9 @@ func writeRefreshConfig(t *testing.T, sources []Source) refreshPaths {
 	dir := t.TempDir()
 	paths := refreshPaths{
 		dir:        dir,
-		config:     filepath.Join(dir, "localclash-subscriptions.yaml"),
+		config:     filepath.Join(dir, "localclash-subscriptions.json"),
 		runtimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
-		merged:     filepath.Join(dir, "subscription.yaml"),
+		merged:     filepath.Join(dir, "subscription.gob"),
 	}
 	urls := make([]string, 0, len(sources))
 	for _, source := range sources {
@@ -400,13 +403,67 @@ func writeTestFile(t *testing.T, path, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodeErr := gob.NewEncoder(file).Encode(subscriptionArtifact{Version: 1, Data: doc, Raw: []byte(content)})
+		closeErr := file.Close()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func readTestFile(t *testing.T, path string) string {
 	t.Helper()
+	if filepath.Ext(path) == ".gob" {
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		var artifact subscriptionArtifact
+		if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
+			t.Fatal(err)
+		}
+		if len(artifact.Raw) > 0 {
+			return string(artifact.Raw)
+		}
+		data, err := yaml.Marshal(artifact.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

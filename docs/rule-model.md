@@ -66,15 +66,17 @@ highest user-controlled precedence, below only the safety baseline.
 
 Examples:
 
-```yaml
-overrides:
-  direct:
-    domains:
-      - nas.home.arpa
-      - printer.lan
-  proxy:
-    domains:
-      - example-work-service.com
+```json
+{
+  "overrides": {
+    "direct": {
+      "domains": ["nas.home.arpa", "printer.lan"]
+    },
+    "proxy": {
+      "domains": ["example-work-service.com"]
+    }
+  }
+}
 ```
 
 Overrides are for small, concrete fixes. They should not become a hidden
@@ -103,35 +105,35 @@ providers when that becomes necessary.
 
 First version schema:
 
-```yaml
-id: ai
-name: AI Services
-description: Route common AI services through a selected target.
-version: 1
-default_target: proxy
-target_options:
-  - proxy
-  - direct
-  - manual
-  - smart
-rules:
-  - domain_suffix: openai.com
-  - domain_suffix: chatgpt.com
-  - domain_suffix: anthropic.com
+```json
+{
+  "id": "ai",
+  "name": "AI Services",
+  "description": "Route common AI services through a selected target.",
+  "version": 1,
+  "default_target": "proxy",
+  "target_options": ["proxy", "direct", "manual", "smart"],
+  "rules": [
+    {"domain_suffix": "openai.com"},
+    {"domain_suffix": "chatgpt.com"},
+    {"domain_suffix": "anthropic.com"}
+  ]
+}
 ```
 
 Local user selection should live in localClash config, for example:
 
-```yaml
-base_preset:
-  id: loyalsoldier
-  mode: whitelist
-
-enabled_rule_packs:
-  - id: ai
-    target: proxy
-  - id: ads
-    target: reject
+```json
+{
+  "base_preset": {
+    "id": "loyalsoldier",
+    "mode": "whitelist"
+  },
+  "enabled_rule_packs": [
+    {"id": "ai", "target": "proxy"},
+    {"id": "ads", "target": "reject"}
+  ]
+}
 ```
 
 The UI should save this localClash config and trigger a render. It should not
@@ -221,7 +223,7 @@ runtime rules.
 Current code already has:
 
 - built-in local safety baseline in `internal/configrender/render.go`
-- Loyalsoldier policy preset in `policies/loyalsoldier.yaml`
+- Loyalsoldier policy preset in `policies/loyalsoldier.json`
 - whitelist and blacklist modes
 - generated Mihomo config under `generated/`
 - doctor checks for baseline injection, rule targets, provider references, and
@@ -236,7 +238,7 @@ Current code now has:
 - disk-backed `minimal` and `localclash-default` policy templates under
   `policy-templates/`; `localclash-default` is a patch-set manifest whose
   ordered files under `policy-templates/localclash-default.d/` are merged during
-  initialization into the same durable `localclash.yaml` intent model that MCP
+  initialization into the same durable `localclash.json` intent model that MCP
   patches use
 - default patch files for region exits, direct baselines,
   communication/social/Telegram routing (including Telegram IP CIDR ranges),
@@ -275,7 +277,7 @@ Agents should not infer active default rules from
 truncated and often dominated by the local safety baseline.
 
 Use the read-only MCP `routing_explain` tool for compact routing discovery.
-It reads durable `localclash.yaml` intent and returns matching packs, policy
+It reads durable `localclash.json` intent and returns matching packs, policy
 groups, reusable exit groups, optional cached provider-rule evidence, and the
 safe reviewed patch path. Example queries:
 
@@ -301,7 +303,7 @@ Build this in small steps:
    editing YAML directly.
 2. Add read-only MCP routing discovery tools so Agents can inspect default
    business groups without parsing the full `config_status` payload.
-3. Add declarative `rule-packs/*.yaml` for localClash-owned reusable packs.
+3. Add declarative `rule-packs/*.json` for localClash-owned reusable packs.
 4. Add doctor checks for pack parsing, custom rule validity, target validity,
    and missing providers.
 5. Add CLI flags for config path and dry-run diff.

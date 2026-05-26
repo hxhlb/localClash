@@ -14,7 +14,7 @@
 
 - `subscriptions_status`：看訂閱來源與本地 effective subscription 狀態。
 - `subscriptions_configure`：寫入訂閱來源，不立即刷新。
-- `subscriptions_refresh`：下載訂閱、生成本地 artifact、合併成 `subscription.yaml`。
+- `subscriptions_refresh`：下載訂閱、生成本地 artifact、合併成 `subscription.gob`。
 - `subscription_nodes_list`：列出節點摘要。
 - `subscription_nodes_search`：按名稱搜尋節點。
 
@@ -32,7 +32,7 @@
 
 **4. 配置狀態、構建與 Patch 工作流**
 
-- `config_status`：看 `localclash.yaml`、`generated/mihomo.yaml`、render readiness、patch 狀態。預設輕量，`resolve=true/detail=true` 才做重查。
+- `config_status`：看 `localclash.json`、`generated/mihomo.yaml`、render readiness、patch 狀態。預設輕量，`resolve=true/detail=true` 才做重查。
 - `config_configure`：改核心、runtime profile、policy template。
 - `proxy_group_build`：建立出口組，例如 HK/JP/US/AUTO。
 - `policy_group_build`：建立業務組，例如 Steam -> HK/JP/US。

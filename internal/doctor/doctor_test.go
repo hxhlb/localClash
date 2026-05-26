@@ -94,7 +94,7 @@ func TestAggregateStatus(t *testing.T) {
 	}
 }
 
-func TestCheckYAMLFileMissingPathIncludesResolvedPath(t *testing.T) {
+func TestCheckConfigFileMissingPathIncludesResolvedPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
@@ -104,14 +104,14 @@ func TestCheckYAMLFileMissingPathIncludesResolvedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := checkYAMLFile("policy", "policy", filepath.Join("policies", "loyalsoldier.yaml"))
+	check := checkConfigFile("policy", "policy", filepath.Join("policies", "loyalsoldier.json"))
 	if check.Status != statusFail {
 		t.Fatalf("status = %s, want %s", check.Status, statusFail)
 	}
 	details := strings.Join(check.Details, "\n")
 	for _, want := range []string{
 		"working directory: " + dir,
-		"resolved path: " + filepath.Join(dir, "policies", "loyalsoldier.yaml"),
+		"resolved path: " + filepath.Join(dir, "policies", "loyalsoldier.json"),
 	} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("details = %q, want %q", details, want)

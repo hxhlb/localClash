@@ -1,7 +1,9 @@
 package runtimeprofile
 
 import (
+	"bytes"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,15 +11,13 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
-//go:embed profiles/*.default.yaml
+//go:embed profiles/*.default.json
 var defaultProfileFS embed.FS
 
 const (
-	DefaultPath = "localclash-runtime.yaml"
+	DefaultPath = "localclash-runtime.json"
 	ModeNormal  = "normal"
 	ModeRouter  = "router"
 	CoreMeta    = "meta"
@@ -118,7 +118,7 @@ func Load(path string) (File, bool, error) {
 
 func parseFile(path string, data []byte) (File, error) {
 	var disk diskFile
-	if err := yaml.Unmarshal(data, &disk); err != nil {
+	if err := json.Unmarshal(data, &disk); err != nil {
 		return File{}, err
 	}
 	file, err := materializeDiskFile(path, normalizeDiskFile(disk))
@@ -374,7 +374,7 @@ func defaultProfileBytes(mode string) []byte {
 
 func readEmbeddedDefaultProfile(mode string) (Profile, error) {
 	var profile Profile
-	if err := yaml.Unmarshal(defaultProfileBytes(mode), &profile); err != nil {
+	if err := decodeJSON(defaultProfileBytes(mode), &profile); err != nil {
 		return Profile{}, err
 	}
 	return profile, nil
@@ -386,18 +386,68 @@ func readProfileFile(path string) (Profile, error) {
 		return Profile{}, err
 	}
 	var profile Profile
-	if err := yaml.Unmarshal(data, &profile); err != nil {
+	if err := decodeJSON(data, &profile); err != nil {
 		return Profile{}, err
 	}
 	return profile, nil
 }
 
+func decodeJSON(data []byte, out any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(out); err != nil {
+		return err
+	}
+	normalizeJSONNumbers(out)
+	return nil
+}
+
+func normalizeJSONNumbers(value any) any {
+	switch typed := value.(type) {
+	case *Profile:
+		typed.Mihomo = normalizeJSONNumbers(typed.Mihomo).(map[string]any)
+		typed.Deploy = normalizeOptionalMap(typed.Deploy)
+	case *File:
+		for key, profile := range typed.Profiles {
+			profile.Mihomo = normalizeJSONNumbers(profile.Mihomo).(map[string]any)
+			profile.Deploy = normalizeOptionalMap(profile.Deploy)
+			typed.Profiles[key] = profile
+		}
+	case map[string]any:
+		for key, item := range typed {
+			typed[key] = normalizeJSONNumbers(item)
+		}
+		return typed
+	case []any:
+		for i, item := range typed {
+			typed[i] = normalizeJSONNumbers(item)
+		}
+		return typed
+	case json.Number:
+		if i, err := typed.Int64(); err == nil {
+			return int(i)
+		}
+		if f, err := typed.Float64(); err == nil {
+			return f
+		}
+		return typed.String()
+	}
+	return value
+}
+
+func normalizeOptionalMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	return normalizeJSONNumbers(in).(map[string]any)
+}
+
 func defaultProfileRelPath(mode string) string {
-	return filepath.Join("profiles", mode+".default.yaml")
+	return filepath.Join("profiles", mode+".default.json")
 }
 
 func userProfileRelPath(mode string) string {
-	return filepath.Join("profiles", mode+".yaml")
+	return filepath.Join("profiles", mode+".json")
 }
 
 func resolveRuntimePath(baseDir, path string) string {
@@ -467,7 +517,7 @@ func write(path string, file File) error {
 		}
 		disk.Profiles[name] = profileRef{Path: profilePath}
 	}
-	data, err := yaml.Marshal(disk)
+	data, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
 	}

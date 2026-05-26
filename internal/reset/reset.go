@@ -79,13 +79,13 @@ func BuildPlan() ([]Target, error) {
 	paths := []Target{
 		{Path: ".runtime", Kind: "directory"},
 		{Path: "generated", Kind: "directory"},
-		{Path: "localclash.yaml", Kind: "file"},
-		{Path: "localclash-packs.yaml", Kind: "file"},
-		{Path: "localclash-subscriptions.yaml", Kind: "file"},
-		{Path: "localclash-runtime.yaml", Kind: "file"},
+		{Path: "localclash.json", Kind: "file"},
+		{Path: "localclash-packs.gob", Kind: "file"},
+		{Path: "localclash-subscriptions.json", Kind: "file"},
+		{Path: "localclash-runtime.json", Kind: "file"},
 		{Path: "profiles", Kind: "directory"},
 	}
-	subscriptions, err := filepath.Glob("subscription*.yaml")
+	subscriptions, err := filepath.Glob("subscription*.gob")
 	if err != nil {
 		return nil, err
 	}

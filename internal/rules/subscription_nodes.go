@@ -1,12 +1,11 @@
 package rules
 
 import (
+	"encoding/gob"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 type SubscriptionNodesListOptions struct {
@@ -50,7 +49,7 @@ type safeSubscriptionNode struct {
 }
 
 func ListSubscriptionNodes(opts SubscriptionNodesListOptions) (SubscriptionNodesResult, error) {
-	subscription := defaultString(opts.Subscription, "subscription.yaml")
+	subscription := defaultString(opts.Subscription, "subscription.gob")
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 100
@@ -72,7 +71,7 @@ func ListSubscriptionNodes(opts SubscriptionNodesListOptions) (SubscriptionNodes
 }
 
 func SearchSubscriptionNodes(opts SubscriptionNodesSearchOptions) (SubscriptionNodesResult, error) {
-	subscription := defaultString(opts.Subscription, "subscription.yaml")
+	subscription := defaultString(opts.Subscription, "subscription.gob")
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 50
@@ -114,14 +113,25 @@ func SearchSubscriptionNodes(opts SubscriptionNodesSearchOptions) (SubscriptionN
 }
 
 func loadSafeSubscriptionNodes(path string) ([]safeSubscriptionNode, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	var source map[string]any
-	if err := yaml.Unmarshal(data, &source); err != nil {
+	defer file.Close()
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
+	var artifact struct {
+		Version int
+		Data    map[string]any
+		Raw     []byte
+	}
+	if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
 		return nil, err
 	}
+	if artifact.Version != 1 {
+		return nil, fmt.Errorf("subscription artifact schema version mismatch: expected 1, got %d; run localclash subscriptions refresh", artifact.Version)
+	}
+	source := artifact.Data
 	raw, ok := source["proxies"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("subscription %q has no proxies", path)

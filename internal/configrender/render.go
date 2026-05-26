@@ -1,6 +1,8 @@
 package configrender
 
 import (
+	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,42 +52,42 @@ type Result struct {
 
 type policy struct {
 	RuleSource struct {
-		BaseURL        string `yaml:"base_url"`
-		PrimaryBaseURL string `yaml:"primary_base_url"`
-		UpdateInterval int    `yaml:"update_interval"`
-	} `yaml:"rule_source"`
-	Groups          map[string]string             `yaml:"groups"`
-	ProviderMapping map[string]providerDefinition `yaml:"provider_mapping"`
-	Modes           policyModes                   `yaml:"modes"`
+		BaseURL        string `json:"base_url"`
+		PrimaryBaseURL string `json:"primary_base_url"`
+		UpdateInterval int    `json:"update_interval"`
+	} `json:"rule_source"`
+	Groups          map[string]string             `json:"groups"`
+	ProviderMapping map[string]providerDefinition `json:"provider_mapping"`
+	Modes           policyModes                   `json:"modes"`
 }
 
 type policyModes struct {
-	Default   string     `yaml:"default"`
-	Whitelist policyMode `yaml:"whitelist"`
-	Blacklist policyMode `yaml:"blacklist"`
+	Default   string     `json:"default"`
+	Whitelist policyMode `json:"whitelist"`
+	Blacklist policyMode `json:"blacklist"`
 }
 
 type policyMode struct {
-	Fallback string     `yaml:"fallback"`
-	Rules    []ruleSpec `yaml:"rules"`
+	Fallback string     `json:"fallback"`
+	Rules    []ruleSpec `json:"rules"`
 }
 
 type providerDefinition struct {
-	Path     string `yaml:"path"`
-	Behavior string `yaml:"behavior"`
-	Target   string `yaml:"target"`
+	Path     string `json:"path"`
+	Behavior string `json:"behavior"`
+	Target   string `json:"target"`
 }
 
 type ruleSpec struct {
-	Provider     string `yaml:"provider,omitempty"`
-	Domain       string `yaml:"domain,omitempty"`
-	DomainSuffix string `yaml:"domain_suffix,omitempty"`
-	IPCIDR       string `yaml:"ip_cidr,omitempty"`
-	IPCIDR6      string `yaml:"ip_cidr6,omitempty"`
-	GeoIP        string `yaml:"geoip,omitempty"`
-	Match        bool   `yaml:"match,omitempty"`
-	Target       string `yaml:"target"`
-	NoResolve    bool   `yaml:"no_resolve,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Domain       string `json:"domain,omitempty"`
+	DomainSuffix string `json:"domain_suffix,omitempty"`
+	IPCIDR       string `json:"ip_cidr,omitempty"`
+	IPCIDR6      string `json:"ip_cidr6,omitempty"`
+	GeoIP        string `json:"geoip,omitempty"`
+	Match        bool   `json:"match,omitempty"`
+	Target       string `json:"target"`
+	NoResolve    bool   `json:"no_resolve,omitempty"`
 }
 
 var localBaselineRules = []ruleSpec{
@@ -128,7 +130,7 @@ func Render(opts Options) (Result, error) {
 	source := opts.Source
 	var err error
 	if source == nil {
-		source, err = readYAMLMap(opts.SourcePath)
+		source, err = readGobMap(opts.SourcePath)
 		if err != nil {
 			finish(err, nil)
 			return Result{}, err
@@ -454,10 +456,10 @@ func stringValue(value any) string {
 
 func normalizeOptions(opts Options) Options {
 	if opts.SourcePath == "" {
-		opts.SourcePath = "subscription.yaml"
+		opts.SourcePath = "subscription.gob"
 	}
 	if opts.PolicyPath == "" {
-		opts.PolicyPath = "policies/loyalsoldier.yaml"
+		opts.PolicyPath = "policies/loyalsoldier.json"
 	}
 	if opts.OutputPath == "" {
 		opts.OutputPath = "generated/mihomo.yaml"
@@ -490,16 +492,26 @@ func ensureOutput(path string, force bool) error {
 	return nil
 }
 
-func readYAMLMap(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
+func readGobMap(path string) (map[string]any, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	var out map[string]any
-	if err := yaml.Unmarshal(data, &out); err != nil {
+	defer file.Close()
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
+	var artifact struct {
+		Version int
+		Data    map[string]any
+		Raw     []byte
+	}
+	if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
 		return nil, err
 	}
-	return out, nil
+	if artifact.Version != 1 {
+		return nil, fmt.Errorf("subscription artifact schema version mismatch: expected 1, got %d; run localclash subscriptions refresh", artifact.Version)
+	}
+	return artifact.Data, nil
 }
 
 func readPolicy(path string) (policy, error) {
@@ -508,7 +520,7 @@ func readPolicy(path string) (policy, error) {
 		return policy{}, err
 	}
 	var pol policy
-	if err := yaml.Unmarshal(data, &pol); err != nil {
+	if err := json.Unmarshal(data, &pol); err != nil {
 		return policy{}, err
 	}
 	if len(pol.Groups) == 0 {

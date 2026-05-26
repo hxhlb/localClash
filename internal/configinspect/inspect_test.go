@@ -1,6 +1,7 @@
 package configinspect
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"localclash/internal/rules"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestInspectBaseReturnsBaseSummary(t *testing.T) {
@@ -108,7 +111,7 @@ func TestInspectOverlayWithEmptyMetadataReturnsNoOverlay(t *testing.T) {
 }
 
 func TestInspectIntentMissingConfigReturnsEmptyIntent(t *testing.T) {
-	result, err := InspectIntent(IntentOptions{ConfigPath: filepath.Join(t.TempDir(), "localclash.yaml")})
+	result, err := InspectIntent(IntentOptions{ConfigPath: filepath.Join(t.TempDir(), "localclash.json")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,8 +125,8 @@ func TestInspectIntentMissingConfigReturnsEmptyIntent(t *testing.T) {
 
 func TestInspectIntentReturnsResolvedDurableIntent(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.yaml")
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	configPath := filepath.Join(dir, "localclash.json")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	rulesCache := filepath.Join(dir, ".runtime", "rules", "packs")
 	writeInspectFile(t, configPath, `version: 1
 proxy_groups:
@@ -194,8 +197,8 @@ packs:
 
 func TestInspectIntentReportsResolveErrorWithoutLosingRawGroups(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.yaml")
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	configPath := filepath.Join(dir, "localclash.json")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeInspectFile(t, configPath, `version: 1
 proxy_groups:
   TempLine:
@@ -308,7 +311,46 @@ func writeInspectFile(t *testing.T, path string, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodeErr := gob.NewEncoder(file).Encode(struct {
+			Version int
+			Data    map[string]any
+			Raw     []byte
+		}{Version: 1, Data: doc, Raw: []byte(content)})
+		closeErr := file.Close()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

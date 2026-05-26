@@ -76,7 +76,7 @@ Flags for core download:
 
 Flags for subscription download:
   --url string          subscription URL
-  --output string       output file path (default subscription.yaml)
+  --output string       output file path (default subscription.gob)
   --user-agent string   subscription User-Agent (default "clash-verge/v1.5.1")
   --force              overwrite output if it exists
 
@@ -88,20 +88,20 @@ Flags for dashboard download:
   --force           replace output directory if it exists
 
 Flags for config render:
-  --source string   downloaded subscription source YAML (default "subscription.yaml")
-  --policy string   localClash policy YAML (default "policies/loyalsoldier.yaml")
+  --source string   downloaded subscription gob (default "subscription.gob")
+  --policy string   localClash policy JSON (default "policies/loyalsoldier.json")
   --mode string     policy mode; empty means policy default
   --output string   generated Mihomo config path (default "generated/mihomo.yaml")
   --packs-selection string
-                 packs selection YAML; optional
+                 packs selection gob; optional
   --rules-cache string
                  runtime pack cache directory (default ".runtime/rules/packs")
   --runtime-profile string
-                 runtime profile YAML (default "localclash-runtime.yaml")
+                 runtime profile JSON (default "localclash-runtime.json")
   --force          overwrite output if it exists
 
 Flags for rules adapt:
-  --sources string  rule source YAML directory (default "rule-sources")
+  --sources string  rule source JSON directory (default "rule-sources")
   --cache string    runtime pack cache directory (default ".runtime/rules/packs")
 
 Flags for rules index-dump:
@@ -110,9 +110,9 @@ Flags for rules index-dump:
   --output string   output path, or "-" for stdout (default "-")
 
 Flags for rules render:
-  --selection string  packs selection YAML (default "localclash-packs.yaml")
+  --selection string  packs selection gob (default "localclash-packs.gob")
   --subscription string
-                    subscription YAML for node label classification (default "subscription.yaml")
+                    subscription gob for node label classification (default "subscription.gob")
   --cache string      runtime pack cache directory (default ".runtime/rules/packs")
   --output string     output rules fragment path, or "-" for stdout (default "-")
 
@@ -147,9 +147,9 @@ Flags for restart:
 
 Flags for doctor:
   --core string          Mihomo core binary path (default from active runtime profile)
-  --subscription string  downloaded subscription YAML (default "subscription.yaml")
+  --subscription string  downloaded subscription gob (default "subscription.gob")
   --config string        generated Mihomo config path (default "generated/mihomo.yaml")
-  --policy string        localClash policy YAML (default "policies/loyalsoldier.yaml")
+  --policy string        localClash policy JSON (default "policies/loyalsoldier.json")
   --dashboard string     zashboard directory (default ".runtime/mihomo/ui/zashboard")
   --workdir string       Mihomo runtime data directory for config test (default ".runtime/mihomo")
   --json                print machine-readable JSON report
@@ -302,7 +302,7 @@ func runSubscriptionDownload(args []string) error {
 
 	opts := subdownload.Options{}
 	fs.StringVar(&opts.URL, "url", "", "subscription URL")
-	fs.StringVar(&opts.OutputPath, "output", "subscription.yaml", "output file path")
+	fs.StringVar(&opts.OutputPath, "output", "subscription.gob", "output file path")
 	fs.StringVar(&opts.UserAgent, "user-agent", "clash-verge/v1.5.1", "subscription User-Agent")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 
@@ -360,13 +360,13 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 	fs.SetOutput(os.Stderr)
 
 	opts := configrender.Options{}
-	fs.StringVar(&opts.SourcePath, "source", state.Paths.SubscriptionPath, "downloaded subscription source YAML")
-	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy YAML")
+	fs.StringVar(&opts.SourcePath, "source", state.Paths.SubscriptionPath, "downloaded subscription gob")
+	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy JSON")
 	fs.StringVar(&opts.Mode, "mode", "", "policy mode; empty means policy default")
 	fs.StringVar(&opts.OutputPath, "output", state.Paths.GeneratedConfig, "generated Mihomo config path")
-	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection YAML; optional")
+	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection gob; optional")
 	fs.StringVar(&opts.RulesCacheDir, "rules-cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
-	fs.StringVar(&opts.RuntimeProfilePath, "runtime-profile", state.Paths.RuntimeProfilePath, "runtime profile YAML")
+	fs.StringVar(&opts.RuntimeProfilePath, "runtime-profile", state.Paths.RuntimeProfilePath, "runtime profile JSON")
 	fs.BoolVar(&opts.Force, "force", false, "overwrite output if it exists")
 
 	if err := fs.Parse(args); err != nil {
@@ -409,7 +409,7 @@ func runRulesAdapt(args []string, state appinit.RuntimeState) error {
 	fs.SetOutput(os.Stderr)
 
 	opts := rules.Options{}
-	fs.StringVar(&opts.SourcesDir, "sources", state.Paths.RuleSourcesDir, "rule source YAML directory")
+	fs.StringVar(&opts.SourcesDir, "sources", state.Paths.RuleSourcesDir, "rule source JSON directory")
 	fs.StringVar(&opts.CacheDir, "cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
 
 	if err := fs.Parse(args); err != nil {
@@ -469,8 +469,8 @@ func runRulesRender(args []string, state appinit.RuntimeState) error {
 	fs.SetOutput(os.Stderr)
 
 	opts := rules.Options{}
-	fs.StringVar(&opts.SelectionPath, "selection", "localclash-packs.yaml", "packs selection YAML")
-	fs.StringVar(&opts.Subscription, "subscription", state.Paths.SubscriptionPath, "subscription YAML for node label classification")
+	fs.StringVar(&opts.SelectionPath, "selection", "localclash-packs.gob", "packs selection gob")
+	fs.StringVar(&opts.Subscription, "subscription", state.Paths.SubscriptionPath, "subscription gob for node label classification")
 	fs.StringVar(&opts.CacheDir, "cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
 	fs.StringVar(&opts.OutputPath, "output", "-", "output rules fragment path, or - for stdout")
 
@@ -633,9 +633,9 @@ func runDoctor(args []string, state appinit.RuntimeState) error {
 
 	opts := doctor.Options{}
 	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
-	fs.StringVar(&opts.SubscriptionPath, "subscription", state.Paths.SubscriptionPath, "downloaded subscription YAML")
+	fs.StringVar(&opts.SubscriptionPath, "subscription", state.Paths.SubscriptionPath, "downloaded subscription gob")
 	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "generated Mihomo config path")
-	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy YAML")
+	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy JSON")
 	fs.StringVar(&opts.DashboardDir, "dashboard", filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard"), "zashboard directory")
 	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory for config test")
 	fs.BoolVar(&opts.JSON, "json", false, "print machine-readable JSON report")

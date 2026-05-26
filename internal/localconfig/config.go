@@ -1,6 +1,8 @@
 package localconfig
 
 import (
+	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,8 +13,6 @@ import (
 	"time"
 
 	"localclash/internal/rules"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -202,8 +202,14 @@ func (err *MissingNodesError) Error() string {
 
 type subscriptionSources struct {
 	Sources []struct {
-		ID string `yaml:"id"`
-	} `yaml:"sources"`
+		ID string `json:"id"`
+	} `json:"sources"`
+}
+
+func init() {
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
+	gob.Register([]map[string]any{})
 }
 
 func Load(path string) (Config, error) {
@@ -212,7 +218,7 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if err := json.Unmarshal(data, &config); err != nil {
 		return Config{}, err
 	}
 	return config, nil
@@ -225,7 +231,7 @@ func Write(path string, config Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(config)
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -233,14 +239,7 @@ func Write(path string, config Config) error {
 }
 
 func WriteSelection(path string, selection rules.Selection) error {
-	data, err := yaml.Marshal(selection)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
+	return rules.WriteSelection(path, selection)
 }
 
 func Resolve(opts ResolveOptions) (Resolved, error) {
@@ -613,7 +612,7 @@ func BuildSubscriptionNodesFromArtifactsMeasured(artifacts []SubscriptionSourceA
 }
 
 func loadMergedSubscriptionNodes(path string, stage localConfigStageFunc) ([]SubscriptionNode, error) {
-	doc, err := readYAMLMapObserved(path, stage, "merged_subscription", nil)
+	doc, err := readGobMapObserved(path, stage, "merged_subscription", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +641,7 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 	finish(nil, map[string]any{"bytes": len(data)})
 	var sources subscriptionSources
 	finish = stage("parse_subscription_config", map[string]any{"path": opts.SubscriptionConfig, "bytes": len(data)})
-	if err := yaml.Unmarshal(data, &sources); err != nil {
+	if err := json.Unmarshal(data, &sources); err != nil {
 		finish(err, nil)
 		return nil, err
 	}
@@ -652,9 +651,9 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 		if source.ID == "" {
 			continue
 		}
-		path := filepath.Join(opts.SubscriptionRuntime, source.ID+".yaml")
+		path := filepath.Join(opts.SubscriptionRuntime, source.ID+".gob")
 		finish := stage("read_subscription_source_artifact", map[string]any{"source_id": source.ID, "path": path})
-		doc, err := readYAMLMapObserved(path, stage, "subscription_source_artifact", map[string]any{"source_id": source.ID})
+		doc, err := readGobMapObserved(path, stage, "subscription_source_artifact", map[string]any{"source_id": source.ID})
 		if err != nil {
 			finish(err, nil)
 			return nil, err
@@ -676,29 +675,40 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 	return nodes, nil
 }
 
-func readYAMLMapObserved(path string, stage localConfigStageFunc, prefix string, fields map[string]any) (map[string]any, error) {
+func readGobMapObserved(path string, stage localConfigStageFunc, prefix string, fields map[string]any) (map[string]any, error) {
 	readFields := map[string]any{"path": path}
 	for key, value := range fields {
 		readFields[key] = value
 	}
-	finish := stage(prefix+".read_file", readFields)
-	data, err := os.ReadFile(path)
+	finish := stage(prefix+".open_file", readFields)
+	file, err := os.Open(path)
 	if err != nil {
 		finish(err, nil)
 		return nil, err
 	}
-	finish(nil, map[string]any{"bytes": len(data)})
+	defer file.Close()
+	finish(nil, nil)
 
-	parseFields := map[string]any{"path": path, "bytes": len(data)}
+	parseFields := map[string]any{"path": path}
 	for key, value := range fields {
 		parseFields[key] = value
 	}
-	finish = stage(prefix+".parse_yaml", parseFields)
-	var doc map[string]any
-	if err := yaml.Unmarshal(data, &doc); err != nil {
+	finish = stage(prefix+".decode_gob", parseFields)
+	var artifact struct {
+		Version int
+		Data    map[string]any
+		Raw     []byte
+	}
+	if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
 		finish(err, nil)
 		return nil, err
 	}
+	if artifact.Version != 1 {
+		err := fmt.Errorf("subscription artifact schema version mismatch: expected 1, got %d; run localclash subscriptions refresh", artifact.Version)
+		finish(err, nil)
+		return nil, err
+	}
+	doc := artifact.Data
 	finish(nil, map[string]any{"top_level_keys": len(doc)})
 	return doc, nil
 }
@@ -1129,10 +1139,10 @@ func ruleProvidersForSelection(providers []ExternalRuleProvider) []rules.Externa
 
 func normalizeResolveOptions(opts ResolveOptions) ResolveOptions {
 	if strings.TrimSpace(opts.SubscriptionPath) == "" {
-		opts.SubscriptionPath = "subscription.yaml"
+		opts.SubscriptionPath = "subscription.gob"
 	}
 	if strings.TrimSpace(opts.SubscriptionConfig) == "" {
-		opts.SubscriptionConfig = "localclash-subscriptions.yaml"
+		opts.SubscriptionConfig = "localclash-subscriptions.json"
 	}
 	if strings.TrimSpace(opts.SubscriptionRuntime) == "" {
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
@@ -1145,27 +1155,15 @@ func normalizeResolveOptions(opts ResolveOptions) ResolveOptions {
 
 func normalizeSubscriptionNodeOptions(opts SubscriptionNodeOptions) SubscriptionNodeOptions {
 	if strings.TrimSpace(opts.SubscriptionPath) == "" {
-		opts.SubscriptionPath = "subscription.yaml"
+		opts.SubscriptionPath = "subscription.gob"
 	}
 	if strings.TrimSpace(opts.SubscriptionConfig) == "" {
-		opts.SubscriptionConfig = "localclash-subscriptions.yaml"
+		opts.SubscriptionConfig = "localclash-subscriptions.json"
 	}
 	if strings.TrimSpace(opts.SubscriptionRuntime) == "" {
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	return opts
-}
-
-func readYAMLMap(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var doc map[string]any
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, err
-	}
-	return doc, nil
 }
 
 func anyMapSlice(value any) []map[string]any {

@@ -116,8 +116,8 @@ MCP `routing_explain`：
 
 剩餘觀察：
 
-- MCP 任務日誌顯示 `.runtime/subscriptions/sub1.yaml` 不存在時會 fallback 到
-  `subscription.yaml`。這不是本輪 CPU 主因，但後續應整理訂閱 source
+- MCP 任務日誌顯示 `.runtime/subscriptions/sub1.gob` 不存在時會 fallback 到
+  `subscription.gob`。這不是本輪 CPU 主因，但後續應整理訂閱 source
   artifact 狀態，避免路徑語意混亂。
 - Mihomo `-t` 的 30s 級成本不屬於 pack index 問題，仍需另外做驗證快取或
   runtime restart 優化。
@@ -225,7 +225,7 @@ CPU 觀察：
 解讀：
 
 - 渲染本身相對便宜。
-- 將 `localclash.yaml` 解析成已選 pack、proxy group、policy group 和 custom rule 是主要成本。
+- 將 `localclash.json` 解析成已選 pack、proxy group、policy group 和 custom rule 是主要成本。
 
 ### `config_patch_create`
 
@@ -515,8 +515,8 @@ localClash CPU 熱點降到可接受範圍。
 
 下一步建議：
 
-1. 修正訂閱 source artifact 狀態，避免 `.runtime/subscriptions/sub1.yaml`
-   缺失時長期 fallback 到 `subscription.yaml`。
+1. 修正訂閱 source artifact 狀態，避免 `.runtime/subscriptions/sub1.gob`
+   缺失時長期 fallback 到 `subscription.gob`。
 2. 為 Mihomo `-t` 設計驗證快取，因為它仍是 `run_runtime` 和
    `restart_runtime` 的主要成本。
 3. 建立可重複的 MCP performance smoke 腳本，把本報告中的真機測試流程固定下來。

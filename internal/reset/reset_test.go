@@ -16,13 +16,13 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	t.Chdir(dir)
 	writeResetFile(t, filepath.Join(".runtime", "logs", "mcp.log"), "log")
 	writeResetFile(t, filepath.Join("generated", "mihomo.yaml"), "config")
-	writeResetFile(t, "localclash.yaml", "version: 1\n")
-	writeResetFile(t, "localclash-packs.yaml", "version: 1\n")
-	writeResetFile(t, "localclash-subscriptions.yaml", "sources: []\n")
-	writeResetFile(t, "localclash-runtime.yaml", "active: router\n")
+	writeResetFile(t, "localclash.json", "version: 1\n")
+	writeResetFile(t, "localclash-packs.gob", "version: 1\n")
+	writeResetFile(t, "localclash-subscriptions.json", "sources: []\n")
+	writeResetFile(t, "localclash-runtime.json", "active: router\n")
 	writeResetFile(t, filepath.Join("profiles", "router.yaml"), "mihomo: {}\n")
-	writeResetFile(t, "subscription.yaml", "proxies: []\n")
-	writeResetFile(t, "subscription-backup.yaml", "proxies: []\n")
+	writeResetFile(t, "subscription.gob", "proxies: []\n")
+	writeResetFile(t, "subscription-backup.gob", "proxies: []\n")
 
 	var out bytes.Buffer
 	result, err := Run(Options{DryRun: true, Out: &out})
@@ -32,12 +32,12 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	if !result.DryRun || len(result.Deleted) != 9 {
 		t.Fatalf("result = %+v, want dry-run with nine delete targets", result)
 	}
-	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-subscriptions.yaml", "localclash-runtime.yaml", "profiles", "subscription.yaml", "subscription-backup.yaml"} {
+	for _, path := range []string{".runtime", "generated", "localclash.json", "localclash-subscriptions.json", "localclash-runtime.json", "profiles", "subscription.gob", "subscription-backup.gob"} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should remain after dry-run: %v", path, err)
 		}
 	}
-	if !strings.Contains(out.String(), "localClash factory reset dry run") || !strings.Contains(out.String(), "subscription-backup.yaml") {
+	if !strings.Contains(out.String(), "localClash factory reset dry run") || !strings.Contains(out.String(), "subscription-backup.gob") {
 		t.Fatalf("output = %q, want dry-run plan", out.String())
 	}
 }
@@ -48,26 +48,26 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	writeResetFile(t, filepath.Join(".runtime", "mihomo", "logs", "mihomo.log"), "log")
 	writeResetFile(t, filepath.Join("generated", "mihomo.yaml"), "config")
 	writeResetFile(t, filepath.Join("bin", "mihomo"), "binary")
-	writeResetFile(t, filepath.Join("policies", "loyalsoldier.yaml"), "policy")
-	writeResetFile(t, filepath.Join("policy-templates", "minimal.yaml"), "template")
-	writeResetFile(t, filepath.Join("rule-sources", "source.yaml"), "source")
-	writeResetFile(t, "localclash.yaml", "version: 1\n")
-	writeResetFile(t, "localclash-packs.yaml", "version: 1\n")
-	writeResetFile(t, "localclash-subscriptions.yaml", "sources: []\n")
-	writeResetFile(t, "localclash-runtime.yaml", "active: router\n")
+	writeResetFile(t, filepath.Join("policies", "loyalsoldier.json"), "policy")
+	writeResetFile(t, filepath.Join("policy-templates", "minimal.json"), "template")
+	writeResetFile(t, filepath.Join("rule-sources", "source.json"), "source")
+	writeResetFile(t, "localclash.json", "version: 1\n")
+	writeResetFile(t, "localclash-packs.gob", "version: 1\n")
+	writeResetFile(t, "localclash-subscriptions.json", "sources: []\n")
+	writeResetFile(t, "localclash-runtime.json", "active: router\n")
 	writeResetFile(t, filepath.Join("profiles", "normal.yaml"), "mihomo: {}\n")
-	writeResetFile(t, "subscription.yaml", "proxies: []\n")
+	writeResetFile(t, "subscription.gob", "proxies: []\n")
 
 	var out bytes.Buffer
 	if _, err := Run(Options{Yes: true, Out: &out}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{".runtime", "generated", "localclash.yaml", "localclash-packs.yaml", "localclash-subscriptions.yaml", "localclash-runtime.yaml", "profiles", "subscription.yaml"} {
+	for _, path := range []string{".runtime", "generated", "localclash.json", "localclash-packs.gob", "localclash-subscriptions.json", "localclash-runtime.json", "profiles", "subscription.gob"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s should be deleted, err=%v", path, err)
 		}
 	}
-	for _, path := range []string{filepath.Join("bin", "mihomo"), filepath.Join("policies", "loyalsoldier.yaml"), filepath.Join("policy-templates", "minimal.yaml"), filepath.Join("rule-sources", "source.yaml")} {
+	for _, path := range []string{filepath.Join("bin", "mihomo"), filepath.Join("policies", "loyalsoldier.json"), filepath.Join("policy-templates", "minimal.json"), filepath.Join("rule-sources", "source.json")} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should be kept: %v", path, err)
 		}
@@ -80,21 +80,21 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 func TestRunRequiresConfirmation(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	writeResetFile(t, "localclash.yaml", "version: 1\n")
+	writeResetFile(t, "localclash.json", "version: 1\n")
 
 	_, err := Run(Options{In: strings.NewReader("no\n"), Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("error = %v, want cancelled", err)
 	}
-	if _, err := os.Stat("localclash.yaml"); err != nil {
-		t.Fatalf("localclash.yaml should remain after cancelled reset: %v", err)
+	if _, err := os.Stat("localclash.json"); err != nil {
+		t.Fatalf("localclash.json should remain after cancelled reset: %v", err)
 	}
 
 	if _, err := Run(Options{In: strings.NewReader(ConfirmationPhrase + "\n"), Out: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat("localclash.yaml"); !os.IsNotExist(err) {
-		t.Fatalf("localclash.yaml should be deleted after confirmed reset, err=%v", err)
+	if _, err := os.Stat("localclash.json"); !os.IsNotExist(err) {
+		t.Fatalf("localclash.json should be deleted after confirmed reset, err=%v", err)
 	}
 }
 

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/gob"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,8 +34,8 @@ type Source struct {
 }
 
 type Config struct {
-	Version int      `yaml:"version"`
-	Sources []Source `yaml:"sources"`
+	Version int      `json:"version"`
+	Sources []Source `json:"sources"`
 }
 
 type StatusOptions struct {
@@ -135,7 +137,19 @@ type subscriptionDoc struct {
 	Raw  []byte
 }
 
+type subscriptionArtifact struct {
+	Version int
+	Data    map[string]any
+	Raw     []byte
+}
+
 var sourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func init() {
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
+	gob.Register([]map[string]any{})
+}
 
 func Status(opts StatusOptions) (StatusResult, error) {
 	opts = normalizeStatusOptions(opts)
@@ -324,7 +338,7 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	finish(nil, map[string]any{"renamed_proxies": renamed})
 
 	finish = stage("write_merged_subscription", map[string]any{"merged": opts.MergedPath})
-	if err := writeSubscriptionArtifact(opts.MergedPath, merged); err != nil {
+	if err := writeSubscriptionArtifact(opts.MergedPath, subscriptionDoc{Data: merged}); err != nil {
 		finish(err, nil)
 		return RefreshResult{}, err
 	}
@@ -432,7 +446,7 @@ func refreshOneSource(ctx context.Context, source Source, opts RefreshOptions, s
 
 	artifact := artifactPath(opts.RuntimeDir, source.ID)
 	finish = stage("write_source_artifact", map[string]any{"source_id": source.ID, "artifact": artifact})
-	if err := writeRawSubscriptionArtifact(artifact, doc.Raw); err != nil {
+	if err := writeSubscriptionArtifact(artifact, doc); err != nil {
 		finish(err, nil)
 		return sourceRefreshOutcome{sourceID: source.ID, err: err}
 	}
@@ -477,10 +491,10 @@ func subscriptionStageEmitter(callback func(StageEvent)) func(string, map[string
 
 func normalizeStatusOptions(opts StatusOptions) StatusOptions {
 	if strings.TrimSpace(opts.ConfigPath) == "" {
-		opts.ConfigPath = "localclash-subscriptions.yaml"
+		opts.ConfigPath = "localclash-subscriptions.json"
 	}
 	if strings.TrimSpace(opts.MergedPath) == "" {
-		opts.MergedPath = "subscription.yaml"
+		opts.MergedPath = "subscription.gob"
 	}
 	if strings.TrimSpace(opts.RuntimeDir) == "" {
 		opts.RuntimeDir = ".runtime/subscriptions"
@@ -490,20 +504,20 @@ func normalizeStatusOptions(opts StatusOptions) StatusOptions {
 
 func normalizeConfigureOptions(opts ConfigureOptions) ConfigureOptions {
 	if strings.TrimSpace(opts.ConfigPath) == "" {
-		opts.ConfigPath = "localclash-subscriptions.yaml"
+		opts.ConfigPath = "localclash-subscriptions.json"
 	}
 	return opts
 }
 
 func normalizeRefreshOptions(opts RefreshOptions) RefreshOptions {
 	if strings.TrimSpace(opts.ConfigPath) == "" {
-		opts.ConfigPath = "localclash-subscriptions.yaml"
+		opts.ConfigPath = "localclash-subscriptions.json"
 	}
 	if strings.TrimSpace(opts.RuntimeDir) == "" {
 		opts.RuntimeDir = ".runtime/subscriptions"
 	}
 	if strings.TrimSpace(opts.MergedPath) == "" {
-		opts.MergedPath = "subscription.yaml"
+		opts.MergedPath = "subscription.gob"
 	}
 	if strings.TrimSpace(opts.UserAgent) == "" {
 		opts.UserAgent = DefaultUserAgent
@@ -517,7 +531,7 @@ func readConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if err := json.Unmarshal(data, &config); err != nil {
 		return Config{}, err
 	}
 	return config, nil
@@ -527,7 +541,7 @@ func writeConfig(path string, config Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	data, err := yaml.Marshal(config)
+	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -696,40 +710,42 @@ func parseSubscription(sourceID string, data []byte) (subscriptionDoc, error) {
 }
 
 func readSubscription(path string) (subscriptionDoc, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return subscriptionDoc{}, err
 	}
-	doc, err := parseSubscription(filepath.Base(path), data)
-	if err != nil {
+	defer file.Close()
+	var artifact subscriptionArtifact
+	if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
 		return subscriptionDoc{}, err
 	}
-	doc.Raw = append([]byte(nil), data...)
-	return doc, nil
+	if artifact.Version != 1 {
+		return subscriptionDoc{}, fmt.Errorf("subscription artifact schema version mismatch: expected 1, got %d; run localclash subscriptions refresh", artifact.Version)
+	}
+	if len(artifact.Data) == 0 {
+		return subscriptionDoc{}, fmt.Errorf("subscription artifact %q is empty; run localclash subscriptions refresh", path)
+	}
+	return subscriptionDoc{Data: artifact.Data, Raw: artifact.Raw}, nil
 }
 
-func writeRawSubscriptionArtifact(path string, data []byte) error {
+func writeSubscriptionArtifact(path string, doc subscriptionDoc) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func writeSubscriptionArtifact(path string, doc map[string]any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(doc)
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
+	encodeErr := gob.NewEncoder(file).Encode(subscriptionArtifact{Version: 1, Data: doc.Data, Raw: doc.Raw})
+	closeErr := file.Close()
+	if encodeErr != nil {
+		_ = os.Remove(tmp)
+		return encodeErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
 	}
 	return os.Rename(tmp, path)
 }
@@ -827,7 +843,7 @@ func MaskURL(rawURL string) string {
 }
 
 func artifactPath(runtimeDir, id string) string {
-	return filepath.Join(runtimeDir, id+".yaml")
+	return filepath.Join(runtimeDir, id+".gob")
 }
 
 func anySlice(value any) []any {

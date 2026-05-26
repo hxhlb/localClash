@@ -17,8 +17,6 @@ import (
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Options struct {
@@ -266,7 +264,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	planDir := filepath.Join(opts.OutputDir, planID)
 	outputPath := filepath.Join(planDir, "mihomo.yaml")
 	summaryPath := filepath.Join(planDir, "summary.json")
-	configPath := filepath.Join(planDir, "localclash.yaml")
+	configPath := filepath.Join(planDir, "localclash.json")
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
 		finish(err, nil)
 		return Result{}, err
@@ -416,7 +414,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 		return ApplyResult{}, err
 	}
 	defer os.RemoveAll(tempDir)
-	tempSelection := filepath.Join(tempDir, "localclash-packs.yaml")
+	tempSelection := filepath.Join(tempDir, "localclash-packs.gob")
 	tempOutput := filepath.Join(tempDir, "mihomo.yaml")
 	if err := localconfig.WriteSelection(tempSelection, resolved.Selection); err != nil {
 		finish(err, nil)
@@ -569,10 +567,10 @@ func mihomoStageError(result MihomoTestResult) error {
 
 func normalizeOptions(opts Options) Options {
 	if opts.Subscription == "" {
-		opts.Subscription = "subscription.yaml"
+		opts.Subscription = "subscription.gob"
 	}
 	if opts.Policy == "" {
-		opts.Policy = "policies/loyalsoldier.yaml"
+		opts.Policy = "policies/loyalsoldier.json"
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
@@ -584,10 +582,10 @@ func normalizeOptions(opts Options) Options {
 		opts.OutputDir = filepath.Join(".runtime", "patches")
 	}
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = "localclash.yaml"
+		opts.ConfigPath = "localclash.json"
 	}
 	if opts.SubscriptionConfig == "" {
-		opts.SubscriptionConfig = "localclash-subscriptions.yaml"
+		opts.SubscriptionConfig = "localclash-subscriptions.json"
 	}
 	if opts.SubscriptionRuntime == "" {
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
@@ -609,10 +607,10 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.PlansDir = filepath.Join(".runtime", "patches")
 	}
 	if opts.Subscription == "" {
-		opts.Subscription = "subscription.yaml"
+		opts.Subscription = "subscription.gob"
 	}
 	if opts.Policy == "" {
-		opts.Policy = "policies/loyalsoldier.yaml"
+		opts.Policy = "policies/loyalsoldier.json"
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
@@ -621,16 +619,16 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = "localclash.yaml"
+		opts.ConfigPath = "localclash.json"
 	}
 	if opts.SubscriptionConfig == "" {
-		opts.SubscriptionConfig = "localclash-subscriptions.yaml"
+		opts.SubscriptionConfig = "localclash-subscriptions.json"
 	}
 	if opts.SubscriptionRuntime == "" {
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	if opts.SelectionPath == "" {
-		opts.SelectionPath = "localclash-packs.yaml"
+		opts.SelectionPath = "localclash-packs.gob"
 	}
 	if opts.OutputPath == "" {
 		opts.OutputPath = "generated/mihomo.yaml"
@@ -1001,7 +999,7 @@ func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) Ch
 func loadApplyConfig(opts ApplyOptions, plan Result) (localconfig.Config, error) {
 	path := plan.ConfigPath
 	if strings.TrimSpace(path) == "" && strings.TrimSpace(plan.SummaryPath) != "" {
-		path = filepath.Join(filepath.Dir(plan.SummaryPath), "localclash.yaml")
+		path = filepath.Join(filepath.Dir(plan.SummaryPath), "localclash.json")
 	}
 	if strings.TrimSpace(path) != "" {
 		if config, err := localconfig.Load(path); err == nil {
@@ -1218,23 +1216,16 @@ func validateProxyGroupNodes(groupID string, rawNodes []string, proxyNames []str
 }
 
 func writeTempSelection(selection rules.Selection) (string, func(), error) {
-	file, err := os.CreateTemp("", "localclash-plan-selection-*.yaml")
+	file, err := os.CreateTemp("", "localclash-plan-selection-*.gob")
 	if err != nil {
 		return "", nil, err
 	}
 	path := file.Name()
-	data, err := yaml.Marshal(selection)
-	if err != nil {
-		file.Close()
-		os.Remove(path)
-		return "", nil, err
-	}
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		os.Remove(path)
-		return "", nil, err
-	}
 	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return "", nil, err
+	}
+	if err := rules.WriteSelection(path, selection); err != nil {
 		os.Remove(path)
 		return "", nil, err
 	}
@@ -1242,14 +1233,7 @@ func writeTempSelection(selection rules.Selection) (string, func(), error) {
 }
 
 func writeSelection(path string, selection rules.Selection) error {
-	data, err := yaml.Marshal(selection)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o644)
+	return rules.WriteSelection(path, selection)
 }
 
 func writeSummary(path string, result Result) error {
@@ -1346,8 +1330,8 @@ func backupApplyTargets(opts ApplyOptions) ([]BackupResult, error) {
 		source string
 		name   string
 	}{
-		{source: opts.ConfigPath, name: "localclash.yaml"},
-		{source: opts.SelectionPath, name: "localclash-packs.yaml"},
+		{source: opts.ConfigPath, name: "localclash.json"},
+		{source: opts.SelectionPath, name: "localclash-packs.gob"},
 		{source: opts.OutputPath, name: "mihomo.yaml"},
 	}
 	var backups []BackupResult

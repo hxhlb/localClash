@@ -1,0 +1,82 @@
+{
+  "id": "default.tail-fallback.v1",
+  "description": "Add entertainment, ecommerce, fallback, and China direct tail routing.",
+  "config": {
+    "version": 2,
+    "policy_groups": {
+      "🎞 媒体": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "综合媒体流量暴露常用流媒体地区。",
+        "boundary": "business_to_exit_layer"
+      },
+      "🛒 电商": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🌐 全球直连",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "电商服务允许直连或指定代理出口。",
+        "boundary": "business_to_exit_layer"
+      },
+      "🧭 漏网之鱼": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🌐 全球直连",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "非中国兜底流量，保留自动、手动、地区和直连出口。",
+        "boundary": "business_to_exit_layer"
+      }
+    },
+    "packs": [
+      {
+        "id": "v2fly_dlc_category_entertainment",
+        "type": "geosite",
+        "target": "🎞 媒体",
+        "reason": "Route entertainment and media categories through media selector."
+      },
+      {
+        "id": "v2fly_dlc_category_ecommerce",
+        "type": "geosite",
+        "target": "🛒 电商",
+        "reason": "Route non-China ecommerce services through ecommerce selector."
+      },
+      {
+        "id": "v2fly_dlc_geolocation__cn",
+        "type": "geosite",
+        "target": "🧭 漏网之鱼",
+        "reason": "Route non-China fallback through default business selector."
+      },
+      {
+        "id": "v2fly_dlc_cn",
+        "type": "geosite",
+        "target": "DIRECT",
+        "reason": "Keep China domains direct."
+      }
+    ]
+  }
+}

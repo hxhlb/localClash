@@ -8,8 +8,8 @@ commands with `rtk`; otherwise `go run . ...` is enough.
 
 - Go is installed and can build this module.
 - You have a Clash/Mihomo subscription URL.
-- The subscription URL is secret. Do not commit `subscription*.yaml`,
-  `localclash-subscriptions.yaml`, `localclash.yaml`, or `.runtime/`.
+- The subscription URL is secret. Do not commit `subscription*.gob`,
+  `localclash-subscriptions.json`, `localclash.json`, or `.runtime/`.
 
 ## 1. Download the Host Core
 
@@ -43,7 +43,7 @@ use `external-ui: ui/zashboard`.
 For a quick CLI-only first run:
 
 ```bash
-go run . subscription download --url "https://example.com/sub?token=..." --output subscription.yaml --force
+go run . subscription download --url "https://example.com/sub?token=..." --output subscription.gob --force
 ```
 
 For the MCP-managed path, start the server and ask the agent to use
@@ -53,8 +53,8 @@ For the MCP-managed path, start the server and ask the agent to use
 go run . mcp
 ```
 
-The MCP path stores source URLs in `localclash-subscriptions.yaml` and produces
-the merged `subscription.yaml`. When more than one source is configured, merged
+The MCP path stores source URLs in `localclash-subscriptions.json` and produces
+the merged `subscription.gob`. When more than one source is configured, merged
 proxy names are prefixed with `[source-id]` so Dashboard and MCP selectors can
 show where each node came from. A single source keeps the provider's original
 node names unless a local duplicate still needs disambiguation.

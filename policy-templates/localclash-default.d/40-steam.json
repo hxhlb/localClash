@@ -1,0 +1,33 @@
+{
+  "id": "default.steam.v1",
+  "description": "Add Steam business routing.",
+  "config": {
+    "version": 2,
+    "policy_groups": {
+      "🎮 Steam": {
+        "mode": "manual",
+        "exits": [
+          "🌐 全球直连",
+          "MANUAL",
+          "AUTO",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "Steam 默认优先直连，保留代理和地区出口处理商店、社区或网络异常。",
+        "boundary": "business_to_exit_layer"
+      }
+    },
+    "packs": [
+      {
+        "id": "v2fly_dlc_steam",
+        "type": "geosite",
+        "target": "🎮 Steam",
+        "reason": "Route Steam store and community domains through Steam selector."
+      }
+    ]
+  }
+}

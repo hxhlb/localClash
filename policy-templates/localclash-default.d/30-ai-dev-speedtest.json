@@ -1,0 +1,97 @@
+{
+  "id": "default.ai-dev-speedtest.v1",
+  "description": "Add ChatGPT, AI, GitHub, and speed-test business groups.",
+  "config": {
+    "version": 2,
+    "policy_groups": {
+      "🤖 ChatGPT": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🇸🇬 新加坡节点",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "OpenAI/ChatGPT 专属业务组；在规则顺序上优先于泛 AI 分类。",
+        "boundary": "business_to_exit_layer"
+      },
+      "🧠 AI": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🇸🇬 新加坡节点",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "非中国泛 AI 服务分类；OpenAI/ChatGPT 已由专属业务组先匹配。",
+        "boundary": "business_to_exit_layer"
+      },
+      "💻 GitHub": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点",
+          "🌐 全球直连"
+        ],
+        "reason": "GitHub 可根据本地网络质量选择代理或直连。",
+        "boundary": "business_to_exit_layer"
+      },
+      "📊 测速服务": {
+        "mode": "manual",
+        "exits": [
+          "🌐 全球直连",
+          "MANUAL",
+          "AUTO",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "测速服务默认优先直连，便于对比直连和代理出口质量。",
+        "boundary": "business_to_exit_layer"
+      }
+    },
+    "packs": [
+      {
+        "id": "v2fly_dlc_openai",
+        "type": "geosite",
+        "target": "🤖 ChatGPT",
+        "reason": "Route OpenAI domains through ChatGPT selector."
+      },
+      {
+        "id": "v2fly_dlc_category_ai__cn",
+        "type": "geosite",
+        "target": "🧠 AI",
+        "reason": "Route non-China AI service categories through AI selector."
+      },
+      {
+        "id": "v2fly_dlc_github",
+        "type": "geosite",
+        "target": "💻 GitHub",
+        "reason": "Route GitHub domains through GitHub selector."
+      },
+      {
+        "id": "v2fly_dlc_category_speedtest",
+        "type": "geosite",
+        "target": "📊 测速服务",
+        "reason": "Route speed test domains through speed-test selector."
+      }
+    ]
+  }
+}

@@ -630,7 +630,7 @@ type configIntentInspectWorkingInput struct {
 
 func (s *Server) configIntentInspectWorkingResult(in configIntentInspectWorkingInput) (toolResult, error) {
 	if in.Config == "" {
-		in.Config = "localclash.yaml"
+		in.Config = "localclash.json"
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -662,14 +662,14 @@ func (s *Server) configIntentInspectWorkingResult(in configIntentInspectWorkingI
 	}
 	if in.View == "working" {
 		if !result.SubscriptionAvailable {
-			result.NextActions = append(result.NextActions, "call subscriptions_status", "call subscriptions_configure if no sources are configured", "call subscriptions_refresh to create subscription.yaml before previewing effective rules")
+			result.NextActions = append(result.NextActions, "call subscriptions_status", "call subscriptions_configure if no sources are configured", "call subscriptions_refresh to create subscription.gob before previewing effective rules")
 		} else {
 			result.NextActions = append(result.NextActions, "use view=effective_preview when the agent needs the effective generated rules without requiring Mihomo to have been started")
 		}
 		return jsonToolResult(result)
 	}
 	if !result.SubscriptionAvailable {
-		result.NextActions = append(result.NextActions, "call subscriptions_status", "call subscriptions_configure if no sources are configured", "call subscriptions_refresh to create subscription.yaml before previewing effective rules")
+		result.NextActions = append(result.NextActions, "call subscriptions_status", "call subscriptions_configure if no sources are configured", "call subscriptions_refresh to create subscription.gob before previewing effective rules")
 		return jsonToolResult(result)
 	}
 	if err := renderConfigIntentPreview(&result, in); err != nil {
@@ -741,7 +741,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 			if err != nil {
 				result.Warnings = append(result.Warnings, "localClash intent cannot be resolved for effective preview: "+err.Error())
 			} else {
-				selectionPath = filepath.Join(tempDir, "localclash-packs.yaml")
+				selectionPath = filepath.Join(tempDir, "localclash-packs.gob")
 				if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
 					return err
 				}
@@ -784,7 +784,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	case in.Intent.Resolved:
 		result.NextActions = append(result.NextActions, "review effective_summary and overlay before starting or applying runtime changes")
 	default:
-		result.NextActions = append(result.NextActions, "repair localclash.yaml intent before applying or starting runtime")
+		result.NextActions = append(result.NextActions, "repair localclash.json intent before applying or starting runtime")
 	}
 	return nil
 }
@@ -803,11 +803,11 @@ func (s *Server) applyConfigIntentInspectDefaults(subscription, policy, rulesCac
 		setDefault(subscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(subscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 	}
-	setDefault(subscription, "subscription.yaml")
-	setDefault(policy, "policies/loyalsoldier.yaml")
+	setDefault(subscription, "subscription.gob")
+	setDefault(policy, "policies/loyalsoldier.json")
 	setDefault(rulesCache, filepath.Join(".runtime", "rules", "packs"))
 	setDefault(runtimeProfile, runtimeprofile.DefaultPath)
-	setDefault(subscriptionConfig, "localclash-subscriptions.yaml")
+	setDefault(subscriptionConfig, "localclash-subscriptions.json")
 	setDefault(subscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
 }
 
@@ -1102,7 +1102,7 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	}
 	generated := inspectConfigFile(in.Output)
 	status := map[string]any{
-		"model":           "localclash.yaml is source_of_truth; generated/mihomo.yaml is build_artifact; .runtime/patches contains review_artifacts",
+		"model":           "localclash.json is source_of_truth; generated/mihomo.yaml is build_artifact; .runtime/patches contains review_artifacts",
 		"source_of_truth": inspectConfigFile(in.Config),
 		"generated":       generated,
 		"subscription":    inspectConfigFile(in.Subscription),
@@ -1179,11 +1179,11 @@ func configStatusNextActions(render configRenderState) []string {
 		for _, missing := range render.MissingInputs {
 			switch missing {
 			case "subscription":
-				actions = append(actions, "call subscriptions_status", "call subscriptions_refresh to create subscription.yaml")
+				actions = append(actions, "call subscriptions_status", "call subscriptions_refresh to create subscription.gob")
 			case "policy":
 				actions = append(actions,
 					"call doctor to inspect localClash base assets and generated config state before choosing a repair path",
-					"localClash base assets are incomplete; policies/loyalsoldier.yaml must exist before rendering",
+					"localClash base assets are incomplete; policies/loyalsoldier.json must exist before rendering",
 					"on router deployments, rerun scripts/deploy-router.sh so missing policies/, policy-templates/, and rule-sources/ files are installed under the MCP working directory",
 					"do not create a config patch to fix missing base assets",
 				)
@@ -1192,7 +1192,7 @@ func configStatusNextActions(render configRenderState) []string {
 		return actions
 	}
 	if !render.CanRender {
-		return []string{"inspect intent.resolve_error in config_status and repair localclash.yaml or subscription node references before rendering"}
+		return []string{"inspect intent.resolve_error in config_status and repair localclash.json or subscription node references before rendering"}
 	}
 	if render.RecommendedTool != "" {
 		return []string{"call " + render.RecommendedTool + " to rebuild generated/mihomo.yaml from durable localClash state"}
@@ -1782,10 +1782,10 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		}
 	}
 	if in.Selection == "" {
-		in.Selection = "localclash-packs.yaml"
+		in.Selection = "localclash-packs.gob"
 	}
 	if in.LocalClashConfig == "" {
-		in.LocalClashConfig = "localclash.yaml"
+		in.LocalClashConfig = "localclash.json"
 	}
 	finish := startTaskStage(ctx, "load_subscription_nodes_before", map[string]any{"subscription": in.Merged})
 	beforeNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
@@ -1958,7 +1958,7 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 		impact.State = "requires_agent_replan"
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
-		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
+		impact.NextActions = []string{"read localclash.json", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
 		return impact
 	}
 	finishTaskStage(finish, nil, map[string]any{"proxy_groups": len(resolved.ProxyGroups), "policy_groups": len(resolved.PolicyGroups), "packs": len(resolved.Packs)})
@@ -2367,7 +2367,7 @@ func runtimeErrorResult(message string) map[string]any {
 		"error":   message,
 		"next_actions": []string{
 			"call subscriptions_status",
-			"call subscriptions_refresh if subscription.yaml is unavailable or stale",
+			"call subscriptions_refresh if subscription.gob is unavailable or stale",
 			"call run_runtime again after generated/mihomo.yaml can be rendered",
 		},
 		"warnings": []string{
@@ -2395,14 +2395,14 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 			setDefault(&in.Selection, s.state.Paths.PacksSelectionPath)
 		}
 	}
-	setDefault(&in.Config, "localclash.yaml")
-	setDefault(&in.Subscription, "subscription.yaml")
-	setDefault(&in.Policy, "policies/loyalsoldier.yaml")
+	setDefault(&in.Config, "localclash.json")
+	setDefault(&in.Subscription, "subscription.gob")
+	setDefault(&in.Policy, "policies/loyalsoldier.json")
 	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
 	setDefault(&in.RuntimeProfile, runtimeprofile.DefaultPath)
-	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.yaml")
+	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.json")
 	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
-	setDefault(&in.Selection, "localclash-packs.yaml")
+	setDefault(&in.Selection, "localclash-packs.gob")
 	setDefault(&in.Output, filepath.Join("generated", "mihomo.yaml"))
 	setDefault(&in.PatchesDir, filepath.Join(".runtime", "patches"))
 }
@@ -2508,19 +2508,19 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	if s.state != nil {
-		setDefault(&in.Config, "localclash.yaml")
+		setDefault(&in.Config, "localclash.json")
 		setDefault(&in.RuntimeProfileConfig, s.state.Paths.RuntimeProfilePath)
 		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
 		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 	}
-	setDefault(&in.Config, "localclash.yaml")
+	setDefault(&in.Config, "localclash.json")
 	setDefault(&in.RuntimeProfileConfig, runtimeprofile.DefaultPath)
 	setDefault(&in.PolicyTemplatesDir, policytemplate.DefaultDir)
 	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
-	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.yaml")
-	setDefault(&in.Subscription, "subscription.yaml")
+	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.json")
+	setDefault(&in.Subscription, "subscription.gob")
 	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
 
 	if strings.TrimSpace(in.RuntimeProfile) == "" && strings.TrimSpace(in.Core) == "" && strings.TrimSpace(in.PolicyTemplate) == "" {
@@ -2637,8 +2637,8 @@ func configConfigureNextActions(status runtimeprofile.Status, effectiveSubscript
 		return []string{
 			"call subscriptions_status",
 			"call subscriptions_configure if no subscription source is configured",
-			"call subscriptions_refresh to create subscription.yaml",
-			"call config_render after subscription.yaml is available",
+			"call subscriptions_refresh to create subscription.gob",
+			"call config_render after subscription.gob is available",
 		}
 	}
 	actions := []string{

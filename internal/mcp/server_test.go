@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 	"localclash/internal/routertakeover"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestHandleInitialize(t *testing.T) {
@@ -228,7 +231,7 @@ func TestToolsCallToolsListReturnsSelfDescription(t *testing.T) {
 
 func TestToolsCallConfigConfigureAndRuntimeProfileStatus(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "localclash-runtime.yaml")
+	path := filepath.Join(dir, "localclash-runtime.json")
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{RuntimeProfilePath: path},
 	})
@@ -276,17 +279,17 @@ func TestToolsCallConfigConfigureAndRuntimeProfileStatus(t *testing.T) {
 
 func TestToolsCallConfigConfigureDoesNotRenderGeneratedConfig(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	profilePath := filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.yaml")
+	profilePath := filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.json")
 	outputPath := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			SubscriptionPath:    paths.subscription,
 			PolicyPath:          paths.policy,
 			RulesCacheDir:       paths.cache,
-			PacksSelectionPath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-packs.yaml"),
+			PacksSelectionPath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-packs.gob"),
 			GeneratedConfig:     outputPath,
 			RuntimeProfilePath:  profilePath,
-			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.yaml"),
+			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.json"),
 			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
 		},
 	})
@@ -316,7 +319,7 @@ func TestToolsCallConfigConfigureDoesNotRenderGeneratedConfig(t *testing.T) {
 
 func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.yaml")
+	configPath := filepath.Join(dir, "localclash.json")
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
 	templatesDir := filepath.Join(dir, "policy-templates")
 	writeMCPV2FlyTemplateCache(t, cacheDir)
@@ -324,9 +327,9 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			RulesCacheDir:      cacheDir,
-			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.yaml"),
-			SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
-			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.yaml"),
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
 		},
 	})
 	resp := callHandleWithServer(t, server, map[string]any{
@@ -347,16 +350,16 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 		t.Fatalf("config_configure content = %+v, want updated config and missing subscription", content)
 	}
 	config := readMCPFile(t, configPath)
-	for _, want := range []string{"policy_template: localclash-default", "v2fly_dlc_openai", "v2fly_dlc_category_media", "template_all_subscription_nodes"} {
+	for _, want := range []string{`"policy_template": "localclash-default"`, "v2fly_dlc_openai", "v2fly_dlc_category_media", "template_all_subscription_nodes"} {
 		if !strings.Contains(config, want) {
-			t.Fatalf("localclash.yaml missing %q:\n%s", want, config)
+			t.Fatalf("localclash.json missing %q:\n%s", want, config)
 		}
 	}
 }
 
 func TestToolsCallRoutingExplainExplainsLayeredDefaultRoute(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.yaml")
+	configPath := filepath.Join(dir, "localclash.json")
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
 	writeMCPFile(t, configPath, `version: 2
 policy_template: localclash-default
@@ -398,8 +401,8 @@ packs:
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			RulesCacheDir:       cacheDir,
-			SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
-			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.yaml"),
+			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
 			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
 		},
 	})
@@ -454,8 +457,8 @@ func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testi
 			SubscriptionPath:    paths.subscription,
 			PolicyPath:          paths.policy,
 			RulesCacheDir:       paths.cache,
-			RuntimeProfilePath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.yaml"),
-			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.yaml"),
+			RuntimeProfilePath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.json"),
+			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.json"),
 			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
 			GeneratedConfig:     generated,
 		},
@@ -487,11 +490,11 @@ func TestToolsCallConfigRenderReportsMissingSubscription(t *testing.T) {
 	dir := t.TempDir()
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
-			SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
-			PolicyPath:          filepath.Join(dir, "policy.yaml"),
+			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
+			PolicyPath:          filepath.Join(dir, "policy.json"),
 			RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
-			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.yaml"),
-			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.yaml"),
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
 			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
 		},
 	})
@@ -682,8 +685,8 @@ func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
 		"params": map[string]any{
 			"name": "subscriptions_status",
 			"arguments": map[string]any{
-				"config":      filepath.Join(dir, "localclash-subscriptions.yaml"),
-				"merged":      filepath.Join(dir, "subscription.yaml"),
+				"config":      filepath.Join(dir, "localclash-subscriptions.json"),
+				"merged":      filepath.Join(dir, "subscription.gob"),
 				"runtime_dir": filepath.Join(dir, ".runtime", "subscriptions"),
 			},
 		},
@@ -710,7 +713,7 @@ func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) 
 		"params": map[string]any{
 			"name": "subscriptions_configure",
 			"arguments": map[string]any{
-				"config": filepath.Join(dir, "localclash-subscriptions.yaml"),
+				"config": filepath.Join(dir, "localclash-subscriptions.json"),
 				"sources": []map[string]any{
 					{"url": "https://example.com/sub?token=secret-token"},
 				},
@@ -743,7 +746,7 @@ func TestToolsCallSubscriptionsConfigureRejectsSourceID(t *testing.T) {
 		"params": map[string]any{
 			"name": "subscriptions_configure",
 			"arguments": map[string]any{
-				"config": filepath.Join(dir, "localclash-subscriptions.yaml"),
+				"config": filepath.Join(dir, "localclash-subscriptions.json"),
 				"sources": []map[string]any{
 					{"id": "primary", "url": "https://example.com/sub?token=secret-token"},
 				},
@@ -807,9 +810,9 @@ func TestToolsCallSubscriptionsRefreshAutoAppliesValidLocalClashSelector(t *test
 `))
 	}))
 	t.Cleanup(server.Close)
-	subConfig := filepath.Join(dir, "localclash-subscriptions.yaml")
+	subConfig := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
-	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	localClashConfig := filepath.Join(dir, "localclash.json")
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
 sources:
@@ -843,7 +846,7 @@ packs:
 				"runtime_dir":       runtimeDir,
 				"merged":            paths.subscription,
 				"localclash_config": localClashConfig,
-				"selection":         filepath.Join(dir, "localclash-packs.yaml"),
+				"selection":         filepath.Join(dir, "localclash-packs.gob"),
 				"policy":            paths.policy,
 				"rules_cache":       paths.cache,
 				"output":            generated,
@@ -871,7 +874,7 @@ packs:
 func TestToolsCallConfigStatusReturnsDurableProxyGroups(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
-	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	localClashConfig := filepath.Join(dir, "localclash.json")
 	writeMCPFile(t, localClashConfig, `version: 1
 proxy_groups:
   AI:
@@ -936,8 +939,8 @@ packs:
 func TestToolsCallConfigRenderUsesDurableSourceOfTruth(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
-	localClashConfig := filepath.Join(dir, "localclash.yaml")
-	selection := filepath.Join(dir, "localclash-packs.yaml")
+	localClashConfig := filepath.Join(dir, "localclash.json")
+	selection := filepath.Join(dir, "localclash-packs.gob")
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 	writeMCPFile(t, localClashConfig, `version: 1
 proxy_groups:
@@ -978,7 +981,7 @@ packs:
 		t.Fatalf("generated config missing durable pack/group:\n%s", rendered)
 	}
 	selectionText := readMCPFile(t, selection)
-	if !strings.Contains(selectionText, "pack: OpenAI") || !strings.Contains(selectionText, "target: AI") {
+	if !strings.Contains(selectionText, `"pack": "OpenAI"`) || !strings.Contains(selectionText, `"target": "AI"`) {
 		t.Fatalf("selection not derived from durable config:\n%s", selectionText)
 	}
 }
@@ -995,9 +998,9 @@ func TestToolsCallSubscriptionsRefreshReportsStaleExactNodes(t *testing.T) {
 `))
 	}))
 	t.Cleanup(server.Close)
-	subConfig := filepath.Join(dir, "localclash-subscriptions.yaml")
+	subConfig := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
-	localClashConfig := filepath.Join(dir, "localclash.yaml")
+	localClashConfig := filepath.Join(dir, "localclash.json")
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
 sources:
@@ -1029,7 +1032,7 @@ packs:
 				"runtime_dir":       runtimeDir,
 				"merged":            paths.subscription,
 				"localclash_config": localClashConfig,
-				"selection":         filepath.Join(dir, "localclash-packs.yaml"),
+				"selection":         filepath.Join(dir, "localclash-packs.gob"),
 				"policy":            paths.policy,
 				"rules_cache":       paths.cache,
 				"output":            generated,
@@ -1498,14 +1501,14 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 	if _, err := os.Stat("generated/mihomo.yaml"); err != nil {
 		t.Fatalf("generated config missing after apply: %v", err)
 	}
-	if _, err := os.Stat("localclash.yaml"); err != nil {
+	if _, err := os.Stat("localclash.json"); err != nil {
 		t.Fatalf("localclash config missing after apply: %v", err)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("config_patch_apply structured content is not serializable: %v", err)
 	}
-	selection := readMCPFile(t, "localclash-packs.yaml")
-	if !strings.Contains(selection, "pack: OpenAI") || !strings.Contains(selection, "target: AI") {
+	selection := readMCPFile(t, "localclash-packs.gob")
+	if !strings.Contains(selection, `"pack": "OpenAI"`) || !strings.Contains(selection, `"target": "AI"`) {
 		t.Fatalf("selection was not updated: %s", selection)
 	}
 }
@@ -1886,9 +1889,9 @@ func TestToolsCallDoctorReturnsSerializableResult(t *testing.T) {
 			"name": "doctor",
 			"arguments": map[string]any{
 				"core":         filepath.Join(dir, "missing-core"),
-				"subscription": filepath.Join(dir, "missing-subscription.yaml"),
+				"subscription": filepath.Join(dir, "missing-subscription.gob"),
 				"config":       filepath.Join(dir, "missing-generated.yaml"),
-				"policy":       filepath.Join(dir, "missing-policy.yaml"),
+				"policy":       filepath.Join(dir, "missing-policy.json"),
 				"dashboard":    filepath.Join(dir, "missing-dashboard"),
 				"workdir":      dir,
 			},
@@ -1911,8 +1914,8 @@ func TestToolsCallEnvironmentInspectReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
 	state := appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
-			SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
-			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.yaml"),
+			SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
 			GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
 			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
 			RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
@@ -2236,7 +2239,7 @@ func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
 		"params": map[string]any{
 			"name": "stop_runtime",
 			"arguments": map[string]any{
-				"runtime_profile": filepath.Join(dir, "localclash-runtime.yaml"),
+				"runtime_profile": filepath.Join(dir, "localclash-runtime.json"),
 				"runtime_dir":     workDir,
 				"background":      false,
 			},
@@ -2315,7 +2318,7 @@ sleep 30
 			MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
 			CorePath:            core,
 			PacksSelectionPath:  filepath.Join(dir, "missing-packs.yaml"),
-			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.yaml"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
 			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
 		},
 		Config: appinit.ConfigState{
@@ -2564,7 +2567,7 @@ func mcpBlackmatrixPack(id, target string) rules.Pack {
 
 func writeMCPPolicyTemplateFixture(t *testing.T, dir string) {
 	t.Helper()
-	writeMCPFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+	writeMCPFile(t, filepath.Join(dir, "localclash-default.json"), `id: localclash-default
 name: localClash Default
 description: ACL4SSR-like default policy.
 default: true
@@ -2701,8 +2704,8 @@ func setupMCPPlanFixture(t *testing.T) mcpPlanFixture {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	paths := mcpPlanFixture{
-		subscription: filepath.Join(dir, "subscription.yaml"),
-		policy:       filepath.Join(dir, "policy.yaml"),
+		subscription: filepath.Join(dir, "subscription.gob"),
+		policy:       filepath.Join(dir, "policy.json"),
 		cache:        filepath.Join(dir, ".runtime", "rules", "packs"),
 		outputDir:    filepath.Join(dir, ".runtime", "plans"),
 	}
@@ -2742,7 +2745,7 @@ modes:
       - match: true
         target: direct
 `)
-	writeMCPFile(t, filepath.Join(dir, "localclash-packs.yaml"), `version: 1
+	writeMCPFile(t, filepath.Join(dir, "localclash-packs.gob"), `version: 1
 proxy_groups: {}
 enabled_packs: []
 `)
@@ -2775,9 +2778,9 @@ func setupMCPSubscriptionsFixture(t *testing.T) mcpSubscriptionsFixture {
 	}))
 	t.Cleanup(server.Close)
 	paths := mcpSubscriptionsFixture{
-		config:     filepath.Join(dir, "localclash-subscriptions.yaml"),
+		config:     filepath.Join(dir, "localclash-subscriptions.json"),
 		runtimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
-		merged:     filepath.Join(dir, "subscription.yaml"),
+		merged:     filepath.Join(dir, "subscription.gob"),
 	}
 	writeMCPFile(t, paths.config, fmt.Sprintf(`version: 1
 sources:
@@ -2790,7 +2793,7 @@ sources:
 func setupMCPSubscriptionNodesFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	subscription := filepath.Join(dir, "subscription.yaml")
+	subscription := filepath.Join(dir, "subscription.gob")
 	writeMCPFile(t, subscription, `proxies:
   - name: SG 01
     type: ss
@@ -2809,13 +2812,80 @@ func writeMCPFile(t *testing.T, path string, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := doc["proxies"]; ok {
+			err = gob.NewEncoder(file).Encode(struct {
+				Version int
+				Data    map[string]any
+				Raw     []byte
+			}{Version: 1, Data: doc, Raw: []byte(content)})
+		} else {
+			var selection rules.Selection
+			data, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &selection); err != nil {
+				t.Fatal(err)
+			}
+			err = gob.NewEncoder(file).Encode(selection)
+		}
+		closeErr := file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func readMCPFile(t *testing.T, path string) string {
 	t.Helper()
+	if filepath.Ext(path) == ".gob" {
+		file, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		var selection rules.Selection
+		if err := gob.NewDecoder(file).Decode(&selection); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.MarshalIndent(selection, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

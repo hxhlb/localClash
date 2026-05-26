@@ -3,6 +3,7 @@ package doctor
 import (
 	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -61,12 +62,12 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	report := Report{}
 
 	core := checkCore(ctx, opts)
-	subscription := checkYAMLFile("subscription", "subscription.yaml", opts.SubscriptionPath)
+	subscription := checkConfigFile("subscription", "subscription.gob", opts.SubscriptionPath)
 	if subscription.Status == statusOK {
 		checkSubscriptionProxyCount(&subscription)
 	}
-	config := checkYAMLFile("generated_config", "generated/mihomo.yaml", opts.ConfigPath)
-	policy := checkYAMLFile("policy", "policy", opts.PolicyPath)
+	config := checkConfigFile("generated_config", "generated/mihomo.yaml", opts.ConfigPath)
+	policy := checkConfigFile("policy", "policy", opts.PolicyPath)
 	if policy.Status == statusOK {
 		checkPolicyMode(&policy)
 	}
@@ -101,13 +102,13 @@ func normalizeOptions(opts Options) Options {
 		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.SubscriptionPath == "" {
-		opts.SubscriptionPath = "subscription.yaml"
+		opts.SubscriptionPath = "subscription.gob"
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "generated/mihomo.yaml"
 	}
 	if opts.PolicyPath == "" {
-		opts.PolicyPath = "policies/loyalsoldier.yaml"
+		opts.PolicyPath = "policies/loyalsoldier.json"
 	}
 	if opts.DashboardDir == "" {
 		opts.DashboardDir = ".runtime/mihomo/ui/zashboard"
@@ -171,7 +172,7 @@ func checkCore(ctx context.Context, opts Options) Check {
 	return check
 }
 
-func checkYAMLFile(id, title, path string) Check {
+func checkConfigFile(id, title, path string) Check {
 	check := Check{ID: id, Title: title, Path: path}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -187,9 +188,9 @@ func checkYAMLFile(id, title, path string) Check {
 		check.Summary = "path is a directory"
 		return check
 	}
-	if _, err := readYAMLMap(path); err != nil {
+	if _, err := readDocMap(path); err != nil {
 		check.Status = statusFail
-		check.Summary = fmt.Sprintf("YAML parse failed: %v", err)
+		check.Summary = fmt.Sprintf("config parse failed: %v", err)
 		return check
 	}
 	check.Status = statusOK
@@ -281,7 +282,7 @@ func workingDirectoryTree(root string, maxDepth, maxEntries int) ([]string, erro
 }
 
 func checkSubscriptionProxyCount(check *Check) {
-	data, err := readYAMLMap(check.Path)
+	data, err := readDocMap(check.Path)
 	if err != nil {
 		return
 	}
@@ -296,7 +297,7 @@ func checkSubscriptionProxyCount(check *Check) {
 }
 
 func checkPolicyMode(check *Check) {
-	data, err := readYAMLMap(check.Path)
+	data, err := readDocMap(check.Path)
 	if err != nil {
 		return
 	}
@@ -634,6 +635,49 @@ func readYAMLMap(path string) (map[string]any, error) {
 		return nil, errors.New("YAML document is empty")
 	}
 	return out, nil
+}
+
+func readDocMap(path string) (map[string]any, error) {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".gob":
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var artifact struct {
+			Version int
+			Data    map[string]any
+			Raw     []byte
+		}
+		if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
+			return nil, err
+		}
+		if artifact.Version != 1 {
+			return nil, fmt.Errorf("subscription artifact schema version mismatch: expected 1, got %d; run localclash subscriptions refresh", artifact.Version)
+		}
+		if artifact.Data == nil {
+			return nil, errors.New("gob document is empty")
+		}
+		return artifact.Data, nil
+	case ".json":
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		var out map[string]any
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil, err
+		}
+		if out == nil {
+			return nil, errors.New("JSON document is empty")
+		}
+		return out, nil
+	default:
+		return readYAMLMap(path)
+	}
 }
 
 func stringList(raw any) []string {

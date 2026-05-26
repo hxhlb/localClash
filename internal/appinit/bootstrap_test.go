@@ -2,26 +2,30 @@ package appinit
 
 import (
 	"context"
+	"encoding/gob"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"localclash/internal/rules"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestBootstrapBuildsRuntimeStateFromLocalArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "bin", "mihomo")
 	writeAppinitFile(t, core, "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo Mihomo test; exit 0; fi\nexit 0\n", 0o755)
-	subscription := filepath.Join(dir, "subscription.yaml")
+	subscription := filepath.Join(dir, "subscription.gob")
 	writeAppinitFile(t, subscription, `proxies:
   - name: SG 01
     type: ss
     server: sg.example.com
     password: secret
 `, 0o644)
-	policy := filepath.Join(dir, "policy.yaml")
+	policy := filepath.Join(dir, "policy.json")
 	writeAppinitFile(t, policy, `rule_source:
   base_url: https://example.com/rules
 groups:
@@ -61,7 +65,7 @@ modes:
 		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:           core,
 		PolicyPath:         policy,
-		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 	})
 
 	if !state.Core.Exists || !strings.Contains(state.Core.Version, "Mihomo test") {
@@ -88,11 +92,11 @@ func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
 		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
 		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
-		SubscriptionPath:   filepath.Join(dir, "subscription.yaml"),
+		SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
 		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:           filepath.Join(dir, "bin", "mihomo"),
-		PolicyPath:         filepath.Join(dir, "policy.yaml"),
-		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.yaml"),
+		PolicyPath:         filepath.Join(dir, "policy.json"),
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 	})
 
 	if state.Core.Exists {
@@ -116,14 +120,14 @@ func TestBootstrapCanSkipGeneratedConfigRender(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "bin", "mihomo")
 	writeAppinitFile(t, core, "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo Mihomo test; exit 0; fi\nexit 0\n", 0o755)
-	subscription := filepath.Join(dir, "subscription.yaml")
+	subscription := filepath.Join(dir, "subscription.gob")
 	writeAppinitFile(t, subscription, `proxies:
   - name: SG 01
     type: ss
     server: sg.example.com
     password: secret
 `, 0o644)
-	policy := filepath.Join(dir, "policy.yaml")
+	policy := filepath.Join(dir, "policy.json")
 	writeAppinitFile(t, policy, `rule_source:
   base_url: https://example.com/rules
 groups:
@@ -150,7 +154,7 @@ modes:
 		MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:            core,
 		PolicyPath:          policy,
-		RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
 		SkipGeneratedConfig: true,
 	})
 
@@ -184,7 +188,7 @@ func TestBootstrapDefaultsToDetectedRouterWorkDir(t *testing.T) {
 	if state.Paths.GeneratedConfig != filepath.Join(routerDir, "generated", "mihomo.yaml") {
 		t.Fatalf("generated config = %q, want detected router workdir", state.Paths.GeneratedConfig)
 	}
-	if got := defaultWorkDirPath(state.Paths.RuntimeRoot, "localclash.yaml"); got != filepath.Join(routerDir, "localclash.yaml") {
+	if got := defaultWorkDirPath(state.Paths.RuntimeRoot, "localclash.json"); got != filepath.Join(routerDir, "localclash.json") {
 		t.Fatalf("localclash config path = %q, want detected router workdir", got)
 	}
 	if _, err := os.Stat(filepath.Join(wrongDir, ".runtime")); !os.IsNotExist(err) {
@@ -197,7 +201,46 @@ func writeAppinitFile(t *testing.T, path, content string, mode os.FileMode) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodeErr := gob.NewEncoder(file).Encode(struct {
+			Version int
+			Data    map[string]any
+			Raw     []byte
+		}{Version: 1, Data: doc, Raw: []byte(content)})
+		closeErr := file.Close()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, mode); err != nil {
 		t.Fatal(err)
 	}
 }

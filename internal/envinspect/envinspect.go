@@ -218,10 +218,10 @@ func normalizeOptions(opts Options) Options {
 		opts.Paths.RuntimeRoot = ".runtime"
 	}
 	if opts.Paths.SubscriptionPath == "" {
-		opts.Paths.SubscriptionPath = "subscription.yaml"
+		opts.Paths.SubscriptionPath = "subscription.gob"
 	}
 	if opts.Paths.SubscriptionConfig == "" {
-		opts.Paths.SubscriptionConfig = "localclash-subscriptions.yaml"
+		opts.Paths.SubscriptionConfig = "localclash-subscriptions.json"
 	}
 	if opts.Paths.GeneratedConfig == "" {
 		opts.Paths.GeneratedConfig = "generated/mihomo.yaml"

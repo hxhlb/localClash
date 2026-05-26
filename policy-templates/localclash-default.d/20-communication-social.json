@@ -1,0 +1,130 @@
+{
+  "id": "default.communication-social.v1",
+  "description": "Add communication and social media business groups.",
+  "config": {
+    "version": 2,
+    "policy_groups": {
+      "💬 通信服务": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点",
+          "🌐 全球直连"
+        ],
+        "reason": "通信服务走业务层选择器。",
+        "boundary": "business_to_exit_layer"
+      },
+      "👥 社交媒体": {
+        "mode": "manual",
+        "exits": [
+          "MANUAL",
+          "AUTO",
+          "🇭🇰 香港节点",
+          "🇺🇸 美国节点",
+          "🇯🇵 日本节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点",
+          "🌐 全球直连"
+        ],
+        "reason": "非中国社交媒体走业务层选择器。",
+        "boundary": "business_to_exit_layer"
+      }
+    },
+    "packs": [
+      {
+        "id": "v2fly_dlc_telegram",
+        "type": "geosite",
+        "target": "💬 通信服务",
+        "reason": "Route Telegram through the communication business-layer selector."
+      },
+      {
+        "id": "v2fly_dlc_category_communication",
+        "type": "geosite",
+        "target": "💬 通信服务",
+        "reason": "Route communication services through a business-layer selector."
+      },
+      {
+        "id": "v2fly_dlc_category_social_media__cn",
+        "type": "geosite",
+        "target": "👥 社交媒体",
+        "reason": "Route non-China social media through a business-layer selector."
+      }
+    ],
+    "custom_rules": [
+      {
+        "id": "telegram-ip-ranges",
+        "target": "💬 通信服务",
+        "reason": "Route Telegram IP connections that do not expose a domain/SNI to GEOSITE.",
+        "rules": [
+          {
+            "type": "ip_cidr",
+            "value": "91.105.192.0/23",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "91.108.4.0/22",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "91.108.8.0/21",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "91.108.16.0/21",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "91.108.56.0/22",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "95.161.64.0/20",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "149.154.160.0/20",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr",
+            "value": "185.76.151.0/24",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr6",
+            "value": "2001:67c:4e8::/48",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr6",
+            "value": "2001:b28:f23c::/47",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr6",
+            "value": "2001:b28:f23f::/48",
+            "no_resolve": true
+          },
+          {
+            "type": "ip_cidr6",
+            "value": "2a0a:f280::/32",
+            "no_resolve": true
+          }
+        ]
+      }
+    ]
+  }
+}

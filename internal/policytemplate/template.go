@@ -1,6 +1,7 @@
 package policytemplate
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,8 +9,6 @@ import (
 	"strings"
 
 	"localclash/internal/localconfig"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -114,7 +113,7 @@ func loadPatchFile(template File, ref PatchRef) (PatchFile, error) {
 		return PatchFile{}, err
 	}
 	var patch PatchFile
-	if err := yaml.Unmarshal(data, &patch); err != nil {
+	if err := json.Unmarshal(data, &patch); err != nil {
 		return PatchFile{}, fmt.Errorf("%s: %w", path, err)
 	}
 	patch.Path = path
@@ -253,7 +252,7 @@ func loadFile(path string) (File, error) {
 		return File{}, err
 	}
 	var template File
-	if err := yaml.Unmarshal(data, &template); err != nil {
+	if err := json.Unmarshal(data, &template); err != nil {
 		return File{}, fmt.Errorf("%s: %w", path, err)
 	}
 	template.Path = path
@@ -328,5 +327,5 @@ func shouldSkip(name string) bool {
 		return true
 	}
 	ext := strings.ToLower(filepath.Ext(name))
-	return ext != ".yaml" && ext != ".yml"
+	return ext != ".json"
 }

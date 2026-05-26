@@ -72,7 +72,7 @@ localclash run
 
 If no subscription has been configured, runtime startup should stop with a clear
 bootstrap message instead of guessing. The user or agent should configure one or
-more subscription sources first, then refresh the effective `subscription.yaml`.
+more subscription sources first, then refresh the effective `subscription.gob`.
 
 Low-level operations such as rule source adaptation, rules fragment rendering,
 and raw Mihomo config testing are implementation details of this runtime and
@@ -175,23 +175,23 @@ MCP subscription bootstrap tools:
 
 - `subscriptions_status`: inspect whether subscription sources are configured,
   whether per-source runtime artifacts exist, and whether the merged effective
-  `subscription.yaml` exists.
+  `subscription.gob` exists.
 - `subscriptions_configure`: save one or more subscription sources into
-  `localclash-subscriptions.yaml` without refreshing them.
+  `localclash-subscriptions.json` without refreshing them.
 - `subscriptions_refresh`: refresh configured sources, validate and normalize
-  them, write `.runtime/subscriptions/<id>.yaml`, and merge the effective
-  `subscription.yaml`. It also returns proxy-node diffs and, when
-  `localclash.yaml` exists, reevaluates saved selectors against the refreshed
+  them, write `.runtime/subscriptions/<id>.gob`, and merge the effective
+  `subscription.gob`. It also returns proxy-node diffs and, when
+  `localclash.json` exists, reevaluates saved selectors against the refreshed
   node list.
 
 From a clean setup, an agent should call `subscriptions_status` first. If no
 sources are configured, it should ask the user for one or more subscription
 URLs, call `subscriptions_configure`, then call `subscriptions_refresh`.
-`subscription.yaml` is the merged output used by the render pipeline, not the
-only source of truth. `localclash-subscriptions.yaml` contains sensitive
+`subscription.gob` is the merged output used by the render pipeline, not the
+only source of truth. `localclash-subscriptions.json` contains sensitive
 subscription URLs and must not be committed. If a saved selector in
-`localclash.yaml` still matches after refresh, localClash updates the selected
-nodes, derives `localclash-packs.yaml`, and regenerates `generated/mihomo.yaml`.
+`localclash.json` still matches after refresh, localClash updates the selected
+nodes, derives `localclash-packs.gob`, and regenerates `generated/mihomo.yaml`.
 If exact `nodes` were selected and one of those nodes disappears, the tool
 reports `state: stale_exact_nodes` with `missing_nodes` and leaves the active
 generated config unchanged. New nodes are only reported in `node_diff.added`;
@@ -238,7 +238,7 @@ Ronnie's app maintenance packs are exposed as `syncnext_SyncnextProxy` and
 
 MCP config model:
 
-- `localclash.yaml` is the source of truth.
+- `localclash.json` is the source of truth.
 - `generated/mihomo.yaml` is a build artifact.
 - `.runtime/patches/<patch-id>/` contains review artifacts.
 
@@ -247,9 +247,9 @@ MCP config tools:
 - `config_configure`: configure base product state with optional `core`
   (`meta` or `smart`), `runtime_profile` (`normal` or `router`), and
   `policy_template` (`minimal` or `localclash-default`). It writes
-  `localclash-runtime.yaml` and/or `localclash.yaml`, but does not configure
+  `localclash-runtime.json` and/or `localclash.json`, but does not configure
   subscriptions, render generated config, start runtime, or apply router
-  takeover. Templates are disk YAML manifests under `policy-templates/`.
+  takeover. Templates are disk JSON manifests under `policy-templates/`.
   `localclash-default` is a patch-set manifest whose ordered files under
   `policy-templates/localclash-default.d/` are merged during initialization.
   It is the ACL4SSR-like v2fly-dlc/GEOSITE default for open-box use and renders
@@ -263,19 +263,19 @@ MCP config tools:
   matches are needed, or `detail: true` when a full generated-summary/overlay
   audit is needed.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable
-  `localclash.yaml`, subscription, policy, and runtime profile. If
-  `localclash.yaml` does not exist, it renders the base config without an
+  `localclash.json`, subscription, policy, and runtime profile. If
+  `localclash.json` does not exist, it renders the base config without an
   overlay. It ignores patches and does not start Mihomo.
 - `routing_explain`: read-only routing discovery for questions like
   "what handles Steam?", "what routes openai.com?", or "how would I route
-  ChatGPT through Singapore?". It reads durable `localclash.yaml` intent,
+  ChatGPT through Singapore?". It reads durable `localclash.json` intent,
   active packs, business policy groups, reusable exit groups, and optional
   cached rule matches, then returns the safe patch path instead of mutating
   config.
 - `config_patch_create`: create a reviewable patch with candidate
-  `localclash.yaml` and `mihomo.yaml` under `.runtime/patches/<patch-id>/`.
-- `config_patch_apply`: apply a reviewed patch by writing `localclash.yaml`,
-  deriving `localclash-packs.yaml`, and regenerating `generated/mihomo.yaml`.
+  `localclash.json` and `mihomo.yaml` under `.runtime/patches/<patch-id>/`.
+- `config_patch_apply`: apply a reviewed patch by writing `localclash.json`,
+  deriving `localclash-packs.gob`, and regenerating `generated/mihomo.yaml`.
 
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from localClash-managed overlay config.
@@ -287,11 +287,11 @@ MCP runtime profile tools:
 
 `normal` is the standalone local proxy profile and matches the original generated
 Mihomo shell. `router` is a transparent-proxy profile based on the local
-router redir-host-mix reference. Profile contents are ordinary YAML files under
-`profiles/`: `normal.yaml` and `router.yaml` are user-owned, while
-`normal.default.yaml` and `router.default.yaml` are templates. On first use,
-localClash writes the `.default.yaml` files and copies missing user profiles from
-them. Advanced users can edit `profiles/*.yaml` directly, or ask an agent to use
+router redir-host-mix reference. Profile contents are ordinary JSON files under
+`profiles/`: `normal.json` and `router.json` are user-owned, while
+`normal.default.json` and `router.default.json` are templates. On first use,
+localClash writes the `.default.json` files and copies missing user profiles from
+them. Advanced users can edit `profiles/*.json` directly, or ask an agent to use
 `nl_file` and `sed_file` for explicit line-based edits. The product MCP path is
 still profile switching, not granular DNS/TUN patching.
 
@@ -316,13 +316,13 @@ MCP patch-building tools:
   `config_patch_create.overlay.rule_providers`.
 - `config_patch_create`: accepts proxy groups, policy groups, third-party packs,
   custom rules, and external rule-providers, then renders candidate
-  `localclash.yaml`, derived `localclash-packs.yaml`, and `mihomo.yaml` into
+  `localclash.json`, derived `localclash-packs.gob`, and `mihomo.yaml` into
   `.runtime/patches/<patch-id>/`. MCP `arguments` must be a JSON object, not a
   JSON-encoded string. If a pack, custom rule, or external provider targets a new
   proxy group or policy group, include it in `overlay.proxy_groups` or
   `overlay.policy_groups` in the same call.
 - `config_patch_apply`: applies a reviewed patch by writing durable
-  `localclash.yaml`, deriving `localclash-packs.yaml`, and regenerating
+  `localclash.json`, deriving `localclash-packs.gob`, and regenerating
   `generated/mihomo.yaml`.
 
 For flat pack routing such as "Steam through HK", an agent should first call
@@ -343,10 +343,10 @@ rule-provider URL, call `rule_provider_build`, then create a patch with desired
 
 Patch creation does not overwrite active generated files, start or restart
 Mihomo, or apply router system changes. It loads the current durable
-`localclash.yaml`, layers the requested overlay on top, and writes the merged
+`localclash.json`, layers the requested overlay on top, and writes the merged
 candidate into the patch directory. After user review, `config_patch_apply`
 resolves selectors against the current subscription, backs up replaced local
-artifacts, writes `localclash.yaml`, derives `localclash-packs.yaml`, and
+artifacts, writes `localclash.json`, derives `localclash-packs.gob`, and
 regenerates `generated/mihomo.yaml`. It still does not start or restart Mihomo;
 use `run_runtime` for that confirmed step.
 The normal reviewed-change loop is:
@@ -467,9 +467,9 @@ local-only diagnosis.
 
 ## Local Data
 
-Do not commit downloaded subscriptions, user-edited `profiles/*.yaml`, generated
-configs, `localclash.yaml`, `localclash-packs.yaml`, or files containing node
-credentials. Committed `.default.yaml` profile templates are source files.
+Do not commit downloaded subscriptions, user-edited `profiles/*.json`, generated
+configs, `localclash.json`, `localclash-packs.gob`, or files containing node
+credentials. Committed `.default.json` profile templates are source files.
 
 ## Core Download
 
@@ -508,7 +508,7 @@ go run . core download --target router --flavor smart --arch arm64 --output bin/
 Download a subscription with a Clash-compatible User-Agent:
 
 ```bash
-go run . subscription download --url "https://example.com/playlist?token=..." --output subscription.yaml --force
+go run . subscription download --url "https://example.com/playlist?token=..." --output subscription.gob --force
 ```
 
 The default User-Agent is `clash-verge/v1.5.1`. The downloaded subscription file is local data and should not be committed.
@@ -542,7 +542,7 @@ go run . config render --force
 The default render path is `generated/mihomo.yaml`. The renderer treats the
 subscription as a proxy source and owns the runtime rules, rule providers, and
 proxy groups locally. It also applies the active mode from
-`localclash-runtime.yaml`, which points to editable profile YAML files under
+`localclash-runtime.json`, which points to editable profile YAML files under
 `profiles/`; use `go run . config render --runtime-profile <path> --force` to
 test an alternate runtime selector. For MCP-managed routing changes, prefer
 `config_patch_create` followed by `config_patch_apply`; for plain MCP rebuilds,
@@ -600,9 +600,9 @@ an installed-but-unconfigured state:
 go run . reset
 ```
 
-The command deletes `.runtime/`, `generated/`, `profiles/`, `subscription*.yaml`,
-`localclash.yaml`, `localclash-packs.yaml`, `localclash-subscriptions.yaml`, and
-`localclash-runtime.yaml`. It keeps downloaded binaries in `bin/`, built-in
+The command deletes `.runtime/`, `generated/`, `profiles/`, `subscription*.gob`,
+`localclash.json`, `localclash-packs.gob`, `localclash-subscriptions.json`, and
+`localclash-runtime.json`. It keeps downloaded binaries in `bin/`, built-in
 policies, rule sources, source code, docs, and scripts. By default it prints the
 delete plan and requires typing `reset localclash`; use `--dry-run` to inspect
 the plan only or `--yes` for non-interactive SSH/script usage. If Mihomo is

@@ -1,6 +1,7 @@
 package configrender
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"localclash/internal/configmeta"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildRulesWhitelistFallback(t *testing.T) {
@@ -122,7 +125,7 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 		SourcePath:         paths.subscription,
 		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "base.yaml"),
-		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
 	})
 	if err != nil {
@@ -155,10 +158,10 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
 		PolicyPath:         paths.policy,
-		OutputPath:         filepath.Join(paths.dir, "with-packs.yaml"),
+		OutputPath:         filepath.Join(paths.dir, "with-packs.gob"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
-		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
 	})
 	if err != nil {
@@ -261,7 +264,7 @@ enabled_packs:
 		OutputPath:         filepath.Join(paths.dir, "default-overlay.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
-		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
 	})
 	if err != nil {
@@ -340,7 +343,7 @@ modes:
 		SourcePath:         paths.subscription,
 		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "without-legacy-apple.yaml"),
-		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
 	})
 	if err != nil {
@@ -379,7 +382,7 @@ enabled_packs:
 		OutputPath:         filepath.Join(paths.dir, "empty-candidates.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
-		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
 	})
 	if err == nil {
@@ -389,7 +392,7 @@ enabled_packs:
 
 func TestRenderAppliesActiveRuntimeProfile(t *testing.T) {
 	paths := writeRenderFixture(t)
-	profilePath := filepath.Join(paths.dir, "localclash-runtime.yaml")
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
 	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +429,7 @@ func TestRenderAppliesActiveRuntimeProfile(t *testing.T) {
 
 func TestRenderSmartCoreMaterializesAutoGroupsAsSmart(t *testing.T) {
 	paths := writeRenderFixture(t)
-	profilePath := filepath.Join(paths.dir, "localclash-runtime.yaml")
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
 	if _, err := runtimeprofile.Configure(profilePath, "", runtimeprofile.CoreSmart); err != nil {
 		t.Fatal(err)
 	}
@@ -515,11 +518,11 @@ func writeRenderFixture(t *testing.T) renderFixturePaths {
 	dir := t.TempDir()
 	paths := renderFixturePaths{
 		dir:              dir,
-		subscription:     filepath.Join(dir, "subscription.yaml"),
-		subscriptionNoJP: filepath.Join(dir, "subscription-no-jp.yaml"),
-		policy:           filepath.Join(dir, "policy.yaml"),
+		subscription:     filepath.Join(dir, "subscription.gob"),
+		subscriptionNoJP: filepath.Join(dir, "subscription-no-jp.gob"),
+		policy:           filepath.Join(dir, "policy.json"),
 		cacheDir:         filepath.Join(dir, "packs"),
-		selection:        filepath.Join(dir, "packs.yaml"),
+		selection:        filepath.Join(dir, "packs.gob"),
 	}
 	writeFile(t, paths.subscription, `proxies:
   - name: "🇯🇵日本01 | JP"
@@ -638,14 +641,73 @@ func writeRenderPackIndex(t *testing.T, cacheDir string) {
 
 func writeFile(t *testing.T, path string, content string) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := doc["proxies"]; ok {
+			err = gob.NewEncoder(file).Encode(struct {
+				Version int
+				Data    map[string]any
+				Raw     []byte
+			}{Version: 1, Data: doc, Raw: []byte(content)})
+		} else {
+			var selection rules.Selection
+			data, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &selection); err != nil {
+				t.Fatal(err)
+			}
+			err = gob.NewEncoder(file).Encode(selection)
+		}
+		closeErr := file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func readTestYAML(t *testing.T, path string) map[string]any {
 	t.Helper()
-	out, err := readYAMLMap(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	err = yaml.Unmarshal(data, &out)
 	if err != nil {
 		t.Fatal(err)
 	}

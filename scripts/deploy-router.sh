@@ -250,11 +250,11 @@ fi
 
 migrated=0
 for file in \
-  localclash-subscriptions.yaml \
-  subscription.yaml \
-  localclash.yaml \
-  localclash-packs.yaml \
-  localclash-runtime.yaml
+  localclash-subscriptions.json \
+  subscription.gob \
+  localclash.json \
+  localclash-packs.gob \
+  localclash-runtime.json
 do
   source="$legacy_workdir/$file"
   target="$remote_workdir/$file"

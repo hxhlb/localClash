@@ -145,10 +145,10 @@ func normalizeOptions(opts Options) Options {
 		opts.GeneratedConfig = defaultPath(baseDir, "generated/mihomo.yaml")
 	}
 	if strings.TrimSpace(opts.SubscriptionConfig) == "" {
-		opts.SubscriptionConfig = defaultPath(baseDir, "localclash-subscriptions.yaml")
+		opts.SubscriptionConfig = defaultPath(baseDir, "localclash-subscriptions.json")
 	}
 	if strings.TrimSpace(opts.SubscriptionPath) == "" {
-		opts.SubscriptionPath = defaultPath(baseDir, "subscription.yaml")
+		opts.SubscriptionPath = defaultPath(baseDir, "subscription.gob")
 	}
 	if strings.TrimSpace(opts.SubscriptionRuntime) == "" {
 		opts.SubscriptionRuntime = filepath.Join(opts.RuntimeRoot, "subscriptions")
@@ -157,10 +157,10 @@ func normalizeOptions(opts Options) Options {
 		opts.MihomoRuntimeDir = filepath.Join(opts.RuntimeRoot, "mihomo")
 	}
 	if strings.TrimSpace(opts.PolicyPath) == "" {
-		opts.PolicyPath = defaultPath(baseDir, "policies/loyalsoldier.yaml")
+		opts.PolicyPath = defaultPath(baseDir, "policies/loyalsoldier.json")
 	}
-	if strings.TrimSpace(opts.PacksSelectionPath) == "" && fileExists(defaultPath(baseDir, "localclash-packs.yaml")) {
-		opts.PacksSelectionPath = defaultPath(baseDir, "localclash-packs.yaml")
+	if strings.TrimSpace(opts.PacksSelectionPath) == "" && fileExists(defaultPath(baseDir, "localclash-packs.gob")) {
+		opts.PacksSelectionPath = defaultPath(baseDir, "localclash-packs.gob")
 	}
 	if strings.TrimSpace(opts.RuntimeProfilePath) == "" {
 		opts.RuntimeProfilePath = defaultPath(baseDir, runtimeprofile.DefaultPath)
@@ -210,9 +210,9 @@ func hasExplicitPath(opts Options) bool {
 
 func looksLikeWorkDir(dir string) bool {
 	for _, marker := range []string{
-		"localclash-runtime.yaml",
-		"localclash.yaml",
-		"subscription.yaml",
+		"localclash-runtime.json",
+		"localclash.json",
+		"subscription.gob",
 		filepath.Join("generated", "mihomo.yaml"),
 		filepath.Join(".runtime", "mihomo", "mihomo.pid"),
 		"policy-templates",
@@ -277,7 +277,7 @@ func inspectSubscription(state *RuntimeState, opts Options) {
 		if status.Message != "" {
 			state.Subscription.Diagnostic = status.Message
 		} else {
-			state.Subscription.Diagnostic = "effective subscription.yaml is unavailable; run subscriptions_refresh"
+			state.Subscription.Diagnostic = "effective subscription.gob is unavailable; run subscriptions_refresh"
 		}
 		state.addDiagnostic("subscription", "warning", state.Subscription.Diagnostic)
 	}
@@ -326,7 +326,7 @@ func ensureGeneratedConfig(state *RuntimeState, opts Options) {
 		RuntimeProfilePath: opts.RuntimeProfilePath,
 		Force:              true,
 	}
-	configPath := defaultWorkDirPath(opts.RuntimeRoot, "localclash.yaml")
+	configPath := defaultWorkDirPath(opts.RuntimeRoot, "localclash.json")
 	if fileExists(configPath) {
 		config, err := localconfig.Load(configPath)
 		if err != nil {
@@ -350,7 +350,7 @@ func ensureGeneratedConfig(state *RuntimeState, opts Options) {
 		}
 		selectionPath := opts.PacksSelectionPath
 		if strings.TrimSpace(selectionPath) == "" {
-			selectionPath = defaultWorkDirPath(opts.RuntimeRoot, "localclash-packs.yaml")
+			selectionPath = defaultWorkDirPath(opts.RuntimeRoot, "localclash-packs.gob")
 		}
 		if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
 			state.Config.Available = fileExists(opts.GeneratedConfig)

@@ -141,7 +141,7 @@ func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (
 	result := routingExplainResult{
 		Query:      in.Query,
 		Config:     in.Config,
-		RouteModel: "localclash.yaml durable intent; default template model is business group -> exit group -> subscription nodes",
+		RouteModel: "localclash.json durable intent; default template model is business group -> exit group -> subscription nodes",
 	}
 	config, err := localconfig.Load(in.Config)
 	if err != nil {
@@ -168,7 +168,7 @@ func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (
 		config = resolved.Config
 	} else {
 		result.ResolveError = resolveErr.Error()
-		result.Warnings = append(result.Warnings, "selector/node resolution is unavailable; explanation is based on durable localclash.yaml intent only")
+		result.Warnings = append(result.Warnings, "selector/node resolution is unavailable; explanation is based on durable localclash.json intent only")
 	}
 
 	catalog, catalogErr := rules.LoadPackCatalog(in.RulesCache)
@@ -509,10 +509,10 @@ func defaultRoutingPatchGuidance(target string) routingPatchGuidance {
 	return routingPatchGuidance{
 		Summary: summary,
 		Steps: []string{
-			"Call config_status to capture current durable localclash.yaml intent.",
+			"Call config_status to capture current durable localclash.json intent.",
 			"For a new or changed exit, call proxy_group_build or reuse an existing proxy group returned by routing_explain.reusable_exits.",
 			"For ACL4SSR-style business routing, call policy_group_build with the desired exits, then config_patch_create with overlay.policy_groups and matching packs/custom_rules/rule_providers.",
-			"Review the returned candidate localclash.yaml and mihomo.yaml, then call config_patch_apply with the exact patch_id.",
+			"Review the returned candidate localclash.json and mihomo.yaml, then call config_patch_apply with the exact patch_id.",
 			"Call config_status or routing_explain again to verify the durable intent; restart_runtime only after user confirmation if the running Mihomo process should load the change.",
 		},
 		Notes: []string{

@@ -1,12 +1,15 @@
 package policytemplate
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
 	"localclash/internal/localconfig"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildMinimalTemplate(t *testing.T) {
@@ -49,7 +52,7 @@ func TestBuildLocalClashDefaultTemplate(t *testing.T) {
 
 func TestBuildPatchSetTemplateMergesPatchesInManifestOrder(t *testing.T) {
 	dir := t.TempDir()
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.json"), `id: localclash-default
 name: localClash Default
 description: Patch-set policy.
 default: true
@@ -58,13 +61,13 @@ config:
   policy_template: localclash-default
 patches:
   - id: default.region.v1
-    path: localclash-default.d/00-region.yaml
+    path: localclash-default.d/00-region.json
   - id: default.ai.v1
-    path: localclash-default.d/10-ai.yaml
+    path: localclash-default.d/10-ai.json
   - id: default.ai-override.v1
-    path: localclash-default.d/20-ai-override.yaml
+    path: localclash-default.d/20-ai-override.json
 `)
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "00-region.yaml"), `id: default.region.v1
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "00-region.json"), `id: default.region.v1
 config:
   version: 2
   proxy_groups:
@@ -76,7 +79,7 @@ config:
         min: 1
       reason: first definition
 `)
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.yaml"), `id: default.ai.v1
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.json"), `id: default.ai.v1
 config:
   version: 2
   policy_groups:
@@ -92,7 +95,7 @@ config:
       type: geosite
       target: ChatGPT
 `)
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "20-ai-override.yaml"), `id: default.ai-override.v1
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "20-ai-override.json"), `id: default.ai-override.v1
 config:
   version: 2
   proxy_groups:
@@ -134,14 +137,14 @@ config:
 
 func TestBuildPatchSetTemplateRejectsPatchIDMismatch(t *testing.T) {
 	dir := t.TempDir()
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.json"), `id: localclash-default
 name: localClash Default
 description: Patch-set policy.
 patches:
   - id: default.ai.v1
-    path: localclash-default.d/10-ai.yaml
+    path: localclash-default.d/10-ai.json
 `)
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.yaml"), `id: wrong.id
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.json"), `id: wrong.id
 config:
   version: 1
   packs: []
@@ -155,7 +158,7 @@ config:
 
 func TestBuildRejectsEmptyTemplate(t *testing.T) {
 	dir := t.TempDir()
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.json"), `id: localclash-default
 name: localClash Default
 description: Empty policy.
 `)
@@ -249,7 +252,7 @@ func TestListTemplatesReadsDiskFiles(t *testing.T) {
 func writeTemplateFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "minimal.yaml"), `id: minimal
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "minimal.json"), `id: minimal
 name: Minimal
 description: Minimal policy.
 config:
@@ -258,7 +261,7 @@ config:
   proxy_groups: {}
   packs: []
 `)
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.yaml"), `id: localclash-default
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.json"), `id: localclash-default
 name: localClash Default
 description: Patch-set default policy.
 default: true
@@ -267,9 +270,9 @@ config:
   policy_template: localclash-default
 patches:
   - id: default.ai.v1
-    path: localclash-default.d/10-ai.yaml
+    path: localclash-default.d/10-ai.json
 `)
-	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.yaml"), `id: default.ai.v1
+	writePolicyTemplateTestFile(t, filepath.Join(dir, "localclash-default.d", "10-ai.json"), `id: default.ai.v1
 config:
   version: 1
   proxy_groups:
@@ -295,7 +298,15 @@ func writePolicyTemplateTestFile(t *testing.T, path string, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var doc any
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

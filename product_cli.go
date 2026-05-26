@@ -864,7 +864,7 @@ func componentStatus(state appinit.RuntimeState) map[string]any {
 func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 	warnings := []string{}
 	intent, err := configinspect.InspectIntent(configinspect.IntentOptions{
-		ConfigPath:          "localclash.yaml",
+		ConfigPath:          "localclash.json",
 		Subscription:        state.Paths.SubscriptionPath,
 		SubscriptionConfig:  state.Paths.SubscriptionConfig,
 		SubscriptionRuntime: state.Paths.SubscriptionRuntime,
@@ -891,11 +891,11 @@ func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 
 func applyTemplateInput(input configInput, state appinit.RuntimeState) (map[string]any, error) {
 	if !input.AllowOverwriteModified {
-		current, err := localconfig.Load("localclash.yaml")
+		current, err := localconfig.Load("localclash.json")
 		if err == nil && current.PolicyTemplate != "" && current.PolicyTemplate != input.Template {
 			return nil, codedProductError{
 				code:        "modified_config_requires_confirmation",
-				message:     "Current localclash.yaml does not match the requested template; refusing to overwrite without allow_overwrite_modified.",
+				message:     "Current localclash.json does not match the requested template; refusing to overwrite without allow_overwrite_modified.",
 				nextActions: []string{"Set allow_overwrite_modified to true after user confirmation."},
 				details: map[string]string{
 					"current_policy_template": current.PolicyTemplate,
@@ -911,7 +911,7 @@ func applyTemplateInput(input configInput, state appinit.RuntimeState) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	if err := localconfig.Write("localclash.yaml", config); err != nil {
+	if err := localconfig.Write("localclash.json", config); err != nil {
 		return nil, err
 	}
 	profile, err := runtimeprofile.Configure(state.Paths.RuntimeProfilePath, input.RuntimeProfile, input.Core)
@@ -947,8 +947,8 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 	source := "base"
 	warnings := []string{}
 
-	if pathExists("localclash.yaml") {
-		config, err := localconfig.Load("localclash.yaml")
+	if pathExists("localclash.json") {
+		config, err := localconfig.Load("localclash.json")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -964,7 +964,7 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 		}
 		selectionPath = state.Paths.PacksSelectionPath
 		if strings.TrimSpace(selectionPath) == "" {
-			selectionPath = "localclash-packs.yaml"
+			selectionPath = "localclash-packs.gob"
 		}
 		if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
 			return nil, nil, err
@@ -981,7 +981,7 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 	return map[string]any{
 		"render":          result,
 		"source":          source,
-		"source_of_truth": "localclash.yaml",
+		"source_of_truth": "localclash.json",
 		"selection":       selectionPath,
 		"output":          state.Paths.GeneratedConfig,
 	}, warnings, nil

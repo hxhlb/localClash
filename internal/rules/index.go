@@ -193,7 +193,7 @@ func removeLegacyPackCacheYAML(dir string) error {
 		return err
 	}
 	for _, entry := range entries {
-		if shouldSkipYAMLFile(entry.Name(), entry.IsDir()) {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") || strings.HasPrefix(entry.Name(), ".") || strings.HasPrefix(entry.Name(), "._") {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {

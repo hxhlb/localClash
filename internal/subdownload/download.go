@@ -1,7 +1,9 @@
 package subdownload
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Options struct {
@@ -22,6 +26,11 @@ type Options struct {
 type Result struct {
 	OutputPath   string
 	BytesWritten int64
+}
+
+func init() {
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
 }
 
 func Download(ctx context.Context, opts Options) (Result, error) {
@@ -58,7 +67,7 @@ func normalizeOptions(opts Options) Options {
 	opts.OutputPath = strings.TrimSpace(opts.OutputPath)
 	opts.UserAgent = strings.TrimSpace(opts.UserAgent)
 	if opts.OutputPath == "" {
-		opts.OutputPath = "subscription.yaml"
+		opts.OutputPath = "subscription.gob"
 	}
 	if opts.UserAgent == "" {
 		opts.UserAgent = "clash-verge/v1.5.1"
@@ -121,11 +130,38 @@ func download(ctx context.Context, opts Options, outputPath string) (int64, erro
 		return 0, fmt.Errorf("subscription request failed: %s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return 0, errors.New("subscription response was empty")
+	}
+	var raw any
+	if err := yaml.Unmarshal(body, &raw); err != nil {
+		return 0, fmt.Errorf("subscription response is not valid YAML: %w", err)
+	}
+	doc, ok := raw.(map[string]any)
+	if !ok {
+		return 0, errors.New("subscription response must be a map")
+	}
+	proxies, ok := doc["proxies"].([]any)
+	if !ok || len(proxies) == 0 {
+		return 0, errors.New("subscription has no proxies")
+	}
+
 	out, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return 0, err
 	}
 	defer out.Close()
-
-	return io.Copy(out, resp.Body)
+	err = gob.NewEncoder(out).Encode(struct {
+		Version int
+		Data    map[string]any
+		Raw     []byte
+	}{Version: 1, Data: doc, Raw: body})
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(body)), nil
 }

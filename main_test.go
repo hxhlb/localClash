@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"io"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"testing"
 
 	"localclash/internal/rules"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRunResetDoesNotBootstrapRuntimeFirst(t *testing.T) {
@@ -139,7 +142,7 @@ func TestRunProductConfigRenderUsesDurableLocalClashIntent(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	writeMainTestFile(t, filepath.Join("policies", "loyalsoldier.yaml"), `rule_source:
+	writeMainTestFile(t, filepath.Join("policies", "loyalsoldier.json"), `rule_source:
   base_url: https://example.com/rules
   update_interval: 86400
 groups:
@@ -169,7 +172,7 @@ modes:
       - match: true
         target: proxy
 `)
-	writeMainTestFile(t, "subscription.yaml", `proxies:
+	writeMainTestFile(t, "subscription.gob", `proxies:
   - name: "HK 01"
     type: ss
     server: example.com
@@ -177,7 +180,7 @@ modes:
     cipher: none
     password: test
 `)
-	writeMainTestFile(t, "localclash.yaml", `version: 1
+	writeMainTestFile(t, "localclash.json", `version: 1
 policy_template: localclash-default
 proxy_groups:
   AI:
@@ -208,7 +211,7 @@ custom_rules:
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("config render JSON = %q, error = %v", output, err)
 	}
-	if !result.OK || result.Status.Source != "durable_state" || result.Status.Selection != "localclash-packs.yaml" {
+	if !result.OK || result.Status.Source != "durable_state" || result.Status.Selection != "localclash-packs.gob" {
 		t.Fatalf("config render result = %+v, want durable state with derived selection", result)
 	}
 	generated, err := os.ReadFile(filepath.Join("generated", "mihomo.yaml"))
@@ -217,10 +220,10 @@ custom_rules:
 	}
 	text := string(generated)
 	if !strings.Contains(text, "name: AI") || !strings.Contains(text, "DOMAIN,example.ai,AI") {
-		t.Fatalf("generated config did not consume localclash.yaml intent:\n%s", text)
+		t.Fatalf("generated config did not consume localclash.json intent:\n%s", text)
 	}
-	if _, err := os.Stat("localclash-packs.yaml"); err != nil {
-		t.Fatalf("derived localclash-packs.yaml missing: %v", err)
+	if _, err := os.Stat("localclash-packs.gob"); err != nil {
+		t.Fatalf("derived localclash-packs.gob missing: %v", err)
 	}
 }
 
@@ -307,7 +310,46 @@ func writeMainTestFile(t *testing.T, path string, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodeErr := gob.NewEncoder(file).Encode(struct {
+			Version int
+			Data    map[string]any
+			Raw     []byte
+		}{Version: 1, Data: doc, Raw: []byte(content)})
+		closeErr := file.Close()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

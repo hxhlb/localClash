@@ -2,6 +2,7 @@ package configplan
 
 import (
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -95,7 +96,7 @@ func TestRenderPlanIDDoesNotOverwriteExistingPlan(t *testing.T) {
 	if result.PlanID != "gaming-direct-20260516-130000-2" {
 		t.Fatalf("plan id = %q, want collision suffix", result.PlanID)
 	}
-	if got := readFile(t, filepath.Join(firstPlanDir, "summary.json")); got != `{"sentinel":true}` {
+	if got := readFile(t, filepath.Join(firstPlanDir, "summary.json")); got != "{\n  \"sentinel\": true\n}" {
 		t.Fatalf("existing plan was overwritten: %q", got)
 	}
 }
@@ -204,7 +205,7 @@ func TestRenderPolicyGroupPlan(t *testing.T) {
 
 func TestRenderPatchCanReuseExistingProxyGroups(t *testing.T) {
 	paths := writePlanFixture(t)
-	existingConfig := filepath.Join(paths.dir, "localclash.yaml")
+	existingConfig := filepath.Join(paths.dir, "localclash.json")
 	writeFile(t, existingConfig, `version: 2
 policy_template: localclash-default
 proxy_groups:
@@ -459,7 +460,7 @@ func TestRenderProxyGroupMatchPlanWritesCandidateLocalClashConfig(t *testing.T) 
 func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 	paths := writePlanFixture(t)
 	generated := filepath.Join(paths.dir, "generated", "mihomo.yaml")
-	selectionPath := filepath.Join(paths.dir, "localclash-packs.yaml")
+	selectionPath := filepath.Join(paths.dir, "localclash-packs.gob")
 	writeFile(t, generated, "sentinel: old generated\n")
 
 	plan, err := Render(context.Background(), Options{
@@ -545,7 +546,7 @@ func TestApplyPlanInheritsDisabledMihomoTestWhenNotExplicit(t *testing.T) {
 		Subscription:  paths.subscription,
 		Policy:        paths.policy,
 		RulesCache:    paths.cacheDir,
-		SelectionPath: filepath.Join(paths.dir, "localclash-packs.yaml"),
+		SelectionPath: filepath.Join(paths.dir, "localclash-packs.gob"),
 		OutputPath:    filepath.Join(paths.dir, "generated", "mihomo.yaml"),
 		Test:          true,
 		Now:           fixedPlanTime(),
@@ -677,8 +678,8 @@ func writePlanFixture(t *testing.T) planFixturePaths {
 	t.Chdir(dir)
 	paths := planFixturePaths{
 		dir:          dir,
-		subscription: filepath.Join(dir, "subscription.yaml"),
-		policy:       filepath.Join(dir, "policy.yaml"),
+		subscription: filepath.Join(dir, "subscription.gob"),
+		policy:       filepath.Join(dir, "policy.json"),
 		cacheDir:     filepath.Join(dir, ".runtime", "rules", "packs"),
 		planDir:      filepath.Join(dir, ".runtime", "plans"),
 	}
@@ -731,7 +732,7 @@ modes:
       - match: true
         target: direct
 `)
-	writeFile(t, filepath.Join(dir, "localclash-packs.yaml"), `version: 1
+	writeFile(t, filepath.Join(dir, "localclash-packs.gob"), `version: 1
 proxy_groups: {}
 enabled_packs: []
 `)
@@ -807,7 +808,58 @@ func writeFile(t *testing.T, path string, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := doc["proxies"]; ok {
+			err = gob.NewEncoder(file).Encode(struct {
+				Version int
+				Data    map[string]any
+				Raw     []byte
+			}{Version: 1, Data: doc, Raw: []byte(content)})
+		} else {
+			var selection rules.Selection
+			data, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(data, &selection); err != nil {
+				t.Fatal(err)
+			}
+			err = gob.NewEncoder(file).Encode(selection)
+		}
+		closeErr := file.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

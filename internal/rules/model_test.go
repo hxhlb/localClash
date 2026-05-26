@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -129,7 +130,15 @@ enabled_packs:
     target: AI
 `)
 	var selection Selection
-	if err := yaml.Unmarshal(raw, &selection); err != nil {
+	var doc any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &selection); err != nil {
 		t.Fatal(err)
 	}
 	if !selection.ProxyGroups["AI"].Manual || selection.ProxyGroups["AI"].Auto {
@@ -139,18 +148,26 @@ enabled_packs:
 
 func TestLoadSourcesIgnoresMacOSMetadataFiles(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "blackmatrix7.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "blackmatrix7.json"), []byte(`{
+  "id": "blackmatrix7",
+  "adapter": "blackmatrix7",
+  "url": "https://example.com/index.yaml",
+  "raw_base_url": "https://example.com/raw"
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "._blackmatrix7.json"), []byte{0, 5, 'b', 'a', 'd'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".hidden.json"), []byte("not json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "legacy.yaml"), []byte(`
 id: blackmatrix7
 adapter: blackmatrix7
 url: https://example.com/index.yaml
 raw_base_url: https://example.com/raw
 `), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "._blackmatrix7.yaml"), []byte{0, 5, 'b', 'a', 'd'}, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".hidden.yaml"), []byte("not: a source\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

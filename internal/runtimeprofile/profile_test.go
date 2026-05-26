@@ -1,11 +1,14 @@
 package runtimeprofile
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestStatusForMissingFileInitializesEditableProfilesFromDefaults(t *testing.T) {
@@ -27,10 +30,10 @@ func TestStatusForMissingFileInitializesEditableProfilesFromDefaults(t *testing.
 		t.Fatalf("summary mixed-port = %v, want 7890", status.Summary["mixed-port"])
 	}
 	for _, path := range []string{
-		filepath.Join(dir, "profiles", "normal.default.yaml"),
-		filepath.Join(dir, "profiles", "router.default.yaml"),
-		filepath.Join(dir, "profiles", "normal.yaml"),
-		filepath.Join(dir, "profiles", "router.yaml"),
+		filepath.Join(dir, "profiles", "normal.default.json"),
+		filepath.Join(dir, "profiles", "router.default.json"),
+		filepath.Join(dir, "profiles", "normal.json"),
+		filepath.Join(dir, "profiles", "router.json"),
 		filepath.Join(dir, DefaultPath),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -63,7 +66,7 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(data)
-	if !contains(text, "path: profiles/normal.yaml") || !contains(text, "path: profiles/router.yaml") || contains(text, "mihomo:") {
+	if !contains(text, `"path": "profiles/normal.json"`) || !contains(text, `"path": "profiles/router.json"`) || contains(text, `"mihomo"`) {
 		t.Fatalf("runtime selector file =\n%s\nwant profile paths without embedded mihomo profile bodies", text)
 	}
 
@@ -165,25 +168,23 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 func TestLoadUsesUserProfileFileWithoutBackfillingDeletedSettings(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultPath)
-	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "router.yaml"), `mihomo:
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "router.json"), `mihomo:
   mixed-port: 9000
   dns:
     listen: 127.0.0.1:5353
 `)
-	if err := os.WriteFile(path, []byte(`version: 1
+	writeRuntimeProfileTestFile(t, path, `version: 1
 mode: router
 core: meta
 profiles:
   router:
-    path: profiles/router.yaml
+    path: profiles/router.json
 cores:
   meta:
     path: custom-meta
   smart:
     path: custom-smart
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+`)
 
 	file, exists, err := Load(path)
 	if err != nil {
@@ -217,18 +218,16 @@ cores:
 func TestLoadRejectsExistingRuntimeFileWithoutExplicitCorePaths(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultPath)
-	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.yaml"), `mihomo:
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.json"), `mihomo:
   mixed-port: 7890
 `)
-	if err := os.WriteFile(path, []byte(`version: 1
+	writeRuntimeProfileTestFile(t, path, `version: 1
 mode: normal
 core: meta
 profiles:
   normal:
-    path: profiles/normal.yaml
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+    path: profiles/normal.json
+`)
 
 	_, _, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), `runtime core "meta" is not defined`) {
@@ -239,21 +238,19 @@ profiles:
 func TestLoadRejectsExistingRuntimeFileWithEmptyActiveCorePath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultPath)
-	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.yaml"), `mihomo:
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.json"), `mihomo:
   mixed-port: 7890
 `)
-	if err := os.WriteFile(path, []byte(`version: 1
+	writeRuntimeProfileTestFile(t, path, `version: 1
 mode: normal
 core: meta
 profiles:
   normal:
-    path: profiles/normal.yaml
+    path: profiles/normal.json
 cores:
   meta:
     path: ""
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
+`)
 
 	_, _, err := Load(path)
 	if err == nil || !strings.Contains(err.Error(), `runtime core "meta" has no path`) {
@@ -292,7 +289,15 @@ func writeRuntimeProfileTestFile(t *testing.T, path, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var doc any
+	if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

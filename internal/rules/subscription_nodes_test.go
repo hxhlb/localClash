@@ -1,11 +1,14 @@
 package rules
 
 import (
+	"encoding/gob"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestListSubscriptionNodesReturnsSafeSummaries(t *testing.T) {
@@ -81,8 +84,8 @@ func TestSearchSubscriptionNodesRequiresQueryOrPattern(t *testing.T) {
 
 func writeSubscriptionNodesFixture(t *testing.T) string {
 	t.Helper()
-	subscription := filepath.Join(t.TempDir(), "subscription.yaml")
-	if err := os.WriteFile(subscription, []byte(`
+	subscription := filepath.Join(t.TempDir(), "subscription.gob")
+	raw := []byte(`
 proxies:
   - name: JP Tokyo 01
     type: ss
@@ -100,8 +103,28 @@ proxies:
     type: vmess
     server: us.example.com
     uuid: secret-us
-`), 0o644); err != nil {
+`)
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
+	}
+	file, err := os.OpenFile(subscription, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
+	encodeErr := gob.NewEncoder(file).Encode(struct {
+		Version int
+		Data    map[string]any
+		Raw     []byte
+	}{Version: 1, Data: doc, Raw: raw})
+	closeErr := file.Close()
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
 	}
 	return subscription
 }

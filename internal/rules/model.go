@@ -2,6 +2,8 @@ package rules
 
 import (
 	"context"
+	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -16,37 +18,37 @@ import (
 )
 
 type Source struct {
-	ID         string `yaml:"id"`
-	Adapter    string `yaml:"adapter"`
-	URL        string `yaml:"url"`
-	BaseURL    string `yaml:"base_url,omitempty"`
-	RawBaseURL string `yaml:"raw_base_url,omitempty"`
+	ID         string `json:"id"`
+	Adapter    string `json:"adapter"`
+	URL        string `json:"url"`
+	BaseURL    string `json:"base_url,omitempty"`
+	RawBaseURL string `json:"raw_base_url,omitempty"`
 }
 
 type PackCache struct {
-	Version    int    `yaml:"version"`
-	Source     string `yaml:"source"`
-	Adapter    string `yaml:"adapter"`
-	Renderable bool   `yaml:"renderable"`
-	Packs      []Pack `yaml:"packs"`
+	Version    int    `json:"version"`
+	Source     string `json:"source"`
+	Adapter    string `json:"adapter"`
+	Renderable bool   `json:"renderable"`
+	Packs      []Pack `json:"packs"`
 }
 
 type Pack struct {
-	ID         string      `yaml:"id"`
-	Name       string      `yaml:"name,omitempty"`
-	Target     string      `yaml:"target,omitempty"`
-	Renderable bool        `yaml:"renderable"`
-	Reason     string      `yaml:"reason,omitempty"`
-	Components []Component `yaml:"components,omitempty"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name,omitempty"`
+	Target     string      `json:"target,omitempty"`
+	Renderable bool        `json:"renderable"`
+	Reason     string      `json:"reason,omitempty"`
+	Components []Component `json:"components,omitempty"`
 }
 
 type Component struct {
-	ID         string `yaml:"id"`
-	Behavior   string `yaml:"behavior"`
-	Format     string `yaml:"format"`
-	OrderClass string `yaml:"order_class"`
-	URL        string `yaml:"url"`
-	Path       string `yaml:"path"`
+	ID         string `json:"id"`
+	Behavior   string `json:"behavior"`
+	Format     string `json:"format"`
+	OrderClass string `json:"order_class"`
+	URL        string `json:"url"`
+	Path       string `json:"path"`
 }
 
 const (
@@ -69,34 +71,34 @@ type PackBackend struct {
 }
 
 type Selection struct {
-	Version       int                    `yaml:"version"`
-	ProxyGroups   map[string]ProxyGroup  `yaml:"proxy_groups,omitempty"`
-	PolicyGroups  map[string]PolicyGroup `yaml:"policy_groups,omitempty"`
-	CustomRules   []CustomRule           `yaml:"custom_rules,omitempty"`
-	RuleProviders []ExternalRuleProvider `yaml:"rule_providers,omitempty"`
-	EnabledPack   []SelectedPack         `yaml:"enabled_packs"`
+	Version       int                    `json:"version"`
+	ProxyGroups   map[string]ProxyGroup  `json:"proxy_groups,omitempty"`
+	PolicyGroups  map[string]PolicyGroup `json:"policy_groups,omitempty"`
+	CustomRules   []CustomRule           `json:"custom_rules,omitempty"`
+	RuleProviders []ExternalRuleProvider `json:"rule_providers,omitempty"`
+	EnabledPack   []SelectedPack         `json:"enabled_packs"`
 }
 
 type ProxyGroup struct {
-	Nodes    []string `yaml:"nodes"`
-	Auto     bool     `yaml:"auto"`
-	Manual   bool     `yaml:"manual"`
-	Smart    bool     `yaml:"smart"`
-	Direct   bool     `yaml:"direct"`
-	Optional bool     `yaml:"optional,omitempty"`
+	Nodes    []string `json:"nodes"`
+	Auto     bool     `json:"auto"`
+	Manual   bool     `json:"manual"`
+	Smart    bool     `json:"smart"`
+	Direct   bool     `json:"direct"`
+	Optional bool     `json:"optional,omitempty"`
 }
 
 type PolicyGroup struct {
-	Exits  []string `yaml:"exits"`
-	Auto   bool     `yaml:"auto"`
-	Manual bool     `yaml:"manual"`
-	Smart  bool     `yaml:"smart"`
+	Exits  []string `json:"exits"`
+	Auto   bool     `json:"auto"`
+	Manual bool     `json:"manual"`
+	Smart  bool     `json:"smart"`
 }
 
 type SelectedPack struct {
-	Source string `yaml:"source"`
-	Pack   string `yaml:"pack"`
-	Target string `yaml:"target"`
+	Source string `json:"source"`
+	Pack   string `json:"pack"`
+	Target string `json:"target"`
 }
 
 type CustomRule struct {
@@ -171,10 +173,10 @@ func NormalizeOptions(opts Options) Options {
 		opts.CacheDir = ".runtime/rules/packs"
 	}
 	if strings.TrimSpace(opts.SelectionPath) == "" {
-		opts.SelectionPath = "localclash-packs.yaml"
+		opts.SelectionPath = "localclash-packs.gob"
 	}
 	if strings.TrimSpace(opts.Subscription) == "" {
-		opts.Subscription = "subscription.yaml"
+		opts.Subscription = "subscription.gob"
 	}
 	return opts
 }
@@ -256,7 +258,7 @@ func LoadSources(dir string) ([]Source, error) {
 	}
 	var sources []Source
 	for _, entry := range entries {
-		if shouldSkipYAMLFile(entry.Name(), entry.IsDir()) {
+		if shouldSkipJSONFile(entry.Name(), entry.IsDir()) {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
@@ -265,7 +267,7 @@ func LoadSources(dir string) ([]Source, error) {
 			return nil, err
 		}
 		var source Source
-		if err := yaml.Unmarshal(data, &source); err != nil {
+		if err := json.Unmarshal(data, &source); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		if err := validateSource(source); err != nil {
@@ -302,34 +304,71 @@ func validateSource(source Source) error {
 	return nil
 }
 
-func shouldSkipYAMLFile(name string, isDir bool) bool {
-	if isDir || !strings.HasSuffix(name, ".yaml") {
+func shouldSkipJSONFile(name string, isDir bool) bool {
+	if isDir || !strings.HasSuffix(name, ".json") {
 		return true
 	}
 	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "._")
 }
 
 func LoadSelection(path string) (Selection, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return Selection{}, err
 	}
+	defer file.Close()
 	var selection Selection
-	if err := yaml.Unmarshal(data, &selection); err != nil {
+	if err := gob.NewDecoder(file).Decode(&selection); err != nil {
 		return Selection{}, err
 	}
 	return selection, nil
 }
 
+func WriteSelection(path string, selection Selection) error {
+	if selection.Version == 0 {
+		selection.Version = 1
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	file, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	encodeErr := gob.NewEncoder(file).Encode(selection)
+	closeErr := file.Close()
+	if encodeErr != nil {
+		_ = os.Remove(tmp)
+		return encodeErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
+	return os.Rename(tmp, path)
+}
+
 func LoadSubscriptionProxyNames(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	var source map[string]any
-	if err := yaml.Unmarshal(data, &source); err != nil {
+	defer file.Close()
+	var artifact struct {
+		Version int
+		Data    map[string]any
+		Raw     []byte
+	}
+	gob.Register(map[string]any{})
+	gob.Register([]any{})
+	if err := gob.NewDecoder(file).Decode(&artifact); err != nil {
 		return nil, err
 	}
+	if artifact.Version != 1 {
+		return nil, fmt.Errorf("subscription artifact schema version mismatch: expected 1, got %d; run localclash subscriptions refresh", artifact.Version)
+	}
+	source := artifact.Data
 	raw, ok := source["proxies"].([]any)
 	if !ok {
 		return nil, fmt.Errorf("subscription %q has no proxies", path)

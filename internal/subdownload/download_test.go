@@ -14,11 +14,11 @@ func TestDownloadUsesClashUserAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUA = r.UserAgent()
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("proxies: []\n"))
+		_, _ = w.Write([]byte("proxies:\n  - name: test\n    type: ss\n"))
 	}))
 	defer server.Close()
 
-	output := filepath.Join(t.TempDir(), "subscription.yaml")
+	output := filepath.Join(t.TempDir(), "subscription.gob")
 	result, err := Download(context.Background(), Options{
 		URL:        server.URL,
 		OutputPath: output,
@@ -46,7 +46,7 @@ func TestDownloadRejectsEmptyResponse(t *testing.T) {
 
 	_, err := Download(context.Background(), Options{
 		URL:        server.URL,
-		OutputPath: filepath.Join(t.TempDir(), "subscription.yaml"),
+		OutputPath: filepath.Join(t.TempDir(), "subscription.gob"),
 	})
 	if err == nil {
 		t.Fatal("expected empty response error")

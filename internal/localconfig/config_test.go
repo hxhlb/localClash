@@ -1,6 +1,8 @@
 package localconfig
 
 import (
+	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,23 +11,25 @@ import (
 	"testing"
 
 	"localclash/internal/rules"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash-subscriptions.yaml")
+	configPath := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
 	writeTestFile(t, configPath, `sources:
   - id: main
   - id: backup
 `)
-	writeTestFile(t, filepath.Join(runtimeDir, "main.yaml"), `proxies:
+	writeTestFile(t, filepath.Join(runtimeDir, "main.gob"), `proxies:
   - name: HK 01
     type: ss
   - name: SG 01
     type: ss
 `)
-	writeTestFile(t, filepath.Join(runtimeDir, "backup.yaml"), `proxies:
+	writeTestFile(t, filepath.Join(runtimeDir, "backup.gob"), `proxies:
   - name: HK 01
     type: ss
 `)
@@ -46,7 +50,7 @@ func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
 			},
 			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "SteamHK"}},
 		},
-		SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
+		SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
 		SubscriptionConfig:  configPath,
 		SubscriptionRuntime: runtimeDir,
 		RulesCache:          rulesCache,
@@ -68,7 +72,7 @@ func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
 
 func TestResolveNameRegexEnforcesMin(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: SG 01
     type: ss
@@ -89,7 +93,7 @@ func TestResolveNameRegexEnforcesMin(t *testing.T) {
 
 func TestResolveExactNodesSupportsExplicitHumanChoice(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: HK 01
     type: ss
@@ -117,7 +121,7 @@ func TestResolveExactNodesSupportsExplicitHumanChoice(t *testing.T) {
 
 func TestResolveProxyGroupSupportsSmartMode(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: SG 01
     type: ss
@@ -141,7 +145,7 @@ func TestResolveProxyGroupSupportsSmartMode(t *testing.T) {
 
 func TestResolveProxyGroupSupportsDirectMode(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: SG 01
     type: ss
@@ -168,7 +172,7 @@ func TestResolveProxyGroupSupportsDirectMode(t *testing.T) {
 
 func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: HK 01
     type: ss
@@ -207,7 +211,7 @@ func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
 
 func TestResolveOptionalProxyGroupCanBeEmpty(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: HK 01
     type: ss
@@ -253,7 +257,7 @@ func TestResolveOptionalProxyGroupCanBeEmpty(t *testing.T) {
 
 func TestResolveExactNodesReportsMissingNodes(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: HK 01
     type: ss
@@ -279,7 +283,7 @@ func TestResolveExactNodesReportsMissingNodes(t *testing.T) {
 
 func TestResolveProxyGroupRejectsAmbiguousMatchAndNodes(t *testing.T) {
 	dir := t.TempDir()
-	subscriptionPath := filepath.Join(dir, "subscription.yaml")
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeTestFile(t, subscriptionPath, `proxies:
   - name: HK 01
     type: ss
@@ -304,12 +308,12 @@ func TestResolveProxyGroupRejectsAmbiguousMatchAndNodes(t *testing.T) {
 
 func TestResolveEmitsStageTimings(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash-subscriptions.yaml")
+	configPath := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
 	writeTestFile(t, configPath, `sources:
   - id: main
 `)
-	writeTestFile(t, filepath.Join(runtimeDir, "main.yaml"), `proxies:
+	writeTestFile(t, filepath.Join(runtimeDir, "main.gob"), `proxies:
   - name: HK 01
     type: ss
 `)
@@ -327,7 +331,7 @@ func TestResolveEmitsStageTimings(t *testing.T) {
 			},
 			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "Steam"}},
 		},
-		SubscriptionPath:    filepath.Join(dir, "subscription.yaml"),
+		SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
 		SubscriptionConfig:  configPath,
 		SubscriptionRuntime: runtimeDir,
 		RulesCache:          rulesCache,
@@ -442,7 +446,46 @@ func writeTestFile(t *testing.T, path, content string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	var data []byte
+	var err error
+	switch filepath.Ext(path) {
+	case ".json":
+		var doc any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		data, err = json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+	case ".gob":
+		gob.Register(map[string]any{})
+		gob.Register([]any{})
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodeErr := gob.NewEncoder(file).Encode(struct {
+			Version int
+			Data    map[string]any
+			Raw     []byte
+		}{Version: 1, Data: doc, Raw: []byte(content)})
+		closeErr := file.Close()
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		return
+	default:
+		data = []byte(content)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

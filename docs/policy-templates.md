@@ -44,7 +44,7 @@ MCP `config_configure` exposes policy templates from disk as base product
 configuration. Template manifests live under `policy-templates/`, and the tool
 does not render or start runtime. A template may either embed one `config:`
 block directly or declare an ordered `patches:` list. Patch-set templates are
-merged in manifest order and then written as the durable `localclash.yaml`
+merged in manifest order and then written as the durable `localclash.json`
 intent.
 
 - `minimal`: records a compact durable intent and leaves routing to the local
@@ -56,7 +56,7 @@ intent.
   direct domains. Telegram also includes explicit IPv4/IPv6 CIDR custom rules,
   because many Telegram clients connect to Telegram IP ranges directly and do
   not always expose a domain that can be caught by `GEOSITE,telegram`.
-  The manifest `policy-templates/localclash-default.yaml` is a patch set: each
+  The manifest `policy-templates/localclash-default.json` is a patch set: each
   file under `policy-templates/localclash-default.d/` contributes one stable
   default patch, such as region exits, communication/social routing, Steam, or
   media groups. The patch files intentionally keep emoji identifiers as YAML
@@ -85,4 +85,4 @@ not infer the default template from the truncated
 
 ## Starter Base Policy
 
-See `policies/loyalsoldier.yaml`.
+See `policies/loyalsoldier.json`.
