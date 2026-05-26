@@ -112,6 +112,7 @@ type RefreshResult struct {
 	Sources   []RefreshSourceSummary `json:"sources"`
 	Merged    ArtifactSummary        `json:"merged"`
 	Warnings  []string               `json:"warnings"`
+	Artifacts []RefreshArtifact      `json:"-"`
 }
 
 type RefreshSourceSummary struct {
@@ -123,8 +124,14 @@ type RefreshSourceSummary struct {
 	Status           string `json:"status"`
 }
 
+type RefreshArtifact struct {
+	SourceID string
+	Proxies  []map[string]any
+}
+
 type subscriptionDoc struct {
 	Data map[string]any
+	Raw  []byte
 }
 
 var sourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -254,35 +261,44 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	}
 	finish(nil, nil)
 
-	refreshed, err := refreshSelectedSources(ctx, config.Sources, selected, opts, stage)
+	refreshed, docs, err := refreshSelectedSources(ctx, config.Sources, selected, opts, stage)
 	if err != nil {
 		return RefreshResult{}, err
 	}
 
 	finish = stage("read_artifacts", nil)
-	docs := map[string]subscriptionDoc{}
 	result := RefreshResult{Refreshed: true, Warnings: []string{}}
+	diskReads := 0
 	for _, source := range config.Sources {
 		path := artifactPath(opts.RuntimeDir, source.ID)
-		doc, err := readSubscription(path)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				if selected[source.ID] {
-					finish(err, map[string]any{"source_id": source.ID})
-					return RefreshResult{}, fmt.Errorf("source %q artifact was not written", source.ID)
+		doc, ok := docs[source.ID]
+		if !ok {
+			var err error
+			doc, err = readSubscription(path)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					if selected[source.ID] {
+						finish(err, map[string]any{"source_id": source.ID})
+						return RefreshResult{}, fmt.Errorf("source %q artifact was not written", source.ID)
+					}
+					result.Warnings = append(result.Warnings, fmt.Sprintf("source %q has no local artifact; run subscriptions_refresh for that source", source.ID))
+					continue
 				}
-				result.Warnings = append(result.Warnings, fmt.Sprintf("source %q has no local artifact; run subscriptions_refresh for that source", source.ID))
-				continue
+				finish(err, map[string]any{"source_id": source.ID})
+				return RefreshResult{}, err
 			}
-			finish(err, map[string]any{"source_id": source.ID})
-			return RefreshResult{}, err
+			docs[source.ID] = doc
+			diskReads++
 		}
-		docs[source.ID] = doc
 		summary := summarizeMap(doc.Data)
 		status := "existing"
 		if refreshed[source.ID] {
 			status = "ok"
 		}
+		result.Artifacts = append(result.Artifacts, RefreshArtifact{
+			SourceID: source.ID,
+			Proxies:  proxyMaps(doc.Data),
+		})
 		result.Sources = append(result.Sources, RefreshSourceSummary{
 			ID:               source.ID,
 			Artifact:         path,
@@ -296,7 +312,7 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 		finish(fmt.Errorf("no subscription artifacts are available to merge"), nil)
 		return RefreshResult{}, fmt.Errorf("no subscription artifacts are available to merge")
 	}
-	finish(nil, map[string]any{"artifact_count": len(docs)})
+	finish(nil, map[string]any{"artifact_count": len(docs), "memory_docs": len(docs) - diskReads, "disk_reads": diskReads})
 
 	finish = stage("merge_subscriptions", nil)
 	merged, renamed, err := mergeSubscriptions(config.Sources, docs)
@@ -324,10 +340,11 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 type sourceRefreshOutcome struct {
 	sourceID  string
 	refreshed bool
+	doc       subscriptionDoc
 	err       error
 }
 
-func refreshSelectedSources(ctx context.Context, sources []Source, selected map[string]bool, opts RefreshOptions, stage func(string, map[string]any) func(error, map[string]any)) (map[string]bool, error) {
+func refreshSelectedSources(ctx context.Context, sources []Source, selected map[string]bool, opts RefreshOptions, stage func(string, map[string]any) func(error, map[string]any)) (map[string]bool, map[string]subscriptionDoc, error) {
 	selectedCount := 0
 	for _, source := range sources {
 		if selected[source.ID] {
@@ -335,7 +352,7 @@ func refreshSelectedSources(ctx context.Context, sources []Source, selected map[
 		}
 	}
 	if selectedCount == 0 {
-		return map[string]bool{}, nil
+		return map[string]bool{}, map[string]subscriptionDoc{}, nil
 	}
 	workerCount := refreshFetchConcurrency
 	if selectedCount < workerCount {
@@ -377,7 +394,7 @@ func refreshSelectedSources(ctx context.Context, sources []Source, selected map[
 		outcomes[result.sourceID] = result
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, source := range sources {
 		if !selected[source.ID] {
@@ -385,19 +402,21 @@ func refreshSelectedSources(ctx context.Context, sources []Source, selected map[
 		}
 		outcome, ok := outcomes[source.ID]
 		if !ok {
-			return nil, fmt.Errorf("source %q was not refreshed", source.ID)
+			return nil, nil, fmt.Errorf("source %q was not refreshed", source.ID)
 		}
 		if outcome.err != nil {
-			return nil, outcome.err
+			return nil, nil, outcome.err
 		}
 	}
 	refreshed := map[string]bool{}
+	docs := map[string]subscriptionDoc{}
 	for _, source := range sources {
 		if outcome, ok := outcomes[source.ID]; ok && outcome.refreshed {
 			refreshed[source.ID] = true
+			docs[source.ID] = outcome.doc
 		}
 	}
-	return refreshed, nil
+	return refreshed, docs, nil
 }
 
 func refreshOneSource(ctx context.Context, source Source, opts RefreshOptions, stage func(string, map[string]any) func(error, map[string]any)) sourceRefreshOutcome {
@@ -411,17 +430,18 @@ func refreshOneSource(ctx context.Context, source Source, opts RefreshOptions, s
 
 	artifact := artifactPath(opts.RuntimeDir, source.ID)
 	finish = stage("write_source_artifact", map[string]any{"source_id": source.ID, "artifact": artifact})
-	if err := writeSubscriptionArtifact(artifact, doc.Data); err != nil {
+	if err := writeRawSubscriptionArtifact(artifact, doc.Raw); err != nil {
 		finish(err, nil)
 		return sourceRefreshOutcome{sourceID: source.ID, err: err}
 	}
 	summary := summarizeMap(doc.Data)
 	finish(nil, map[string]any{
+		"bytes":        len(doc.Raw),
 		"proxies":      summary.ProxiesCount,
 		"proxy_groups": summary.ProxyGroupsCount,
 		"rules":        summary.RulesCount,
 	})
-	return sourceRefreshOutcome{sourceID: source.ID, refreshed: true}
+	return sourceRefreshOutcome{sourceID: source.ID, refreshed: true, doc: doc}
 }
 
 func subscriptionStageEmitter(callback func(StageEvent)) func(string, map[string]any) func(error, map[string]any) {
@@ -637,7 +657,12 @@ func fetchSource(ctx context.Context, source Source, userAgent string) (subscrip
 	if err != nil {
 		return subscriptionDoc{}, fmt.Errorf("source %q response could not be read", source.ID)
 	}
-	return parseSubscription(source.ID, body)
+	doc, err := parseSubscription(source.ID, body)
+	if err != nil {
+		return subscriptionDoc{}, err
+	}
+	doc.Raw = append([]byte(nil), body...)
+	return doc, nil
 }
 
 func parseSubscription(sourceID string, data []byte) (subscriptionDoc, error) {
@@ -673,7 +698,23 @@ func readSubscription(path string) (subscriptionDoc, error) {
 	if err != nil {
 		return subscriptionDoc{}, err
 	}
-	return parseSubscription(filepath.Base(path), data)
+	doc, err := parseSubscription(filepath.Base(path), data)
+	if err != nil {
+		return subscriptionDoc{}, err
+	}
+	doc.Raw = append([]byte(nil), data...)
+	return doc, nil
+}
+
+func writeRawSubscriptionArtifact(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func writeSubscriptionArtifact(path string, doc map[string]any) error {
@@ -792,6 +833,17 @@ func anySlice(value any) []any {
 		return values
 	}
 	return nil
+}
+
+func proxyMaps(doc map[string]any) []map[string]any {
+	raw := anySlice(doc["proxies"])
+	proxies := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		if proxy, ok := item.(map[string]any); ok {
+			proxies = append(proxies, proxy)
+		}
+	}
+	return proxies
 }
 
 func cloneMap(in map[string]any) map[string]any {

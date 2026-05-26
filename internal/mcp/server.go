@@ -1810,24 +1810,30 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		return toolResult{}, err
 	}
 	finish = startTaskStage(ctx, "load_subscription_nodes_after", map[string]any{"subscription": in.Merged})
-	afterNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
-		SubscriptionPath:    in.Merged,
-		SubscriptionConfig:  in.Config,
-		SubscriptionRuntime: in.RuntimeDir,
-		OnStage:             localConfigTaskLogger(ctx, "load_subscription_nodes_after"),
-	})
-	finishTaskStage(finish, nil, map[string]any{"node_count": len(afterNodes)})
+	afterNodes := localconfig.BuildSubscriptionNodesFromArtifacts(subscriptionArtifactsForLocalConfig(result.Artifacts))
+	finishTaskStage(finish, nil, map[string]any{"node_count": len(afterNodes), "source": "refresh_memory", "artifact_count": len(result.Artifacts)})
 	toolResultValue := subscriptionsRefreshToolResult{
 		RefreshResult: result,
 		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
 	}
 	finish = startTaskStage(ctx, "evaluate_localclash_impact", map[string]any{"config": in.LocalClashConfig})
-	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output)
+	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output, afterNodes)
 	finishTaskStage(finish, nil, map[string]any{"exists": impact.Exists, "state": impact.State, "valid": impact.Valid})
 	if impact.Exists {
 		toolResultValue.LocalClash = &impact
 	}
 	return jsonToolResult(toolResultValue)
+}
+
+func subscriptionArtifactsForLocalConfig(artifacts []subscriptions.RefreshArtifact) []localconfig.SubscriptionSourceArtifact {
+	out := make([]localconfig.SubscriptionSourceArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		out = append(out, localconfig.SubscriptionSourceArtifact{
+			SourceID: artifact.SourceID,
+			Proxies:  artifact.Proxies,
+		})
+	}
+	return out
 }
 
 type subscriptionsRefreshToolResult struct {
@@ -1911,7 +1917,7 @@ func buildNodeDiff(before, after []localconfig.SubscriptionNode) nodeDiff {
 	return diff
 }
 
-func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string) localClashRefreshImpact {
+func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string, subscriptionNodes []localconfig.SubscriptionNode) localClashRefreshImpact {
 	impact := localClashRefreshImpact{ConfigPath: configPath, GeneratedConfig: outputPath, SelectionPath: selectionPath}
 	config, err := localconfig.Load(configPath)
 	if err != nil {
@@ -1929,6 +1935,7 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 		SubscriptionPath:    subscriptionPath,
 		SubscriptionConfig:  subscriptionConfig,
 		SubscriptionRuntime: subscriptionRuntime,
+		SubscriptionNodes:   subscriptionNodes,
 		RulesCache:          rulesCache,
 		OnStage:             localConfigTaskLogger(ctx, "evaluate_localclash_impact"),
 	})

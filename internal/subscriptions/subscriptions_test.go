@@ -239,6 +239,51 @@ func TestRefreshFetchesSelectedSourcesInParallel(t *testing.T) {
 	}
 }
 
+func TestRefreshReusesFetchedDocsAndWritesRawArtifacts(t *testing.T) {
+	const body = `# raw marker should be preserved
+proxies:
+  - name: HK 01
+    type: ss
+    server: hk.example
+    password: secret
+`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	rawURL := server.URL + "/sub?token=secret-token"
+	id := mustSourceID(t, rawURL)
+	paths := writeRefreshConfig(t, []Source{{URL: rawURL}})
+	var events []StageEvent
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+		OnStage: func(event StageEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := readTestFile(t, filepath.Join(paths.runtimeDir, id+".yaml"))
+	if !strings.Contains(artifact, "# raw marker should be preserved") {
+		t.Fatalf("artifact did not preserve raw subscription body:\n%s", artifact)
+	}
+	if len(result.Artifacts) != 1 || result.Artifacts[0].SourceID != id || len(result.Artifacts[0].Proxies) != 1 {
+		t.Fatalf("artifacts = %+v, want one in-memory artifact", result.Artifacts)
+	}
+	event := findStageEvent(t, events, "read_artifacts", "done")
+	if got := event.Fields["disk_reads"]; got != 0 {
+		t.Fatalf("read_artifacts disk_reads = %v, want 0", got)
+	}
+	if got := event.Fields["memory_docs"]; got != 1 {
+		t.Fatalf("read_artifacts memory_docs = %v, want 1", got)
+	}
+	assertNoTokenLeak(t, result)
+}
+
 func TestRefreshSingleSourcePreservesNodeNames(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`proxies:
@@ -374,6 +419,17 @@ func assertFileExists(t *testing.T, path string) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func findStageEvent(t *testing.T, events []StageEvent, stage, event string) StageEvent {
+	t.Helper()
+	for _, candidate := range events {
+		if candidate.Stage == stage && candidate.Event == event {
+			return candidate
+		}
+	}
+	t.Fatalf("missing stage event %s/%s in %+v", stage, event, events)
+	return StageEvent{}
 }
 
 func mustSourceID(t *testing.T, rawURL string) string {

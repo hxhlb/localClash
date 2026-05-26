@@ -88,6 +88,7 @@ type ResolveOptions struct {
 	SubscriptionPath    string
 	SubscriptionConfig  string
 	SubscriptionRuntime string
+	SubscriptionNodes   []SubscriptionNode `json:"-"`
 	RulesCache          string
 	OnStage             func(StageEvent) `json:"-"`
 }
@@ -98,6 +99,11 @@ type StageEvent struct {
 	DurationMS int64          `json:"duration_ms,omitempty"`
 	Error      string         `json:"error,omitempty"`
 	Fields     map[string]any `json:"fields,omitempty"`
+}
+
+type SubscriptionSourceArtifact struct {
+	SourceID string
+	Proxies  []map[string]any
 }
 
 type Resolved struct {
@@ -230,17 +236,23 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 		"subscription_config":  opts.SubscriptionConfig,
 		"subscription_runtime": opts.SubscriptionRuntime,
 	})
-	nodes, err := LoadSubscriptionNodes(SubscriptionNodeOptions{
-		SubscriptionPath:    opts.SubscriptionPath,
-		SubscriptionConfig:  opts.SubscriptionConfig,
-		SubscriptionRuntime: opts.SubscriptionRuntime,
-		OnStage:             nestedLocalConfigStage(opts.OnStage, "load_subscription_nodes"),
-	})
-	if err != nil {
-		finish(err, nil)
-		return Resolved{}, err
+	var nodes []SubscriptionNode
+	var err error
+	if len(opts.SubscriptionNodes) > 0 {
+		nodes = append([]SubscriptionNode(nil), opts.SubscriptionNodes...)
+	} else {
+		nodes, err = LoadSubscriptionNodes(SubscriptionNodeOptions{
+			SubscriptionPath:    opts.SubscriptionPath,
+			SubscriptionConfig:  opts.SubscriptionConfig,
+			SubscriptionRuntime: opts.SubscriptionRuntime,
+			OnStage:             nestedLocalConfigStage(opts.OnStage, "load_subscription_nodes"),
+		})
+		if err != nil {
+			finish(err, nil)
+			return Resolved{}, err
+		}
 	}
-	finish(nil, map[string]any{"node_count": len(nodes)})
+	finish(nil, map[string]any{"node_count": len(nodes), "source": resolveSubscriptionNodeSource(opts.SubscriptionNodes)})
 	selection := rules.Selection{
 		Version:      1,
 		ProxyGroups:  map[string]rules.ProxyGroup{},
@@ -544,6 +556,27 @@ func LoadSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNode, er
 	return nodes, nil
 }
 
+func BuildSubscriptionNodesFromArtifacts(artifacts []SubscriptionSourceArtifact) []SubscriptionNode {
+	prefixSource := len(artifacts) > 1
+	usedNames := map[string]bool{}
+	var nodes []SubscriptionNode
+	for _, artifact := range artifacts {
+		for _, proxy := range artifact.Proxies {
+			name := stringValue(proxy["name"])
+			if name == "" {
+				continue
+			}
+			if prefixSource {
+				name = "[" + artifact.SourceID + "] " + name
+			}
+			name = uniqueName(name, usedNames)
+			usedNames[name] = true
+			nodes = append(nodes, SubscriptionNode{Name: name, Type: stringValue(proxy["type"]), SourceID: artifact.SourceID})
+		}
+	}
+	return nodes
+}
+
 func loadMergedSubscriptionNodes(path string, stage localConfigStageFunc) ([]SubscriptionNode, error) {
 	doc, err := readYAMLMapObserved(path, stage, "merged_subscription", nil)
 	if err != nil {
@@ -596,20 +629,14 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 		sourceDocs[source.ID] = proxies
 	}
 	prefixSource := len(sourceDocs) > 1
-	usedNames := map[string]bool{}
-	var nodes []SubscriptionNode
 	finish = stage("build_subscription_nodes", map[string]any{"source_count": len(sourceDocs), "prefix_source": prefixSource})
+	artifacts := make([]SubscriptionSourceArtifact, 0, len(sources.Sources))
 	for _, source := range sources.Sources {
-		for _, proxy := range sourceDocs[source.ID] {
-			name := stringValue(proxy["name"])
-			if prefixSource {
-				name = "[" + source.ID + "] " + name
-			}
-			name = uniqueName(name, usedNames)
-			usedNames[name] = true
-			nodes = append(nodes, SubscriptionNode{Name: name, Type: stringValue(proxy["type"]), SourceID: source.ID})
+		if proxies, ok := sourceDocs[source.ID]; ok {
+			artifacts = append(artifacts, SubscriptionSourceArtifact{SourceID: source.ID, Proxies: proxies})
 		}
 	}
+	nodes := BuildSubscriptionNodesFromArtifacts(artifacts)
 	finish(nil, map[string]any{"node_count": len(nodes)})
 	return nodes, nil
 }
@@ -649,6 +676,13 @@ func resolveProxyGroup(id string, group ProxyGroup, nodes []SubscriptionNode) ([
 		return resolveMatch(id, *group.Match, nodes, group.Optional)
 	}
 	return resolveExactNodes(id, group.Nodes, nodes)
+}
+
+func resolveSubscriptionNodeSource(nodes []SubscriptionNode) string {
+	if len(nodes) > 0 {
+		return "provided"
+	}
+	return "disk"
 }
 
 func resolveMatch(id string, match Match, nodes []SubscriptionNode, optional bool) ([]string, error) {
