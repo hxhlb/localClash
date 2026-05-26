@@ -113,6 +113,7 @@ type RefreshResult struct {
 	Merged    ArtifactSummary        `json:"merged"`
 	Warnings  []string               `json:"warnings"`
 	Artifacts []RefreshArtifact      `json:"-"`
+	MergedDoc map[string]any         `json:"-"`
 }
 
 type RefreshSourceSummary struct {
@@ -329,6 +330,7 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	}
 	result.Merged = summarizeArtifact(opts.MergedPath)
 	result.Merged.RenamedProxiesCount = renamed
+	result.MergedDoc = merged
 	sort.Strings(result.Warnings)
 	finish(nil, map[string]any{
 		"proxies":         result.Merged.ProxiesCount,

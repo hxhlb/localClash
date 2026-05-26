@@ -106,6 +106,24 @@ type SubscriptionSourceArtifact struct {
 	Proxies  []map[string]any
 }
 
+type SubscriptionNodeBuildStats struct {
+	ArtifactCount    int `json:"artifact_count"`
+	ProxyIterations  int `json:"proxy_iterations"`
+	EmptyNameSkipped int `json:"empty_name_skipped"`
+	NodeAppends      int `json:"node_appends"`
+	UniqueNameChecks int `json:"unique_name_checks"`
+}
+
+type proxyGroupResolveStats struct {
+	RegexCompiles            int
+	MatchNodeScans           int
+	RegexMatchAttempts       int
+	SourceScopeChecks        int
+	ExactAvailableIndexItems int
+	ExactNodeRefs            int
+	SelectedNodeAppends      int
+}
+
 type Resolved struct {
 	Config        Config               `json:"config"`
 	Selection     rules.Selection      `json:"selection"`
@@ -271,6 +289,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	}
 	sort.Strings(groupIDs)
 	var groupResults []ProxyGroupResult
+	var groupStats proxyGroupResolveStats
 	finish = stage("resolve_proxy_groups", map[string]any{"proxy_group_count": len(groupIDs), "node_count": len(nodes)})
 	for _, id := range groupIDs {
 		group := resolvedConfig.ProxyGroups[id]
@@ -294,14 +313,19 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 				return Resolved{}, err
 			}
 		} else {
-			selected, err = resolveProxyGroup(id, group, nodes)
+			var currentStats proxyGroupResolveStats
+			selected, err = resolveProxyGroupMeasured(id, group, nodes, &currentStats)
 			if err != nil {
-				finishGroup(err, nil)
-				finish(err, nil)
+				finishGroup(err, currentStats.fields())
+				finish(err, groupStats.fields())
 				return Resolved{}, err
 			}
+			groupStats.add(currentStats)
+			finishGroup(nil, mergeFields(map[string]any{"selected_nodes": len(selected)}, currentStats.fields()))
 		}
-		finishGroup(nil, map[string]any{"selected_nodes": len(selected)})
+		if mode == "direct" {
+			finishGroup(nil, map[string]any{"selected_nodes": len(selected)})
+		}
 		group.Mode = mode
 		group.SelectedNodes = selected
 		resolvedConfig.ProxyGroups[id] = group
@@ -332,7 +356,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 			Boundary:      group.Boundary,
 		})
 	}
-	finish(nil, map[string]any{"resolved_proxy_groups": len(groupResults)})
+	finish(nil, mergeFields(map[string]any{"resolved_proxy_groups": len(groupResults)}, groupStats.fields()))
 	policyIDs := make([]string, 0, len(resolvedConfig.PolicyGroups))
 	for id := range resolvedConfig.PolicyGroups {
 		if _, exists := resolvedConfig.ProxyGroups[id]; exists {
@@ -557,24 +581,35 @@ func LoadSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNode, er
 }
 
 func BuildSubscriptionNodesFromArtifacts(artifacts []SubscriptionSourceArtifact) []SubscriptionNode {
+	nodes, _ := BuildSubscriptionNodesFromArtifactsMeasured(artifacts)
+	return nodes
+}
+
+func BuildSubscriptionNodesFromArtifactsMeasured(artifacts []SubscriptionSourceArtifact) ([]SubscriptionNode, SubscriptionNodeBuildStats) {
 	prefixSource := len(artifacts) > 1
 	usedNames := map[string]bool{}
 	var nodes []SubscriptionNode
+	stats := SubscriptionNodeBuildStats{ArtifactCount: len(artifacts)}
 	for _, artifact := range artifacts {
 		for _, proxy := range artifact.Proxies {
+			stats.ProxyIterations++
 			name := stringValue(proxy["name"])
 			if name == "" {
+				stats.EmptyNameSkipped++
 				continue
 			}
 			if prefixSource {
 				name = "[" + artifact.SourceID + "] " + name
 			}
-			name = uniqueName(name, usedNames)
+			var checks int
+			name, checks = uniqueNameMeasured(name, usedNames)
+			stats.UniqueNameChecks += checks
 			usedNames[name] = true
 			nodes = append(nodes, SubscriptionNode{Name: name, Type: stringValue(proxy["type"]), SourceID: artifact.SourceID})
+			stats.NodeAppends++
 		}
 	}
-	return nodes
+	return nodes, stats
 }
 
 func loadMergedSubscriptionNodes(path string, stage localConfigStageFunc) ([]SubscriptionNode, error) {
@@ -636,8 +671,8 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 			artifacts = append(artifacts, SubscriptionSourceArtifact{SourceID: source.ID, Proxies: proxies})
 		}
 	}
-	nodes := BuildSubscriptionNodesFromArtifacts(artifacts)
-	finish(nil, map[string]any{"node_count": len(nodes)})
+	nodes, buildStats := BuildSubscriptionNodesFromArtifactsMeasured(artifacts)
+	finish(nil, mergeFields(map[string]any{"node_count": len(nodes)}, buildStats.fields()))
 	return nodes, nil
 }
 
@@ -669,13 +704,17 @@ func readYAMLMapObserved(path string, stage localConfigStageFunc, prefix string,
 }
 
 func resolveProxyGroup(id string, group ProxyGroup, nodes []SubscriptionNode) ([]string, error) {
+	return resolveProxyGroupMeasured(id, group, nodes, nil)
+}
+
+func resolveProxyGroupMeasured(id string, group ProxyGroup, nodes []SubscriptionNode, stats *proxyGroupResolveStats) ([]string, error) {
 	if group.Match != nil {
 		if len(group.Nodes) > 0 {
 			return nil, fmt.Errorf("proxy group %q must use either match or nodes, not both", id)
 		}
-		return resolveMatch(id, *group.Match, nodes, group.Optional)
+		return resolveMatchMeasured(id, *group.Match, nodes, group.Optional, stats)
 	}
-	return resolveExactNodes(id, group.Nodes, nodes)
+	return resolveExactNodesMeasured(id, group.Nodes, nodes, stats)
 }
 
 func resolveSubscriptionNodeSource(nodes []SubscriptionNode) string {
@@ -685,7 +724,60 @@ func resolveSubscriptionNodeSource(nodes []SubscriptionNode) string {
 	return "disk"
 }
 
+func (stats SubscriptionNodeBuildStats) Fields() map[string]any {
+	return map[string]any{
+		"artifact_count":     stats.ArtifactCount,
+		"proxy_iterations":   stats.ProxyIterations,
+		"empty_name_skipped": stats.EmptyNameSkipped,
+		"node_appends":       stats.NodeAppends,
+		"unique_name_checks": stats.UniqueNameChecks,
+	}
+}
+
+func (stats SubscriptionNodeBuildStats) fields() map[string]any {
+	return stats.Fields()
+}
+
+func (stats *proxyGroupResolveStats) add(other proxyGroupResolveStats) {
+	stats.RegexCompiles += other.RegexCompiles
+	stats.MatchNodeScans += other.MatchNodeScans
+	stats.RegexMatchAttempts += other.RegexMatchAttempts
+	stats.SourceScopeChecks += other.SourceScopeChecks
+	stats.ExactAvailableIndexItems += other.ExactAvailableIndexItems
+	stats.ExactNodeRefs += other.ExactNodeRefs
+	stats.SelectedNodeAppends += other.SelectedNodeAppends
+}
+
+func (stats proxyGroupResolveStats) fields() map[string]any {
+	return map[string]any{
+		"regex_compiles":              stats.RegexCompiles,
+		"match_node_scans":            stats.MatchNodeScans,
+		"regex_match_attempts":        stats.RegexMatchAttempts,
+		"source_scope_checks":         stats.SourceScopeChecks,
+		"exact_available_index_items": stats.ExactAvailableIndexItems,
+		"exact_node_refs":             stats.ExactNodeRefs,
+		"selected_node_appends":       stats.SelectedNodeAppends,
+	}
+}
+
+func mergeFields(base map[string]any, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	if base == nil {
+		base = map[string]any{}
+	}
+	for key, value := range extra {
+		base[key] = value
+	}
+	return base
+}
+
 func resolveMatch(id string, match Match, nodes []SubscriptionNode, optional bool) ([]string, error) {
+	return resolveMatchMeasured(id, match, nodes, optional, nil)
+}
+
+func resolveMatchMeasured(id string, match Match, nodes []SubscriptionNode, optional bool, stats *proxyGroupResolveStats) ([]string, error) {
 	if strings.TrimSpace(match.Type) == "" {
 		match.Type = "name_regex"
 	}
@@ -698,6 +790,9 @@ func resolveMatch(id string, match Match, nodes []SubscriptionNode, optional boo
 	}
 	if !match.CaseSensitive {
 		pattern = "(?i)" + pattern
+	}
+	if stats != nil {
+		stats.RegexCompiles++
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -713,14 +808,29 @@ func resolveMatch(id string, match Match, nodes []SubscriptionNode, optional boo
 	var selected []string
 	seen := map[string]bool{}
 	for _, node := range nodes {
+		if stats != nil {
+			stats.MatchNodeScans++
+		}
 		if len(sourceIDs) > 0 && !sourceIDs[node.SourceID] {
+			if stats != nil {
+				stats.SourceScopeChecks++
+			}
 			continue
+		}
+		if stats != nil {
+			if len(sourceIDs) > 0 {
+				stats.SourceScopeChecks++
+			}
+			stats.RegexMatchAttempts++
 		}
 		if !re.MatchString(node.Name) || seen[node.Name] {
 			continue
 		}
 		seen[node.Name] = true
 		selected = append(selected, node.Name)
+		if stats != nil {
+			stats.SelectedNodeAppends++
+		}
 		if match.Max > 0 && len(selected) >= match.Max {
 			break
 		}
@@ -739,14 +849,24 @@ func resolveMatch(id string, match Match, nodes []SubscriptionNode, optional boo
 }
 
 func resolveExactNodes(id string, rawNodes []string, nodes []SubscriptionNode) ([]string, error) {
+	return resolveExactNodesMeasured(id, rawNodes, nodes, nil)
+}
+
+func resolveExactNodesMeasured(id string, rawNodes []string, nodes []SubscriptionNode, stats *proxyGroupResolveStats) ([]string, error) {
 	available := map[string]bool{}
 	for _, node := range nodes {
 		available[node.Name] = true
+		if stats != nil {
+			stats.ExactAvailableIndexItems++
+		}
 	}
 	seen := map[string]bool{}
 	var selected []string
 	var missing []string
 	for _, raw := range rawNodes {
+		if stats != nil {
+			stats.ExactNodeRefs++
+		}
 		node := strings.TrimSpace(raw)
 		if node == "" {
 			return nil, fmt.Errorf("proxy group %q has an empty node name", id)
@@ -760,6 +880,9 @@ func resolveExactNodes(id string, rawNodes []string, nodes []SubscriptionNode) (
 		}
 		seen[node] = true
 		selected = append(selected, node)
+		if stats != nil {
+			stats.SelectedNodeAppends++
+		}
 	}
 	if len(missing) > 0 {
 		return nil, &MissingNodesError{GroupID: id, Nodes: missing}
@@ -1067,14 +1190,21 @@ func stringValue(value any) string {
 }
 
 func uniqueName(name string, used map[string]bool) string {
+	name, _ = uniqueNameMeasured(name, used)
+	return name
+}
+
+func uniqueNameMeasured(name string, used map[string]bool) (string, int) {
+	checks := 1
 	if !used[name] {
-		return name
+		return name, checks
 	}
 	base := name
 	for i := 2; ; i++ {
 		candidate := fmt.Sprintf("%s (%d)", base, i)
+		checks++
 		if !used[candidate] {
-			return candidate
+			return candidate, checks
 		}
 	}
 }

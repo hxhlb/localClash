@@ -27,10 +27,12 @@ type StageEvent struct {
 
 type Options struct {
 	SourcePath         string
+	Source             map[string]any `json:"-"`
 	PolicyPath         string
 	Mode               string
 	OutputPath         string
 	PacksSelectionPath string
+	Selection          *rulespkg.Selection `json:"-"`
 	RulesCacheDir      string
 	RuntimeProfilePath string
 	Force              bool
@@ -123,12 +125,16 @@ func Render(opts Options) (Result, error) {
 	finish(nil, nil)
 
 	finish = stage("read_subscription", map[string]any{"path": opts.SourcePath})
-	source, err := readYAMLMap(opts.SourcePath)
-	if err != nil {
-		finish(err, nil)
-		return Result{}, err
+	source := opts.Source
+	var err error
+	if source == nil {
+		source, err = readYAMLMap(opts.SourcePath)
+		if err != nil {
+			finish(err, nil)
+			return Result{}, err
+		}
 	}
-	finish(nil, nil)
+	finish(nil, map[string]any{"source": renderInputSource(source, opts.Source)})
 
 	finish = stage("read_policy", map[string]any{"path": opts.PolicyPath})
 	pol, err := readPolicy(opts.PolicyPath)
@@ -169,28 +175,29 @@ func Render(opts Options) (Result, error) {
 
 	var fragment *rulespkg.Fragment
 	var selection *rulespkg.Selection
-	if opts.PacksSelectionPath != "" {
+	if opts.Selection != nil || opts.PacksSelectionPath != "" {
 		finish = stage("render_pack_selection", map[string]any{"selection": opts.PacksSelectionPath, "rules_cache": opts.RulesCacheDir})
-		loadedSelection, err := rulespkg.LoadSelection(opts.PacksSelectionPath)
-		if err != nil {
-			finish(err, nil)
-			return Result{}, err
+		if opts.Selection != nil {
+			selection = opts.Selection
+		} else {
+			loadedSelection, err := rulespkg.LoadSelection(opts.PacksSelectionPath)
+			if err != nil {
+				finish(err, nil)
+				return Result{}, err
+			}
+			selection = &loadedSelection
 		}
-		selection = &loadedSelection
-		renderedFragment, err := rulespkg.Render(rulespkg.Options{
-			SelectionPath: opts.PacksSelectionPath,
-			CacheDir:      opts.RulesCacheDir,
-			Subscription:  opts.SourcePath,
-		})
+		renderedFragment, renderStats, err := rulespkg.RenderSelectionWithStats(*selection, opts.RulesCacheDir, proxyNames)
 		if err != nil {
 			finish(err, nil)
 			return Result{}, err
 		}
 		fragment = &renderedFragment
-		finish(nil, map[string]any{
+		finish(nil, mergeRenderFields(map[string]any{
+			"selection_source":    renderSelectionSource(opts.Selection),
 			"rule_provider_count": len(renderedFragment.RuleProviders),
 			"rule_count":          len(renderedFragment.Rules),
-		})
+		}, renderStats.Fields()))
 	}
 
 	finish = stage("build_runtime_config", nil)
@@ -258,6 +265,27 @@ func configRenderStageEmitter(callback func(StageEvent)) func(string, map[string
 			callback(event)
 		}
 	}
+}
+
+func renderInputSource(source, provided map[string]any) string {
+	if provided != nil {
+		return "provided"
+	}
+	return "disk"
+}
+
+func renderSelectionSource(selection *rulespkg.Selection) string {
+	if selection != nil {
+		return "provided"
+	}
+	return "disk"
+}
+
+func mergeRenderFields(base map[string]any, extra map[string]any) map[string]any {
+	for key, value := range extra {
+		base[key] = value
+	}
+	return base
 }
 
 func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.Fragment) configmeta.Metadata {

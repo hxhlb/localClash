@@ -131,6 +131,30 @@ type Fragment struct {
 	BaseManualChoices []string                  `yaml:"-"`
 }
 
+type RenderSelectionStats struct {
+	ProxyNames            int
+	ProxyGroups           int
+	PolicyGroups          int
+	EnabledPacks          int
+	CustomRules           int
+	RuleProviders         int
+	RenderedRules         int
+	RenderedRuleProviders int
+}
+
+func (stats RenderSelectionStats) Fields() map[string]any {
+	return map[string]any{
+		"proxy_names":             stats.ProxyNames,
+		"proxy_groups":            stats.ProxyGroups,
+		"policy_groups":           stats.PolicyGroups,
+		"enabled_packs":           stats.EnabledPacks,
+		"custom_rules":            stats.CustomRules,
+		"rule_providers":          stats.RuleProviders,
+		"rendered_rules":          stats.RenderedRules,
+		"rendered_rule_providers": stats.RenderedRuleProviders,
+	}
+}
+
 type Options struct {
 	SourcesDir    string
 	CacheDir      string
@@ -188,15 +212,41 @@ func Render(opts Options) (Fragment, error) {
 	if err != nil {
 		return Fragment{}, err
 	}
-	index, err := LoadPackIndex(PackIndexPath(opts.CacheDir))
-	if err != nil {
-		return Fragment{}, err
-	}
 	proxyNames, err := LoadSubscriptionProxyNames(opts.Subscription)
 	if err != nil {
 		return Fragment{}, err
 	}
-	return RenderFragment(selection, index.Caches, proxyNames)
+	return RenderSelection(selection, opts.CacheDir, proxyNames)
+}
+
+func RenderSelection(selection Selection, cacheDir string, proxyNames []string) (Fragment, error) {
+	fragment, _, err := RenderSelectionWithStats(selection, cacheDir, proxyNames)
+	return fragment, err
+}
+
+func RenderSelectionWithStats(selection Selection, cacheDir string, proxyNames []string) (Fragment, RenderSelectionStats, error) {
+	cacheDir = strings.TrimSpace(cacheDir)
+	if cacheDir == "" {
+		cacheDir = ".runtime/rules/packs"
+	}
+	index, err := LoadPackIndex(PackIndexPath(cacheDir))
+	if err != nil {
+		return Fragment{}, RenderSelectionStats{}, err
+	}
+	fragment, err := RenderFragment(selection, index.Caches, proxyNames)
+	if err != nil {
+		return Fragment{}, RenderSelectionStats{}, err
+	}
+	return fragment, RenderSelectionStats{
+		ProxyNames:            len(proxyNames),
+		ProxyGroups:           len(selection.ProxyGroups),
+		PolicyGroups:          len(selection.PolicyGroups),
+		EnabledPacks:          len(selection.EnabledPack),
+		CustomRules:           len(selection.CustomRules),
+		RuleProviders:         len(selection.RuleProviders),
+		RenderedRules:         len(fragment.Rules),
+		RenderedRuleProviders: len(fragment.RuleProviders),
+	}, nil
 }
 
 func LoadSources(dir string) ([]Source, error) {

@@ -346,11 +346,44 @@ func TestResolveEmitsStageTimings(t *testing.T) {
 	assertStageEvent(t, events, "resolve_rule_providers", "done")
 }
 
+func TestResolveEmitsComplexityCounters(t *testing.T) {
+	var events []StageEvent
+	_, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"HK": {Mode: "manual", Match: &Match{Type: "name_regex", Pattern: "HK", Min: 1}},
+				"JP": {Mode: "manual", Match: &Match{Type: "name_regex", Pattern: "JP", Min: 1}},
+			},
+		},
+		SubscriptionNodes: []SubscriptionNode{
+			{Name: "HK 01", SourceID: "S-1"},
+			{Name: "HK 02", SourceID: "S-1"},
+			{Name: "JP 01", SourceID: "S-1"},
+		},
+		OnStage: func(event StageEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	event := findStageEvent(t, events, "resolve_proxy_groups", "done")
+	assertStageField(t, event, "regex_compiles", 2)
+	assertStageField(t, event, "match_node_scans", 6)
+	assertStageField(t, event, "regex_match_attempts", 6)
+	assertStageField(t, event, "selected_node_appends", 3)
+}
+
 func assertStageEvent(t *testing.T, events []StageEvent, stage, event string) {
+	t.Helper()
+	_ = findStageEvent(t, events, stage, event)
+}
+
+func findStageEvent(t *testing.T, events []StageEvent, stage, event string) StageEvent {
 	t.Helper()
 	for _, got := range events {
 		if got.Stage == stage && got.Event == event {
-			return
+			return got
 		}
 	}
 	names := make([]string, 0, len(events))
@@ -358,6 +391,18 @@ func assertStageEvent(t *testing.T, events []StageEvent, stage, event string) {
 		names = append(names, got.Stage+":"+got.Event)
 	}
 	t.Fatalf("missing stage event %s:%s in %s", stage, event, strings.Join(names, ", "))
+	return StageEvent{}
+}
+
+func assertStageField(t *testing.T, event StageEvent, key string, want int) {
+	t.Helper()
+	got, ok := event.Fields[key].(int)
+	if !ok {
+		t.Fatalf("%s field = %#v, want int %d in %+v", key, event.Fields[key], want, event.Fields)
+	}
+	if got != want {
+		t.Fatalf("%s = %d, want %d in %+v", key, got, want, event.Fields)
+	}
 }
 
 func testRulePack(id, target string) rules.Pack {

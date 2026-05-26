@@ -1810,14 +1810,14 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		return toolResult{}, err
 	}
 	finish = startTaskStage(ctx, "load_subscription_nodes_after", map[string]any{"subscription": in.Merged})
-	afterNodes := localconfig.BuildSubscriptionNodesFromArtifacts(subscriptionArtifactsForLocalConfig(result.Artifacts))
-	finishTaskStage(finish, nil, map[string]any{"node_count": len(afterNodes), "source": "refresh_memory", "artifact_count": len(result.Artifacts)})
+	afterNodes, buildStats := localconfig.BuildSubscriptionNodesFromArtifactsMeasured(subscriptionArtifactsForLocalConfig(result.Artifacts))
+	finishTaskStage(finish, nil, mergeMCPFields(map[string]any{"node_count": len(afterNodes), "source": "refresh_memory"}, buildStats.Fields()))
 	toolResultValue := subscriptionsRefreshToolResult{
 		RefreshResult: result,
 		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
 	}
 	finish = startTaskStage(ctx, "evaluate_localclash_impact", map[string]any{"config": in.LocalClashConfig})
-	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output, afterNodes)
+	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output, afterNodes, result.MergedDoc)
 	finishTaskStage(finish, nil, map[string]any{"exists": impact.Exists, "state": impact.State, "valid": impact.Valid})
 	if impact.Exists {
 		toolResultValue.LocalClash = &impact
@@ -1917,19 +1917,25 @@ func buildNodeDiff(before, after []localconfig.SubscriptionNode) nodeDiff {
 	return diff
 }
 
-func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string, subscriptionNodes []localconfig.SubscriptionNode) localClashRefreshImpact {
+func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string, subscriptionNodes []localconfig.SubscriptionNode, subscriptionDoc map[string]any) localClashRefreshImpact {
 	impact := localClashRefreshImpact{ConfigPath: configPath, GeneratedConfig: outputPath, SelectionPath: selectionPath}
+	finish := startTaskStage(ctx, "evaluate_localclash_impact.load_config", map[string]any{"config": configPath})
 	config, err := localconfig.Load(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
+			finishTaskStage(finish, nil, map[string]any{"exists": false})
 			return impact
 		}
+		finishTaskStage(finish, err, nil)
 		impact.Exists = true
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
 		return impact
 	}
+	finishTaskStage(finish, nil, map[string]any{"exists": true})
 	impact.Exists = true
+
+	finish = startTaskStage(ctx, "evaluate_localclash_impact.resolve_after_refresh", map[string]any{"subscription_nodes": len(subscriptionNodes)})
 	resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
 		Config:              config,
 		SubscriptionPath:    subscriptionPath,
@@ -1940,6 +1946,7 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 		OnStage:             localConfigTaskLogger(ctx, "evaluate_localclash_impact"),
 	})
 	if err != nil {
+		finishTaskStage(finish, err, nil)
 		var missingNodes *localconfig.MissingNodesError
 		if errors.As(err, &missingNodes) {
 			impact.State = "stale_exact_nodes"
@@ -1954,48 +1961,64 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 		impact.NextActions = []string{"read localclash.yaml", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
 		return impact
 	}
+	finishTaskStage(finish, nil, map[string]any{"proxy_groups": len(resolved.ProxyGroups), "policy_groups": len(resolved.PolicyGroups), "packs": len(resolved.Packs)})
 	impact.State = "auto_applied"
 	impact.Valid = true
 	impact.ProxyGroups = proxyGroupImpacts(config, resolved.Config)
-	tempDir, err := os.MkdirTemp("", "localclash-refresh-render-*")
-	if err != nil {
-		impact.RequiresAgentReplan = true
-		impact.Error = err.Error()
-		return impact
-	}
-	defer os.RemoveAll(tempDir)
-	tempSelection := filepath.Join(tempDir, "localclash-packs.yaml")
-	if err := localconfig.WriteSelection(tempSelection, resolved.Selection); err != nil {
-		impact.RequiresAgentReplan = true
-		impact.Error = err.Error()
-		return impact
-	}
+
+	finish = startTaskStage(ctx, "evaluate_localclash_impact.render_after_refresh", map[string]any{"output": outputPath, "subscription_source": renderSubscriptionSource(subscriptionDoc)})
 	_, err = configrender.Render(configrender.Options{
 		SourcePath:         subscriptionPath,
+		Source:             subscriptionDoc,
 		PolicyPath:         policyPath,
 		OutputPath:         outputPath,
-		PacksSelectionPath: tempSelection,
+		Selection:          &resolved.Selection,
 		RulesCacheDir:      rulesCache,
 		RuntimeProfilePath: presetPath,
 		Force:              true,
+		OnStage:            configRenderTaskLogger(ctx, "evaluate_localclash_impact.render_after_refresh"),
 	})
 	if err != nil {
+		finishTaskStage(finish, err, nil)
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
 		return impact
 	}
+	finishTaskStage(finish, nil, nil)
+
+	finish = startTaskStage(ctx, "evaluate_localclash_impact.write_resolved_config", map[string]any{"config": configPath})
 	if err := localconfig.Write(configPath, resolved.Config); err != nil {
+		finishTaskStage(finish, err, nil)
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
 		return impact
 	}
+	finishTaskStage(finish, nil, nil)
+
+	finish = startTaskStage(ctx, "evaluate_localclash_impact.write_selection", map[string]any{"selection": selectionPath})
 	if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
+		finishTaskStage(finish, err, nil)
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
 		return impact
 	}
+	finishTaskStage(finish, nil, nil)
 	impact.AppliedAuto = true
 	return impact
+}
+
+func renderSubscriptionSource(doc map[string]any) string {
+	if doc != nil {
+		return "provided"
+	}
+	return "disk"
+}
+
+func mergeMCPFields(base map[string]any, extra map[string]any) map[string]any {
+	for key, value := range extra {
+		base[key] = value
+	}
+	return base
 }
 
 func proxyGroupImpacts(before, after localconfig.Config) []localClashProxyGroupImpact {
