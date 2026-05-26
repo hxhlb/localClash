@@ -712,7 +712,7 @@ func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) 
 			"arguments": map[string]any{
 				"config": filepath.Join(dir, "localclash-subscriptions.yaml"),
 				"sources": []map[string]any{
-					{"id": "primary", "url": "https://example.com/sub?token=secret-token"},
+					{"url": "https://example.com/sub?token=secret-token"},
 				},
 			},
 		},
@@ -731,6 +731,27 @@ func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) 
 	}
 	if strings.Contains(string(data), "secret-token") || strings.Contains(string(data), "token=") {
 		t.Fatalf("subscriptions_configure leaked token in %s", data)
+	}
+}
+
+func TestToolsCallSubscriptionsConfigureRejectsSourceID(t *testing.T) {
+	dir := t.TempDir()
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "subscriptions_configure",
+			"arguments": map[string]any{
+				"config": filepath.Join(dir, "localclash-subscriptions.yaml"),
+				"sources": []map[string]any{
+					{"id": "primary", "url": "https://example.com/sub?token=secret-token"},
+				},
+			},
+		},
+	})
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, `unknown field "id"`) {
+		t.Fatalf("error = %+v, want unknown field id", resp.Error)
 	}
 }
 

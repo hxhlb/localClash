@@ -164,14 +164,13 @@ func runProductSubscription(args []string, state appinit.RuntimeState) error {
 		if err != nil {
 			return err
 		}
-		sources, err := sourcesFromURLs(input.URLs)
-		if err != nil {
+		if _, err := sourcesFromURLs(input.URLs); err != nil {
 			return err
 		}
 		replace := true
 		result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
 			ConfigPath: state.Paths.SubscriptionConfig,
-			Sources:    sources,
+			URLs:       input.URLs,
 			Replace:    &replace,
 		})
 		if err != nil {
@@ -506,12 +505,11 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if input.Subscriptions != nil && len(input.Subscriptions.URLs) > 0 {
-		sources, err := sourcesFromURLs(input.Subscriptions.URLs)
-		if err != nil {
+		if _, err := sourcesFromURLs(input.Subscriptions.URLs); err != nil {
 			return changes, warnings, err
 		}
 		replace := true
-		if _, err := subscriptions.Configure(subscriptions.ConfigureOptions{ConfigPath: state.Paths.SubscriptionConfig, Sources: sources, Replace: &replace}); err != nil {
+		if _, err := subscriptions.Configure(subscriptions.ConfigureOptions{ConfigPath: state.Paths.SubscriptionConfig, URLs: input.Subscriptions.URLs, Replace: &replace}); err != nil {
 			return changes, warnings, err
 		}
 		changes = append(changes, "subscription_sources_replaced")

@@ -76,10 +76,7 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	result, err := Configure(ConfigureOptions{
 		ConfigPath: filepath.Join(dir, "localclash-subscriptions.yaml"),
 		Replace:    &replace,
-		Sources: []Source{
-			{ID: "primary", URL: url1},
-			{ID: "backup_1", URL: url2},
-		},
+		URLs:       []string{url1, url2},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -89,9 +86,6 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	}
 	if result.Sources[0].ID != mustSourceID(t, url1) || result.Sources[1].ID != mustSourceID(t, url2) {
 		t.Fatalf("source ids = %+v, want generated short hash ids", result.Sources)
-	}
-	if result.Sources[0].ID == "primary" || result.Sources[1].ID == "backup_1" {
-		t.Fatalf("configure should ignore caller supplied ids: %+v", result.Sources)
 	}
 	data := readTestFile(t, filepath.Join(dir, "localclash-subscriptions.yaml"))
 	if !strings.Contains(data, "secret-token") {
@@ -103,18 +97,18 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 func TestConfigureRejectsInvalidInputs(t *testing.T) {
 	dir := t.TempDir()
 	tests := []struct {
-		name    string
-		sources []Source
+		name string
+		urls []string
 	}{
-		{name: "empty", sources: nil},
-		{name: "duplicate url", sources: []Source{{URL: "https://example.com/sub"}, {URL: "https://example.com/sub"}}},
-		{name: "bad scheme", sources: []Source{{URL: "file:///tmp/sub.yaml"}}},
+		{name: "empty", urls: nil},
+		{name: "duplicate url", urls: []string{"https://example.com/sub", "https://example.com/sub"}},
+		{name: "bad scheme", urls: []string{"file:///tmp/sub.yaml"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Configure(ConfigureOptions{
 				ConfigPath: filepath.Join(dir, tt.name+".yaml"),
-				Sources:    tt.sources,
+				URLs:       tt.urls,
 			})
 			if err == nil {
 				t.Fatal("expected configure error")
@@ -345,7 +339,11 @@ func writeRefreshConfig(t *testing.T, sources []Source) refreshPaths {
 		runtimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
 		merged:     filepath.Join(dir, "subscription.yaml"),
 	}
-	_, err := Configure(ConfigureOptions{ConfigPath: paths.config, Sources: sources})
+	urls := make([]string, 0, len(sources))
+	for _, source := range sources {
+		urls = append(urls, source.URL)
+	}
+	_, err := Configure(ConfigureOptions{ConfigPath: paths.config, URLs: urls})
 	if err != nil {
 		t.Fatal(err)
 	}

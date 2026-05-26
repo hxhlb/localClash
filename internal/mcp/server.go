@@ -1706,20 +1706,29 @@ func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, 
 }
 
 func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config  string                 `json:"config"`
-		Sources []subscriptions.Source `json:"sources"`
-		Replace *bool                  `json:"replace"`
+	type subscriptionConfigureSourceInput struct {
+		URL string `json:"url"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	var in struct {
+		Config  string                             `json:"config"`
+		Sources []subscriptionConfigureSourceInput `json:"sources"`
+		Replace *bool                              `json:"replace"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.SubscriptionConfig
 	}
+	urls := make([]string, 0, len(in.Sources))
+	for _, source := range in.Sources {
+		urls = append(urls, source.URL)
+	}
 	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
 		ConfigPath: in.Config,
-		Sources:    in.Sources,
+		URLs:       urls,
 		Replace:    in.Replace,
 	})
 	if err != nil {

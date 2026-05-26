@@ -555,7 +555,6 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"id":  map[string]any{"type": "string", "description": "Deprecated compatibility field. Ignored when writing config; localClash generates a stable short hash source id from the URL."},
 				"url": map[string]any{"type": "string", "description": "HTTP or HTTPS Clash/Mihomo subscription URL. The source id is generated automatically from this URL."},
 			},
 			"required": []string{"url"},

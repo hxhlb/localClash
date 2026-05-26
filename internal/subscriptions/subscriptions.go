@@ -44,7 +44,7 @@ type StatusOptions struct {
 
 type ConfigureOptions struct {
 	ConfigPath string
-	Sources    []Source
+	URLs       []string
 	Replace    *bool
 }
 
@@ -170,10 +170,10 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 	if opts.Replace != nil && !*opts.Replace {
 		return ConfigureResult{}, fmt.Errorf("replace=false is not supported in this version")
 	}
-	if len(opts.Sources) == 0 {
-		return ConfigureResult{}, fmt.Errorf("sources is required")
+	if len(opts.URLs) == 0 {
+		return ConfigureResult{}, fmt.Errorf("urls is required")
 	}
-	sources, err := normalizeSources(opts.Sources)
+	sources, err := SourcesFromURLs(opts.URLs)
 	if err != nil {
 		return ConfigureResult{}, err
 	}
