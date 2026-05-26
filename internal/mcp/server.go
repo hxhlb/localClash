@@ -1315,7 +1315,7 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 	if err := json.Unmarshal(args, &in); err != nil {
 		return toolResult{}, err
 	}
-	test := true
+	test := false
 	if in.Test != nil {
 		test = *in.Test
 	}
@@ -2177,12 +2177,13 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := corerun.Start(ctx, corerun.StartOptions{
-		CorePath:   in.Core,
-		ConfigPath: in.Config,
-		WorkDir:    in.RuntimeDir,
-		LogPath:    in.LogFile,
-		Foreground: in.Foreground,
-		OnStage:    startRuntimeStageLogger(ctx),
+		CorePath:       in.Core,
+		ConfigPath:     in.Config,
+		WorkDir:        in.RuntimeDir,
+		LogPath:        in.LogFile,
+		Foreground:     in.Foreground,
+		SkipConfigTest: true,
+		OnStage:        startRuntimeStageLogger(ctx),
 	})
 	if err != nil {
 		return jsonToolResult(runtimeErrorResult(err.Error()))

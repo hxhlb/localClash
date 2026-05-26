@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -520,8 +521,11 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 	}
 }
 
-func TestApplyPlanInheritsDisabledMihomoTestWhenNotExplicit(t *testing.T) {
+func TestApplyPlanRunsMihomoTestEvenWhenCreateSkippedIt(t *testing.T) {
 	paths := writePlanFixture(t)
+	corePath := filepath.Join(paths.dir, "mihomo")
+	argsPath := filepath.Join(paths.dir, "apply-core.args")
+	writeExecutable(t, corePath, fmt.Sprintf("#!/bin/sh\nprintf '%%s\n' \"$0 $*\" > '%s'\nexit 0\n", argsPath))
 	plan, err := Render(context.Background(), Options{
 		PlanName:     "ai-sg",
 		Subscription: paths.subscription,
@@ -548,14 +552,19 @@ func TestApplyPlanInheritsDisabledMihomoTestWhenNotExplicit(t *testing.T) {
 		RulesCache:    paths.cacheDir,
 		SelectionPath: filepath.Join(paths.dir, "localclash-packs.gob"),
 		OutputPath:    filepath.Join(paths.dir, "generated", "mihomo.yaml"),
+		CorePath:      corePath,
+		WorkDir:       paths.dir,
 		Test:          true,
 		Now:           fixedPlanTime(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.MihomoTest.Enabled {
-		t.Fatalf("apply mihomo test = %+v, want inherited disabled test from patch summary", result.MihomoTest)
+	if !result.MihomoTest.Enabled || !result.MihomoTest.Passed {
+		t.Fatalf("apply mihomo test = %+v, want enabled passing test", result.MihomoTest)
+	}
+	if got := readFile(t, argsPath); !strings.Contains(got, "-t") {
+		t.Fatalf("core args = %q, want mihomo config test", got)
 	}
 	if !result.Applied || !result.Valid {
 		t.Fatalf("apply result = %+v, want applied valid plan", result)

@@ -262,7 +262,7 @@ func TestStopRemovesStalePIDFile(t *testing.T) {
 	}
 }
 
-func TestRestartPretestsConfigBeforeStoppingRuntime(t *testing.T) {
+func TestRestartSkipsConfigTestAndRestartsRuntime(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -281,26 +281,27 @@ func TestRestartPretestsConfigBeforeStoppingRuntime(t *testing.T) {
 	writeStartExecutable(t, core, `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo bad config >&2
-    exit 9
+    echo restart should not run mihomo config test >&2
+    exit 99
   fi
 done
 sleep 30
 `)
 	config := writeStartConfig(t, dir)
+	stubProcessCommandLine(t, cmd.Process.Pid, []string{core, "-d", workDir, "-f", config})
 
-	_, err := Restart(context.Background(), RestartOptions{
+	result, err := Restart(context.Background(), RestartOptions{
 		CorePath:   core,
 		ConfigPath: config,
 		WorkDir:    workDir,
 	})
-	if err == nil || !strings.Contains(err.Error(), "mihomo config test failed") {
-		t.Fatalf("restart error = %v, want pretest failure", err)
+	if err != nil {
+		t.Fatalf("restart error = %v, want skipped config test", err)
 	}
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
+	defer killProcess(result.Start.PID)
 	status := Status(StatusOptions{ConfigPath: config, WorkDir: workDir})
-	if !status.Running || status.PID != cmd.Process.Pid {
-		t.Fatalf("status after failed restart = %+v, want original runtime still running", status)
+	if !status.Running || status.PID == cmd.Process.Pid {
+		t.Fatalf("status after restart = %+v, want new runtime", status)
 	}
 }
 
@@ -385,11 +386,8 @@ func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {
 	writeStartExecutable(t, core, `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    count_file="$(dirname "$0")/config-test-count"
-    count="$(cat "$count_file" 2>/dev/null || echo 0)"
-    expr "$count" + 1 > "$count_file"
-    echo configuration test is successful
-    exit 0
+    echo restart should not run mihomo config test >&2
+    exit 99
   fi
 done
 sleep 30
@@ -415,7 +413,7 @@ sleep 30
 		t.Fatalf("restart = %+v, want stopped old pid %d and started new pid", result, old.Process.Pid)
 	}
 	if !result.Start.ConfigTestSkipped {
-		t.Fatalf("restart start = %+v, want second config test skipped after pretest", result.Start)
+		t.Fatalf("restart start = %+v, want config test skipped", result.Start)
 	}
 	if !result.Status.Running || result.Status.PID != result.Start.PID {
 		t.Fatalf("restart status = %+v, want new runtime pid %d running", result.Status, result.Start.PID)
@@ -423,17 +421,13 @@ sleep 30
 	if result.Timings.TotalMS == 0 {
 		t.Fatalf("restart timings = %+v, want total duration", result.Timings)
 	}
-	for _, want := range []string{"config_test:done", "stop:done", "start:done", "status:done"} {
+	for _, want := range []string{"stop:done", "start:done", "status:done"} {
 		if !restartStagesContain(stages, want) {
 			t.Fatalf("restart stages = %+v, missing %s", stages, want)
 		}
 	}
-	count, err := os.ReadFile(filepath.Join(dir, "config-test-count"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(count)) != "1" {
-		t.Fatalf("config test count = %q, want one pre-stop validation", strings.TrimSpace(string(count)))
+	if restartStagesContain(stages, "config_test:done") || restartStagesContain(stages, "config_test:error") {
+		t.Fatalf("restart stages = %+v, should not run config_test", stages)
 	}
 	select {
 	case <-oldDone:

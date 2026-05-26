@@ -56,12 +56,12 @@
 **6. 執行型工具**
 
 - `run_runtime`：啟動 Mihomo。
-- `restart_runtime`：先測 config，再 stop/start/status，適合 Agent 依賴代理路徑時使用。
+- `restart_runtime`：stop/start/status，假設配置已由 `config_patch_apply` 或 `doctor` 驗證，適合 Agent 依賴代理路徑時使用。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。
 - `router_takeover_apply`：套用 localClash 管理的 OpenWrt runtime 接管規則。
 - `router_takeover_stop`：撤銷 localClash 管理的接管規則，不停止 Mihomo。
 
-服務場景：真正改變運行狀態或路由器網路狀態，所以是 `confirm_required`。這組現在也會輸出階段性 task log，Agent 可以追 `config_test -> stop -> start -> status` 或 takeover script/verify 的進度。
+服務場景：真正改變運行狀態或路由器網路狀態，所以是 `confirm_required`。這組現在也會輸出階段性 task log，Agent 可以追 `stop -> start -> status` 或 takeover script/verify 的進度。
 
 **推薦 Agent 流程**
 

@@ -1970,8 +1970,8 @@ func TestRunRuntimeToolReturnsSerializableResult(t *testing.T) {
 	writeTestExecutable(t, core, `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo configuration test is successful
-    exit 0
+    echo run_runtime should not run mihomo config test >&2
+    exit 99
   fi
 done
 echo runtime started
@@ -2149,8 +2149,8 @@ func TestStopRuntimeToolStopsStartedRuntime(t *testing.T) {
 	writeTestExecutable(t, core, `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo configuration test is successful
-    exit 0
+    echo run_runtime should not run mihomo config test >&2
+    exit 99
   fi
 done
 sleep 30
@@ -2301,8 +2301,8 @@ func TestRunRuntimeToolRendersMissingGeneratedConfigFromSubscription(t *testing.
 	writeTestExecutable(t, core, `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo configuration test is successful
-    exit 0
+    echo run_runtime should not run mihomo config test >&2
+    exit 99
   fi
 done
 echo runtime started

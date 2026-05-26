@@ -64,11 +64,10 @@ type RestartStageEvent struct {
 }
 
 type RestartTimings struct {
-	ConfigTestMS int64 `json:"config_test_ms"`
-	StopMS       int64 `json:"stop_ms"`
-	StartMS      int64 `json:"start_ms"`
-	StatusMS     int64 `json:"status_ms"`
-	TotalMS      int64 `json:"total_ms"`
+	StopMS   int64 `json:"stop_ms"`
+	StartMS  int64 `json:"start_ms"`
+	StatusMS int64 `json:"status_ms"`
+	TotalMS  int64 `json:"total_ms"`
 }
 
 type StopResult struct {
@@ -207,17 +206,6 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 	if err := os.MkdirAll(filepath.Dir(runOpts.LogPath), 0o755); err != nil {
 		return result, err
 	}
-	configTestStarted := time.Now()
-	stage(RestartStageEvent{Stage: "config_test", Event: "started"})
-	if err := testConfig(ctx, runOpts); err != nil {
-		result.Timings.ConfigTestMS = elapsedMS(configTestStarted)
-		result.Timings.TotalMS = elapsedMS(totalStarted)
-		stage(RestartStageEvent{Stage: "config_test", Event: "error", DurationMS: result.Timings.ConfigTestMS, Error: err.Error()})
-		return result, err
-	}
-	result.Timings.ConfigTestMS = elapsedMS(configTestStarted)
-	stage(RestartStageEvent{Stage: "config_test", Event: "done", DurationMS: result.Timings.ConfigTestMS})
-
 	stopStarted := time.Now()
 	stage(RestartStageEvent{Stage: "stop", Event: "started"})
 	stop, err := Stop(StopOptions{

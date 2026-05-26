@@ -374,9 +374,6 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	if opts.PlanID == "" {
 		opts.PlanID = plan.PlanID
 	}
-	if !opts.TestExplicit && !plan.MihomoTest.Enabled {
-		opts.Test = false
-	}
 	opts = normalizeApplyOptions(applyPlanInputDefaults(opts, plan.Inputs))
 
 	finish = stage("resolve_apply_config", nil)
