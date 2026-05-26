@@ -14,7 +14,7 @@
     "external-ui": "ui/zashboard",
     "ipv6": true,
     "geodata-mode": true,
-    "geodata-loader": "standard",
+    "geodata-loader": "memconservative",
     "tcp-concurrent": true,
     "unified-delay": true,
     "find-process-mode": "off",

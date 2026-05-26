@@ -83,8 +83,8 @@ func TestDefaultNormalProfileCanResolveV2FlyGeoSitePacks(t *testing.T) {
 	file := DefaultFile()
 	mihomo := file.Profiles[ModeNormal].Mihomo
 
-	if mihomo["geodata-mode"] != true || mihomo["geodata-loader"] != "standard" {
-		t.Fatalf("normal geodata = mode %v loader %v, want enabled standard", mihomo["geodata-mode"], mihomo["geodata-loader"])
+	if mihomo["geodata-mode"] != true || mihomo["geodata-loader"] != "memconservative" {
+		t.Fatalf("normal geodata = mode %v loader %v, want enabled memconservative", mihomo["geodata-mode"], mihomo["geodata-loader"])
 	}
 	geoxURL := mihomo["geox-url"].(map[string]any)
 	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
@@ -110,7 +110,7 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		"external-controller": "0.0.0.0:9090",
 		"ipv6":                true,
 		"geodata-mode":        true,
-		"geodata-loader":      "standard",
+		"geodata-loader":      "memconservative",
 		"tcp-concurrent":      true,
 		"unified-delay":       true,
 		"find-process-mode":   "off",
