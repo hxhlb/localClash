@@ -15,25 +15,6 @@ func TestRenderEmitsSelectionComplexityCounters(t *testing.T) {
 			map[string]any{"name": "JP 01", "type": "ss"},
 		},
 	}
-	policyPath := filepath.Join(dir, "policy.json")
-	writeFile(t, policyPath, `groups:
-  manual: 🎯 手动选择
-  auto: ⚡ 自动选择
-  direct: DIRECT
-provider_mapping:
-  default:
-    path: default.yaml
-    behavior: domain
-modes:
-  default: whitelist
-  whitelist:
-    fallback: direct
-    rules:
-      - match: true
-        target: manual
-  blacklist:
-    fallback: direct
-`)
 	runtimePath := filepath.Join(dir, "runtime.json")
 	writeFile(t, runtimePath, `version: 1
 mode: router
@@ -62,7 +43,6 @@ meta:
 	_, err := Render(Options{
 		SourcePath:         filepath.Join(dir, "subscription.gob"),
 		Source:             source,
-		PolicyPath:         policyPath,
 		OutputPath:         filepath.Join(dir, "generated", "mihomo.yaml"),
 		Selection:          &selection,
 		RulesCacheDir:      rulesCache,

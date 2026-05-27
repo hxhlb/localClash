@@ -1,88 +1,51 @@
 # Policy Templates
 
 `docs/rule-model.md` is the authoritative development contract for rule
-layering, customization, and the Loyalsoldier boundary. This document describes
-the current base policy and localClash policy templates.
-
-## Initial Choice
-
-The first policy template uses `Loyalsoldier/clash-rules` as the base ruleset.
-
-Reasons:
-
-- The rule categories are small enough for a user to understand.
-- The files map cleanly into Mihomo `rule-providers`.
-- The template can stay localClash-owned while rule content remains upstream.
-- It includes the recommended whitelist and blacklist rule orders from Loyalsoldier.
-- Whitelist mode sends unmatched traffic to proxy.
-- Blacklist mode sends unmatched traffic direct.
-- Rendered configs prepend a local safety baseline before the upstream policy rules.
-- The local safety baseline keeps loopback, private LAN ranges, link-local ranges, and local hostnames direct.
-- Rendered configs keep `.local`, `.lan`, `.home.arpa`, and `localhost` DNS resolution on the system resolver instead of remote DoH.
-
-Loyalsoldier is the default base routing preset. It is not the immutable local
-safety baseline and it should not be modeled as an optional rule pack.
+layering, customization, and target ownership. This document describes the
+current disk-backed localClash policy templates.
 
 ## Boundary
 
-Do not commit upstream rule content into this repository. A policy template should store:
+Policy templates are localClash-owned durable intent, not generated Mihomo YAML.
+Template manifests live under `policy-templates/`, and `config_configure` writes
+their resolved intent into `localclash.json`. The renderer then combines that
+intent with the effective subscription and runtime profile.
 
-- upstream references
-- group mappings
-- rule order
-- local override slots
+Do not model a removed upstream preset as hidden renderer behavior. Broad default
+behavior must appear as explicit patch files in the selected template manifest.
 
-Optional rule packs should be modeled separately from policy templates. Rule
-packs are user-selectable add-ons; policy templates define the broad public
-internet routing mode such as whitelist-first or blacklist-first.
+## Built-In Templates
 
-The renderer should turn the policy into a generated Mihomo runtime config under `generated/`, which is local data and ignored by git.
+- `minimal`: loads only `policy-templates/minimal.json`. It defines the compact
+  default graph for advanced manual customization and does not auto-load the
+  built-in patch set.
+- `localclash-default`: loads all built-in patches listed by
+  `policy-templates/localclash-default.json`. Each ordered file under
+  `policy-templates/localclash-default.d/` contributes one stable default patch,
+  such as region exits, communication/social routing, Steam, media groups, games,
+  and fallback behavior.
 
-## localClash Templates
+Both templates are patch-layered product configuration. Neither depends on a
+separate preset file outside `policy-templates/`.
 
-MCP `config_configure` exposes policy templates from disk as base product
-configuration. Template manifests live under `policy-templates/`, and the tool
-does not render or start runtime. A template may either embed one `config:`
-block directly or declare an ordered `patches:` list. Patch-set templates are
-merged in manifest order and then written as the durable `localclash.json`
-intent.
+## Default Structure
 
-- `minimal`: records a compact durable intent and leaves routing to the local
-  safety baseline plus the base policy. This is for users who want manual
-  customization.
-- `localclash-default`: ACL4SSR-like default for new users. It uses v2fly-dlc
-  GEOSITE packs for common categories such as AI, media, communication,
-  Telegram, Google, Apple, Microsoft, developer services, games, ads, and China
-  direct domains. Telegram also includes explicit IPv4/IPv6 CIDR custom rules,
-  because many Telegram clients connect to Telegram IP ranges directly and do
-  not always expose a domain that can be caught by `GEOSITE,telegram`.
-  The manifest `policy-templates/localclash-default.json` is a patch set: each
-  file under `policy-templates/localclash-default.d/` contributes one stable
-  default patch, such as region exits, communication/social routing, Steam, or
-  media groups. The patch files intentionally keep emoji identifiers as YAML
-  `\U...` escapes so OpenWrt/BusyBox display locale quirks do not change the
-  on-disk template bytes.
-  Its Dashboard-facing structure is layered as business group -> exit group ->
-  subscription nodes. The base policy provides `⚡ 自动选择` and `🎯 手动选择`;
-  the default template adds direct and region exits. For example, `🎮 Steam`
-  and `🎮 游戏平台` default to `🌐 全球直连`, `🕹 Bahamut` defaults to
-  `🇹🇼 台湾节点`, while ChatGPT and streaming groups default to the Aethersailor
-  region order. The final Dashboard group list pins `🎯 手动选择` first and
-  `⚡ 自动选择` second. `🎯 手动选择` itself exposes `⚡ 自动选择`, then available
-  region groups, then subscription nodes. Region exits are optional so a
-  subscription without, for example, Korean nodes does not make first-time
-  initialization fail.
-  `🤖 ChatGPT` is the OpenAI-specific rule target and is rendered before the
-  broader `🧠 AI` category.
+The default Dashboard-facing structure is layered as:
 
-MCP `config_status` exposes this template through `intent.packs`,
-`intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. For a compact
-Agent-facing answer, use the read-only `routing_explain` tool; it explains a
-service/domain/group query with the matching packs, business policy group,
-available exits, optional cached rule evidence, and safe patch path. Agents must
-not infer the default template from the truncated
-`generated_summary.rules_sample` alone. See `docs/rule-model.md`.
+```text
+business group -> exit group -> subscription nodes
+```
 
-## Starter Base Policy
+`minimal` defines `⚡ 自动选择`, `🎯 手动选择`, and `DNSProxy` in the minimal
+strategy layer. `DNSProxy` exits through `⚡ 自动选择`, so router DNS `#DNSProxy`
+references have a concrete target even without loading the default patch set.
 
-See `policies/loyalsoldier.json`.
+`localclash-default` adds direct and regional exits plus business routing groups.
+Region exits are optional so subscriptions without a given region can still
+initialize. Patch files intentionally keep emoji identifiers as YAML `\U...`
+escapes so OpenWrt/BusyBox display locale quirks do not change on-disk template
+bytes.
+
+MCP `config_status` exposes the active template through `intent.packs`,
+`intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. For compact
+Agent-facing routing discovery, use the read-only `routing_explain` tool.

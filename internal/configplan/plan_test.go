@@ -26,7 +26,6 @@ func TestRenderBuiltInTargetPlanWritesArtifacts(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		PlanName:     "gaming-direct",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -80,7 +79,6 @@ func TestRenderPlanIDDoesNotOverwriteExistingPlan(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		PlanName:     "gaming-direct",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -108,7 +106,6 @@ func TestRenderProxyGroupPlan(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		PlanName:     "ai-sg-jp-us",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -154,7 +151,6 @@ func TestRenderPolicyGroupPlan(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		PlanName:     "steam-exits",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -230,7 +226,6 @@ packs:
 	result, err := Render(context.Background(), Options{
 		PlanName:     "steam-existing-exits",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		ConfigPath:   existingConfig,
@@ -295,7 +290,6 @@ func TestRenderExternalRuleProviderPlan(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		PlanName:     "us-proxy",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -358,7 +352,6 @@ func TestRenderMihomoTestUsesRuntimeProfileCore(t *testing.T) {
 	result, err := Render(context.Background(), Options{
 		PlanName:           "smart-core-test",
 		Subscription:       paths.subscription,
-		Policy:             paths.policy,
 		RulesCache:         paths.cacheDir,
 		RuntimeProfilePath: profilePath,
 		OutputDir:          paths.planDir,
@@ -476,7 +469,6 @@ func TestRenderProxyGroupMatchPlanWritesCandidateLocalClashConfig(t *testing.T) 
 	result, err := Render(context.Background(), Options{
 		PlanName:     "ai-by-regex",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -525,7 +517,6 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 	plan, err := Render(context.Background(), Options{
 		PlanName:     "ai-sg",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -544,7 +535,6 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 		PlanID:        plan.PlanID,
 		PlansDir:      paths.planDir,
 		Subscription:  paths.subscription,
-		Policy:        paths.policy,
 		RulesCache:    paths.cacheDir,
 		SelectionPath: selectionPath,
 		OutputPath:    generated,
@@ -587,7 +577,6 @@ func TestApplyPlanRunsMihomoTestEvenWhenCreateSkippedIt(t *testing.T) {
 	plan, err := Render(context.Background(), Options{
 		PlanName:     "ai-sg",
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -606,7 +595,6 @@ func TestApplyPlanRunsMihomoTestEvenWhenCreateSkippedIt(t *testing.T) {
 		PlanID:        plan.PlanID,
 		PlansDir:      paths.planDir,
 		Subscription:  paths.subscription,
-		Policy:        paths.policy,
 		RulesCache:    paths.cacheDir,
 		SelectionPath: filepath.Join(paths.dir, "localclash-packs.gob"),
 		OutputPath:    filepath.Join(paths.dir, "generated", "mihomo.yaml"),
@@ -634,7 +622,6 @@ func TestRenderUnknownPackIDReturnsError(t *testing.T) {
 
 	_, err := Render(context.Background(), Options{
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -652,7 +639,6 @@ func TestRenderRejectsMismatchedPackType(t *testing.T) {
 
 	_, err := Render(context.Background(), Options{
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -670,7 +656,6 @@ func TestRenderMissingProxyGroupReturnsError(t *testing.T) {
 
 	_, err := Render(context.Background(), Options{
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -688,7 +673,6 @@ func TestRenderUnknownProxyGroupNodeReturnsError(t *testing.T) {
 
 	_, err := Render(context.Background(), Options{
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -709,7 +693,6 @@ func TestRenderDuplicateProxyGroupNodesAreDeduplicated(t *testing.T) {
 
 	result, err := Render(context.Background(), Options{
 		Subscription: paths.subscription,
-		Policy:       paths.policy,
 		RulesCache:   paths.cacheDir,
 		OutputDir:    paths.planDir,
 		Test:         false,
@@ -734,7 +717,6 @@ func TestRenderDuplicateProxyGroupNodesAreDeduplicated(t *testing.T) {
 type planFixturePaths struct {
 	dir          string
 	subscription string
-	policy       string
 	cacheDir     string
 	planDir      string
 }
@@ -746,7 +728,6 @@ func writePlanFixture(t *testing.T) planFixturePaths {
 	paths := planFixturePaths{
 		dir:          dir,
 		subscription: filepath.Join(dir, "subscription.gob"),
-		policy:       filepath.Join(dir, "policy.json"),
 		cacheDir:     filepath.Join(dir, ".runtime", "rules", "packs"),
 		planDir:      filepath.Join(dir, ".runtime", "plans"),
 	}
@@ -764,38 +745,6 @@ func writePlanFixture(t *testing.T) planFixturePaths {
     type: vmess
     server: us.example.com
     uuid: secret
-`)
-	writeFile(t, paths.policy, `rule_source:
-  base_url: https://example.com/rules
-  update_interval: 86400
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-  apple: Apple
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-  proxy:
-    path: proxy.txt
-    behavior: domain
-    target: direct
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - match: true
-        target: direct
-  blacklist:
-    rules:
-      - match: true
-        target: direct
 `)
 	writeFile(t, filepath.Join(dir, "localclash-packs.gob"), `version: 1
 proxy_groups: {}

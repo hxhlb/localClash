@@ -25,7 +25,6 @@ type Options struct {
 	CorePath         string
 	SubscriptionPath string
 	ConfigPath       string
-	PolicyPath       string
 	DashboardDir     string
 	WorkDir          string
 	JSON             bool
@@ -68,15 +67,10 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		checkSubscriptionProxyCount(&subscription)
 	}
 	config := checkConfigFile("generated_config", "generated/mihomo.yaml", opts.ConfigPath)
-	policy := checkConfigFile("policy", "policy", opts.PolicyPath)
-	if policy.Status == statusOK {
-		checkPolicyMode(&policy)
-	}
 
 	report.add(core)
 	report.add(subscription)
 	report.add(config)
-	report.add(policy)
 	report.add(checkWorkingDirectory())
 
 	if config.Status == statusOK {
@@ -97,7 +91,6 @@ func normalizeOptions(opts Options) Options {
 	opts.CorePath = strings.TrimSpace(opts.CorePath)
 	opts.SubscriptionPath = strings.TrimSpace(opts.SubscriptionPath)
 	opts.ConfigPath = strings.TrimSpace(opts.ConfigPath)
-	opts.PolicyPath = strings.TrimSpace(opts.PolicyPath)
 	opts.DashboardDir = strings.TrimSpace(opts.DashboardDir)
 	if opts.CorePath == "" {
 		opts.CorePath = runtimeprofile.MetaCorePath
@@ -107,9 +100,6 @@ func normalizeOptions(opts Options) Options {
 	}
 	if opts.ConfigPath == "" {
 		opts.ConfigPath = "generated/mihomo.yaml"
-	}
-	if opts.PolicyPath == "" {
-		opts.PolicyPath = "policies/loyalsoldier.json"
 	}
 	if opts.DashboardDir == "" {
 		opts.DashboardDir = ".runtime/mihomo/ui/zashboard"
@@ -295,32 +285,6 @@ func checkSubscriptionProxyCount(check *Check) {
 	}
 	check.Summary = fmt.Sprintf("exists and parses; %d proxies", len(proxies))
 	check.Metrics = map[string]int{"proxies": len(proxies)}
-}
-
-func checkPolicyMode(check *Check) {
-	data, err := readDocMap(check.Path)
-	if err != nil {
-		return
-	}
-	modes, ok := data["modes"].(map[string]any)
-	if !ok {
-		check.Status = statusFail
-		check.Summary = "policy has no modes"
-		return
-	}
-	mode, ok := modes["default"].(string)
-	if !ok || mode == "" {
-		check.Status = statusFail
-		check.Summary = "policy has no default mode"
-		return
-	}
-	if mode != "whitelist" && mode != "blacklist" {
-		check.Status = statusFail
-		check.Summary = fmt.Sprintf("policy default mode %q is not whitelist or blacklist", mode)
-		return
-	}
-	check.Summary = fmt.Sprintf("default mode: %s", mode)
-	check.Metrics = map[string]int{"modes": len(modes) - 1}
 }
 
 func checkLocalBaseline(config map[string]any) Check {

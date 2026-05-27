@@ -284,7 +284,6 @@ func TestToolsCallConfigConfigureDoesNotRenderGeneratedConfig(t *testing.T) {
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			SubscriptionPath:    paths.subscription,
-			PolicyPath:          paths.policy,
 			RulesCacheDir:       paths.cache,
 			PacksSelectionPath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-packs.gob"),
 			GeneratedConfig:     outputPath,
@@ -462,7 +461,6 @@ func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testi
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			SubscriptionPath:    paths.subscription,
-			PolicyPath:          paths.policy,
 			RulesCacheDir:       paths.cache,
 			RuntimeProfilePath:  filepath.Join(filepath.Dir(paths.subscription), "localclash-runtime.json"),
 			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.json"),
@@ -498,7 +496,6 @@ func TestToolsCallConfigRenderReportsMissingSubscription(t *testing.T) {
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
-			PolicyPath:          filepath.Join(dir, "policy.json"),
 			RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
 			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
 			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
@@ -530,49 +527,6 @@ func TestToolsCallConfigRenderReportsMissingSubscription(t *testing.T) {
 	actions := content["next_actions"].([]any)
 	if len(actions) == 0 {
 		t.Fatalf("next_actions missing in %+v", content)
-	}
-}
-
-func TestToolsCallConfigRenderReportsMissingPolicyAsBaseAssetsProblem(t *testing.T) {
-	paths := setupMCPPlanFixture(t)
-	if err := os.Remove(paths.policy); err != nil {
-		t.Fatal(err)
-	}
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_render",
-			"arguments": map[string]any{
-				"subscription": paths.subscription,
-				"policy":       paths.policy,
-				"rules_cache":  paths.cache,
-				"background":   false,
-			},
-		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("config_render returned JSON-RPC error: %+v", resp.Error)
-	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	if content["rendered"] != false {
-		t.Fatalf("content = %+v, want not rendered", content)
-	}
-	missing := content["missing_inputs"].([]any)
-	if len(missing) != 1 || missing[0] != "policy" {
-		t.Fatalf("missing = %+v, want policy", missing)
-	}
-	actionsData, err := json.Marshal(content["next_actions"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	actions := string(actionsData)
-	for _, want := range []string{"call doctor", "base assets", "deploy-router.sh", "do not create a config patch"} {
-		if !strings.Contains(actions, want) {
-			t.Fatalf("next_actions = %s, want %q", actions, want)
-		}
 	}
 }
 
@@ -854,7 +808,6 @@ packs:
 				"merged":            paths.subscription,
 				"localclash_config": localClashConfig,
 				"selection":         filepath.Join(dir, "localclash-packs.gob"),
-				"policy":            paths.policy,
 				"rules_cache":       paths.cache,
 				"output":            generated,
 				"background":        false,
@@ -911,7 +864,6 @@ packs:
 			"arguments": map[string]any{
 				"config":       localClashConfig,
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"resolve":      true,
 			},
@@ -967,7 +919,6 @@ packs:
 			"arguments": map[string]any{
 				"config":       localClashConfig,
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"selection":    selection,
 				"output":       generated,
@@ -1040,7 +991,6 @@ packs:
 				"merged":            paths.subscription,
 				"localclash_config": localClashConfig,
 				"selection":         filepath.Join(dir, "localclash-packs.gob"),
-				"policy":            paths.policy,
 				"rules_cache":       paths.cache,
 				"output":            generated,
 				"background":        false,
@@ -1148,7 +1098,6 @@ func TestToolsCallConfigPatchCreateReturnsSerializableResult(t *testing.T) {
 			"arguments": map[string]any{
 				"patch_name":   "ai-test",
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
@@ -1191,7 +1140,6 @@ func TestToolsCallConfigPatchCreateSupportsPolicyGroups(t *testing.T) {
 			"arguments": map[string]any{
 				"patch_name":   "ai-policy",
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
@@ -1368,7 +1316,6 @@ func TestToolsCallConfigPatchCreateSupportsCustomRulesWithoutPacks(t *testing.T)
 			"arguments": map[string]any{
 				"patch_name":   "huggingface-temp",
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
@@ -1415,7 +1362,6 @@ func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
 			"arguments": map[string]any{
 				"patch_name":   "us-proxy",
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
@@ -1465,7 +1411,6 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 			"arguments": map[string]any{
 				"patch_name":   "ai-test",
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
@@ -1533,7 +1478,6 @@ func TestToolsCallConfigPatchCreateInvalidInputReturnsError(t *testing.T) {
 			"name": "config_patch_create",
 			"arguments": map[string]any{
 				"subscription": paths.subscription,
-				"policy":       paths.policy,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
@@ -1901,7 +1845,6 @@ func TestToolsCallDoctorReturnsSerializableResult(t *testing.T) {
 				"core":         filepath.Join(dir, "missing-core"),
 				"subscription": filepath.Join(dir, "missing-subscription.gob"),
 				"config":       filepath.Join(dir, "missing-generated.yaml"),
-				"policy":       filepath.Join(dir, "missing-policy.json"),
 				"dashboard":    filepath.Join(dir, "missing-dashboard"),
 				"workdir":      dir,
 			},
@@ -2323,7 +2266,6 @@ sleep 30
 		Paths: appinit.RuntimePaths{
 			GeneratedConfig:     generated,
 			SubscriptionPath:    paths.subscription,
-			PolicyPath:          paths.policy,
 			RulesCacheDir:       paths.cache,
 			MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
 			CorePath:            core,
@@ -2695,7 +2637,7 @@ x-localclash:
       - type: RULE-SET
         provider: blackmatrix7_OpenAI
         target: AI
-    insertion: after local safety baseline, before base rules
+    insertion: after local safety baseline, before DIRECT fallback
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2704,7 +2646,6 @@ x-localclash:
 
 type mcpPlanFixture struct {
 	subscription string
-	policy       string
 	cache        string
 	outputDir    string
 }
@@ -2715,7 +2656,6 @@ func setupMCPPlanFixture(t *testing.T) mcpPlanFixture {
 	t.Chdir(dir)
 	paths := mcpPlanFixture{
 		subscription: filepath.Join(dir, "subscription.gob"),
-		policy:       filepath.Join(dir, "policy.json"),
 		cache:        filepath.Join(dir, ".runtime", "rules", "packs"),
 		outputDir:    filepath.Join(dir, ".runtime", "plans"),
 	}
@@ -2727,33 +2667,6 @@ func setupMCPPlanFixture(t *testing.T) mcpPlanFixture {
     type: ss
     server: sg.example.com
     password: secret
-`)
-	writeMCPFile(t, paths.policy, `rule_source:
-  base_url: https://example.com/rules
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-  apple: Apple
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - match: true
-        target: direct
-  blacklist:
-    rules:
-      - match: true
-        target: direct
 `)
 	writeMCPFile(t, filepath.Join(dir, "localclash-packs.gob"), `version: 1
 proxy_groups: {}

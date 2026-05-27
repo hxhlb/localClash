@@ -52,17 +52,17 @@ func TestInstallDownloadsAndExtractsBaseAssets(t *testing.T) {
 
 func TestStatusReportsMissingJSONAssets(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "policy-templates"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "policies", "loyalsoldier.yaml"), []byte("old"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "policy-templates", "minimal.yaml"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	status := Status(dir)
 	if status.Installed {
 		t.Fatalf("status = %+v, want missing json assets", status)
 	}
-	if len(status.Missing) == 0 || status.Missing[0] != filepath.Join("policies", "loyalsoldier.json") {
+	if len(status.Missing) == 0 || status.Missing[0] != filepath.Join("policy-templates", "localclash-default.json") {
 		t.Fatalf("missing = %+v", status.Missing)
 	}
 }
@@ -73,7 +73,6 @@ func testArchive(t *testing.T) []byte {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	files := map[string]string{
-		"policies/loyalsoldier.json":                    `{"version":1}`,
 		"policy-templates/localclash-default.json":      `{"patches":[{"path":"localclash-default.d/00.json"}]}`,
 		"policy-templates/localclash-default.d/00.json": `{"id":"p","config":{}}`,
 		"rule-sources/v2fly-dlc.json":                   `{"version":1}`,

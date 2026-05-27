@@ -97,21 +97,18 @@ func TestAggregateStatus(t *testing.T) {
 func TestCheckConfigFileMissingPathIncludesResolvedPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(dir, "subscription.yaml"), []byte("proxies: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	check := checkConfigFile("policy", "policy", filepath.Join("policies", "loyalsoldier.json"))
+	check := checkConfigFile("generated_config", "generated config", filepath.Join("generated", "mihomo.yaml"))
 	if check.Status != statusFail {
 		t.Fatalf("status = %s, want %s", check.Status, statusFail)
 	}
 	details := strings.Join(check.Details, "\n")
 	for _, want := range []string{
 		"working directory: " + dir,
-		"resolved path: " + filepath.Join(dir, "policies", "loyalsoldier.json"),
+		"resolved path: " + filepath.Join(dir, "generated", "mihomo.yaml"),
 	} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("details = %q, want %q", details, want)
@@ -122,9 +119,6 @@ func TestCheckConfigFileMissingPathIncludesResolvedPath(t *testing.T) {
 func TestRunAlwaysIncludesWorkingDirectoryTree(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	if err := os.MkdirAll(filepath.Join(dir, "policies"), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(filepath.Join(dir, "subscription.yaml"), []byte("proxies: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +127,6 @@ func TestRunAlwaysIncludesWorkingDirectoryTree(t *testing.T) {
 		CorePath:         filepath.Join(dir, "missing-core"),
 		SubscriptionPath: "subscription.yaml",
 		ConfigPath:       filepath.Join("generated", "mihomo.yaml"),
-		PolicyPath:       filepath.Join("policies", "loyalsoldier.yaml"),
 		DashboardDir:     filepath.Join(dir, "missing-dashboard"),
 		WorkDir:          filepath.Join(dir, ".runtime", "mihomo"),
 	})
@@ -154,7 +147,7 @@ func TestRunAlwaysIncludesWorkingDirectoryTree(t *testing.T) {
 		t.Fatalf("working_directory = %+v, want ok at temp dir", *workingDir)
 	}
 	details := strings.Join(workingDir.Details, "\n")
-	for _, want := range []string{"policies/", "subscription.yaml"} {
+	for _, want := range []string{"subscription.yaml"} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("working directory details = %q, want %q", details, want)
 		}
@@ -187,10 +180,6 @@ exit 0
 	if err := os.WriteFile(config, []byte("proxies: []\nproxy-groups: []\nrules: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	policy := filepath.Join(dir, "policy.yaml")
-	if err := os.WriteFile(policy, []byte("modes:\n  default: whitelist\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -200,7 +189,6 @@ exit 0
 		CorePath:         core,
 		SubscriptionPath: subscription,
 		ConfigPath:       config,
-		PolicyPath:       policy,
 		DashboardDir:     filepath.Join(dir, "missing-dashboard"),
 		WorkDir:          workDir,
 	})

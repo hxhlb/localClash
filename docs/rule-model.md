@@ -1,8 +1,8 @@
 # Rule Model
 
 This document defines the development contract for localClash routing rules.
-It turns the current starter policy into an extensible model for the future
-web UI, without letting optional customization pollute the safety baseline.
+It keeps the renderer explicit: local safety behavior is built in, while product
+defaults are visible policy-template patches.
 
 ## Product Position
 
@@ -27,7 +27,7 @@ Rules are layered in this order:
 1. local safety baseline
 2. user explicit overrides
 3. optional rule packs
-4. base routing preset
+4. policy template patches
 5. fallback
 ```
 
@@ -125,10 +125,7 @@ Local user selection should live in localClash config, for example:
 
 ```json
 {
-  "base_preset": {
-    "id": "loyalsoldier",
-    "mode": "whitelist"
-  },
+  "policy_template": "minimal",
   "enabled_rule_packs": [
     {"id": "ai", "target": "proxy"},
     {"id": "ads", "target": "reject"}
@@ -139,55 +136,40 @@ Local user selection should live in localClash config, for example:
 The UI should save this localClash config and trigger a render. It should not
 patch the generated Mihomo runtime config.
 
-### 4. Base Routing RuntimeProfile
+### 4. Policy Template Patches
 
-The base routing preset defines the public internet routing philosophy. The
-default preset is currently Loyalsoldier.
+Policy template patches define product defaults that are broader than a single
+optional pack but still must remain visible localClash-owned data. They are not
+Go-side aliases and are not hidden renderer defaults.
 
-Loyalsoldier belongs here:
-
-```text
-base routing preset = public internet routing base
-```
-
-It is not:
-
-- the immutable safety baseline
-- an AI/media/game style optional pack
-- a user override layer
-
-It is broad enough to decide whether the config is whitelist-first or
-blacklist-first. That makes it a base policy choice, not a small add-on.
-
-The web UI should present it separately from rule packs:
+Built-in templates:
 
 ```text
-Base Policy
-(*) Loyalsoldier whitelist
-( ) Loyalsoldier blacklist
-( ) Minimal direct-first
-( ) Custom
-
-Rule Packs
-[ ] AI services
-[ ] Streaming media
-[ ] Ads and tracking
-[ ] Developer services
-[ ] Games
+minimal = load only policy-templates/minimal.json
+localclash-default = load every patch listed by policy-templates/localclash-default.json
 ```
 
-Loyalsoldier should remain replaceable. Future presets can exist beside it,
-but none of them may replace the local safety baseline.
+Template patches may define:
+
+- Dashboard-facing proxy groups
+- business-layer policy groups
+- built-in pack selections
+- custom rules
+- external rule-provider declarations
+
+The web UI should present policy templates separately from optional rule packs.
+Changing the selected template changes the durable `localclash.json` intent; it
+does not mutate `generated/mihomo.yaml` directly.
 
 ### 5. Fallback
 
-Fallback is the final `MATCH` rule emitted by the selected base preset or
-custom policy.
+Fallback is the final `MATCH` rule emitted by the renderer.
 
 Examples:
 
-- whitelist-style routing: unmatched traffic goes to an explicitly defined proxy or policy group
-- blacklist-style routing: unmatched traffic goes `DIRECT`
+- minimal routing: unmatched traffic goes `DIRECT`
+- default template routing: unmatched traffic follows explicit template rules
+  before the final `DIRECT` fallback
 
 Optional packs and overrides must be rendered before fallback.
 
@@ -207,7 +189,7 @@ subscription proxies
 + local safety baseline
 + user explicit overrides
 + enabled rule packs
-+ selected base routing preset
++ selected policy template patches
 + fallback
 ```
 
@@ -226,17 +208,12 @@ runtime rules.
 
 ## Current Implementation State
 
-Current code already has:
+Current code has:
 
 - built-in local safety baseline in `internal/configrender/render.go`
-- Loyalsoldier policy preset in `policies/loyalsoldier.json`
-- whitelist and blacklist modes
 - generated Mihomo config under `generated/`
 - doctor checks for baseline injection, rule targets, provider references, and
   `mihomo -t`
-
-Current code now has:
-
 - a localClash user config file model
 - a `policy_template` field for durable config intent
 - a `config_configure` MCP tool for base product configuration: core,
@@ -259,7 +236,7 @@ Current code now has:
 Current code still does not yet have:
 
 - standalone local rule pack files
-- UI support for base policy and rule pack selection
+- UI support for policy template and rule pack selection
 - doctor checks for custom rule or external provider schema and target
   references
 
@@ -323,9 +300,8 @@ A correct implementation must satisfy:
 
 - local safety baseline is always rendered first and cannot be disabled
 - user overrides render before optional packs
-- optional packs render before the base routing preset
-- Loyalsoldier is selectable as a base preset, not as an optional pack
-- whitelist and blacklist remain base policy modes
+- optional packs render before template-managed fallback behavior
+- product defaults live in explicit policy-template patches, not hidden Go code
 - generated config is reproducible from localClash-owned inputs
 - UI changes are stored in localClash config, not in generated Mihomo YAML
 - doctor can explain missing files, invalid rules, missing targets, missing

@@ -25,34 +25,6 @@ func TestBootstrapBuildsRuntimeStateFromLocalArtifacts(t *testing.T) {
     server: sg.example.com
     password: secret
 `, 0o644)
-	policy := filepath.Join(dir, "policy.json")
-	writeAppinitFile(t, policy, `rule_source:
-  base_url: https://example.com/rules
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-  apple: Apple
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - match: true
-        target: direct
-  blacklist:
-    rules:
-      - match: true
-        target: direct
-`, 0o644)
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
 	writeAppinitPackIndex(t, cacheDir)
 
@@ -64,7 +36,6 @@ modes:
 		SubscriptionPath:   subscription,
 		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:           core,
-		PolicyPath:         policy,
 		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 	})
 
@@ -95,7 +66,6 @@ func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 		SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
 		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:           filepath.Join(dir, "bin", "mihomo"),
-		PolicyPath:         filepath.Join(dir, "policy.json"),
 		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 	})
 
@@ -127,22 +97,6 @@ func TestBootstrapCanSkipGeneratedConfigRender(t *testing.T) {
     server: sg.example.com
     password: secret
 `, 0o644)
-	policy := filepath.Join(dir, "policy.json")
-	writeAppinitFile(t, policy, `rule_source:
-  base_url: https://example.com/rules
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - match: true
-        target: direct
-`, 0o644)
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 
 	state := Bootstrap(context.Background(), Options{
@@ -153,7 +107,6 @@ modes:
 		SubscriptionPath:    subscription,
 		MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
 		CorePath:            core,
-		PolicyPath:          policy,
 		RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
 		SkipGeneratedConfig: true,
 	})

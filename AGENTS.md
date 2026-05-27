@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`localClash` is a Go module for managing a local Mihomo runtime through CLI and MCP surfaces. The root `main.go` owns command routing. Feature code lives under `internal/`, grouped by responsibility: `mcp/` for MCP registry/server behavior, `appinit/` for shared bootstrap state, `configrender/` and `configplan/` for generated configs, `rules/` for rule-source adapters and packs, `doctor/` for diagnostics, and download/runtime helpers in `coredownload/`, `subdownload/`, `dashboard/`, and `corerun/`. Repository docs live in `docs/`; static policy inputs are in `policies/` and `rule-sources/`. Treat `.runtime/`, `generated/`, `bin/`, `subscription*.gob`, and `localclash-subscriptions.json` as local artifacts or secrets, not source.
+`localClash` is a Go module for managing a local Mihomo runtime through CLI and MCP surfaces. The root `main.go` owns command routing. Feature code lives under `internal/`, grouped by responsibility: `mcp/` for MCP registry/server behavior, `appinit/` for shared bootstrap state, `configrender/` and `configplan/` for generated configs, `rules/` for rule-source adapters and packs, `doctor/` for diagnostics, and download/runtime helpers in `coredownload/`, `subdownload/`, `dashboard/`, and `corerun/`. Repository docs live in `docs/`; static policy-template inputs are in `policy-templates/` and static rule-source inputs are in `rule-sources/`. Treat `.runtime/`, `generated/`, `bin/`, `subscription*.gob`, and `localclash-subscriptions.json` as local artifacts or secrets, not source.
 
 ## Build, Test, and Development Commands
 
@@ -10,7 +10,7 @@
 - `rtk go run . mcp`: start the stdio MCP server.
 - `rtk go run . doctor` or `rtk go run . doctor --json`: inspect local runtime prerequisites and generated config health.
 - `rtk go run . core download --dry-run`: verify Mihomo release asset selection without writing binaries.
-- `rtk go run . config render --force`: render `generated/mihomo.yaml` from local subscription, policy, and pack inputs.
+- `rtk go run . config render --force`: render `generated/mihomo.yaml` from local subscription, policy-template intent, and pack inputs.
 - `rtk scripts/test-mcp-callcopilot.sh`: run the end-to-end Copilot MCP smoke test when the local MCP registration is configured.
 
 ## Coding Style & Naming Conventions

@@ -2,7 +2,6 @@ package configrender
 
 import (
 	"encoding/gob"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -30,8 +29,6 @@ type StageEvent struct {
 type Options struct {
 	SourcePath         string
 	Source             map[string]any `json:"-"`
-	PolicyPath         string
-	Mode               string
 	OutputPath         string
 	PacksSelectionPath string
 	Selection          *rulespkg.Selection `json:"-"`
@@ -43,43 +40,13 @@ type Options struct {
 
 type Result struct {
 	OutputPath  string
-	Mode        string
 	RuntimeMode string
 	Core        string
 	ProxyCount  int
 	RuleCount   int
 }
 
-type policy struct {
-	RuleSource struct {
-		BaseURL        string `json:"base_url"`
-		PrimaryBaseURL string `json:"primary_base_url"`
-		UpdateInterval int    `json:"update_interval"`
-	} `json:"rule_source"`
-	Groups          map[string]string             `json:"groups"`
-	ProviderMapping map[string]providerDefinition `json:"provider_mapping"`
-	Modes           policyModes                   `json:"modes"`
-}
-
-type policyModes struct {
-	Default   string     `json:"default"`
-	Whitelist policyMode `json:"whitelist"`
-	Blacklist policyMode `json:"blacklist"`
-}
-
-type policyMode struct {
-	Fallback string     `json:"fallback"`
-	Rules    []ruleSpec `json:"rules"`
-}
-
-type providerDefinition struct {
-	Path     string `json:"path"`
-	Behavior string `json:"behavior"`
-	Target   string `json:"target"`
-}
-
 type ruleSpec struct {
-	Provider     string `json:"provider,omitempty"`
 	Domain       string `json:"domain,omitempty"`
 	DomainSuffix string `json:"domain_suffix,omitempty"`
 	IPCIDR       string `json:"ip_cidr,omitempty"`
@@ -91,24 +58,23 @@ type ruleSpec struct {
 }
 
 var localBaselineRules = []ruleSpec{
-	{Domain: "localhost", Target: "direct"},
-	{DomainSuffix: "localhost", Target: "direct"},
-	{DomainSuffix: "local", Target: "direct"},
-	{DomainSuffix: "lan", Target: "direct"},
-	{DomainSuffix: "home.arpa", Target: "direct"},
-	{IPCIDR: "127.0.0.0/8", Target: "direct", NoResolve: true},
-	{IPCIDR: "10.0.0.0/8", Target: "direct", NoResolve: true},
-	{IPCIDR: "172.16.0.0/12", Target: "direct", NoResolve: true},
-	{IPCIDR: "192.168.0.0/16", Target: "direct", NoResolve: true},
-	{IPCIDR: "169.254.0.0/16", Target: "direct", NoResolve: true},
-	{IPCIDR6: "::1/128", Target: "direct", NoResolve: true},
-	{IPCIDR6: "fc00::/7", Target: "direct", NoResolve: true},
-	{IPCIDR6: "fe80::/10", Target: "direct", NoResolve: true},
+	{Domain: "localhost", Target: rulespkg.TerminalDirect},
+	{DomainSuffix: "localhost", Target: rulespkg.TerminalDirect},
+	{DomainSuffix: "local", Target: rulespkg.TerminalDirect},
+	{DomainSuffix: "lan", Target: rulespkg.TerminalDirect},
+	{DomainSuffix: "home.arpa", Target: rulespkg.TerminalDirect},
+	{IPCIDR: "127.0.0.0/8", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR: "10.0.0.0/8", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR: "172.16.0.0/12", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR: "192.168.0.0/16", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR: "169.254.0.0/16", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR6: "::1/128", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR6: "fc00::/7", Target: rulespkg.TerminalDirect, NoResolve: true},
+	{IPCIDR6: "fe80::/10", Target: rulespkg.TerminalDirect, NoResolve: true},
 }
 
 func LocalBaselineRuleLines() []string {
-	pol := policy{Groups: map[string]string{"direct": "DIRECT"}}
-	rules, err := buildRules(pol, policyMode{Rules: localBaselineRules})
+	rules, err := renderRuleSpecs(localBaselineRules)
 	if err != nil {
 		return nil
 	}
@@ -137,22 +103,6 @@ func Render(opts Options) (Result, error) {
 		}
 	}
 	finish(nil, map[string]any{"source": renderInputSource(source, opts.Source)})
-
-	finish = stage("read_policy", map[string]any{"path": opts.PolicyPath})
-	pol, err := readPolicy(opts.PolicyPath)
-	if err != nil {
-		finish(err, nil)
-		return Result{}, err
-	}
-	finish(nil, nil)
-
-	finish = stage("select_policy_mode", map[string]any{"mode": opts.Mode})
-	modeName, mode, err := selectMode(pol, opts.Mode)
-	if err != nil {
-		finish(err, nil)
-		return Result{}, err
-	}
-	finish(nil, map[string]any{"selected_mode": modeName})
 
 	finish = stage("read_runtime_profile", map[string]any{"path": opts.RuntimeProfilePath})
 	runtimeFile, profile, _, err := runtimeprofile.ActiveProfile(opts.RuntimeProfilePath)
@@ -205,7 +155,7 @@ func Render(opts Options) (Result, error) {
 	}
 
 	finish = stage("build_runtime_config", nil)
-	rendered, err := buildRuntimeConfig(source, pol, mode, proxyNames, proxies, fragment)
+	rendered, err := buildRuntimeConfig(source, proxies, fragment)
 	if err != nil {
 		finish(err, nil)
 		return Result{}, err
@@ -248,7 +198,6 @@ func Render(opts Options) (Result, error) {
 
 	return Result{
 		OutputPath:  opts.OutputPath,
-		Mode:        modeName,
 		RuntimeMode: runtimeFile.Mode,
 		Core:        runtimeFile.Core,
 		ProxyCount:  len(proxyNames),
@@ -416,7 +365,7 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			PolicyGroups:  []configmeta.OverlayPolicyGroup{},
 			RuleProviders: []configmeta.OverlayRuleProvider{},
 			Rules:         []configmeta.OverlayRule{},
-			Insertion:     "after local safety baseline, before base rules",
+			Insertion:     "after local safety baseline, before DIRECT fallback",
 		},
 	}
 	if selection != nil {
@@ -573,9 +522,6 @@ func normalizeOptions(opts Options) Options {
 	if opts.SourcePath == "" {
 		opts.SourcePath = "subscription.gob"
 	}
-	if opts.PolicyPath == "" {
-		opts.PolicyPath = "policies/loyalsoldier.json"
-	}
 	if opts.OutputPath == "" {
 		opts.OutputPath = "generated/mihomo.yaml"
 	}
@@ -629,39 +575,6 @@ func readGobMap(path string) (map[string]any, error) {
 	return artifact.Data, nil
 }
 
-func readPolicy(path string) (policy, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return policy{}, err
-	}
-	var pol policy
-	if err := json.Unmarshal(data, &pol); err != nil {
-		return policy{}, err
-	}
-	if len(pol.Groups) == 0 {
-		return policy{}, errors.New("policy has no groups")
-	}
-	if len(pol.ProviderMapping) == 0 {
-		return policy{}, errors.New("policy has no provider_mapping")
-	}
-	return pol, nil
-}
-
-func selectMode(pol policy, requested string) (string, policyMode, error) {
-	name := requested
-	if name == "" {
-		name = pol.Modes.Default
-	}
-	switch name {
-	case "whitelist":
-		return name, pol.Modes.Whitelist, nil
-	case "blacklist":
-		return name, pol.Modes.Blacklist, nil
-	default:
-		return "", policyMode{}, fmt.Errorf("unknown policy mode %q", name)
-	}
-}
-
 func readProxies(source map[string]any) ([]any, error) {
 	raw, ok := source["proxies"]
 	if !ok {
@@ -695,7 +608,7 @@ func proxyNames(proxies []any) ([]string, error) {
 	return names, nil
 }
 
-func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, proxyNames []string, proxies []any, fragment *rulespkg.Fragment) (map[string]any, error) {
+func buildRuntimeConfig(source map[string]any, proxies []any, fragment *rulespkg.Fragment) (map[string]any, error) {
 	config := map[string]any{
 		"mixed-port":          7890,
 		"allow-lan":           false,
@@ -713,8 +626,7 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 		config["dns"] = withLocalDNSPolicy(dns)
 	}
 
-	providerNames := providersUsed(mode)
-	ruleProviders := buildRuleProviders(pol, providerNames)
+	ruleProviders := map[string]any{}
 	if fragment != nil {
 		if err := mergeRuleProviders(ruleProviders, fragment.RuleProviders); err != nil {
 			return nil, err
@@ -722,7 +634,7 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 	}
 	config["rule-providers"] = ruleProviders
 
-	rules, err := buildOrderedRules(pol, mode, fragment)
+	rules, err := buildOrderedRules(fragment)
 	if err != nil {
 		return nil, err
 	}
@@ -834,21 +746,17 @@ func setDefaultAny(values map[string]any, key string, value any) {
 	}
 }
 
-func buildOrderedRules(pol policy, mode policyMode, fragment *rulespkg.Fragment) ([]string, error) {
-	baseline, err := buildRules(pol, policyMode{Rules: localBaselineRules})
+func buildOrderedRules(fragment *rulespkg.Fragment) ([]string, error) {
+	baseline, err := renderRuleSpecs(localBaselineRules)
 	if err != nil {
 		return nil, err
 	}
-	base, err := buildRules(pol, mode)
-	if err != nil {
-		return nil, err
-	}
-	rules := make([]string, 0, len(baseline)+len(base))
+	rules := make([]string, 0, len(baseline)+1)
 	rules = append(rules, baseline...)
 	if fragment != nil {
 		rules = append(rules, fragment.Rules...)
 	}
-	rules = append(rules, base...)
+	rules = append(rules, "MATCH,DIRECT")
 	return rules, nil
 }
 
@@ -860,14 +768,6 @@ func mergeRuleProviders(base map[string]any, extra map[string]map[string]any) er
 		base[name] = provider
 	}
 	return nil
-}
-
-func withLocalBaseline(mode policyMode) policyMode {
-	rules := make([]ruleSpec, 0, len(localBaselineRules)+len(mode.Rules))
-	rules = append(rules, localBaselineRules...)
-	rules = append(rules, mode.Rules...)
-	mode.Rules = rules
-	return mode
 }
 
 func withLocalDNSPolicy(raw any) any {
@@ -925,57 +825,14 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
-func providersUsed(mode policyMode) []string {
-	seen := map[string]bool{}
-	var names []string
-	for _, rule := range mode.Rules {
-		if rule.Provider == "" || seen[rule.Provider] {
-			continue
-		}
-		seen[rule.Provider] = true
-		names = append(names, rule.Provider)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func buildRuleProviders(pol policy, names []string) map[string]any {
-	out := map[string]any{}
-	baseURL := strings.TrimRight(pol.RuleSource.BaseURL, "/")
-	interval := pol.RuleSource.UpdateInterval
-	if interval == 0 {
-		interval = 86400
-	}
-	for _, name := range names {
-		def := pol.ProviderMapping[name]
-		out[name] = map[string]any{
-			"type":     "http",
-			"behavior": def.Behavior,
-			"url":      baseURL + "/" + def.Path,
-			"path":     "./ruleset/" + name + ".yaml",
-			"interval": interval,
-		}
-	}
-	return out
-}
-
-func buildRules(pol policy, mode policyMode) ([]string, error) {
-	rules := make([]string, 0, len(mode.Rules))
-	for _, rule := range mode.Rules {
-		target := pol.Groups[rule.Target]
+func renderRuleSpecs(specs []ruleSpec) ([]string, error) {
+	rules := make([]string, 0, len(specs))
+	for _, rule := range specs {
+		target := strings.TrimSpace(rule.Target)
 		if target == "" {
-			return nil, fmt.Errorf("unknown target group %q", rule.Target)
+			return nil, errors.New("rule target is required")
 		}
 		switch {
-		case rule.Provider != "":
-			if _, ok := pol.ProviderMapping[rule.Provider]; !ok {
-				return nil, fmt.Errorf("unknown provider %q", rule.Provider)
-			}
-			line := fmt.Sprintf("RULE-SET,%s,%s", rule.Provider, target)
-			if rule.NoResolve {
-				line += ",no-resolve"
-			}
-			rules = append(rules, line)
 		case rule.Domain != "":
 			rules = append(rules, fmt.Sprintf("DOMAIN,%s,%s", rule.Domain, target))
 		case rule.DomainSuffix != "":
@@ -997,7 +854,7 @@ func buildRules(pol policy, mode policyMode) ([]string, error) {
 		case rule.Match:
 			rules = append(rules, fmt.Sprintf("MATCH,%s", target))
 		default:
-			return nil, errors.New("empty rule in policy mode")
+			return nil, errors.New("empty local rule")
 		}
 	}
 	return rules, nil

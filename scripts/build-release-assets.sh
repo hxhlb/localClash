@@ -90,7 +90,7 @@ fetch_asset "$geox_tmp/.runtime/mihomo/geosite.dat" \
 fetch_asset "$geox_tmp/.runtime/mihomo/ASN.mmdb" \
 	$(github_release_mirrors "https://github.com/xishang0128/geoip/releases/latest/download/GeoLite2-ASN.mmdb") \
 	"https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb"
-COPYFILE_DISABLE=1 tar -czf "$dist/$base_assets" policies policy-templates rule-sources -C "$geox_tmp" .runtime
+COPYFILE_DISABLE=1 tar -czf "$dist/$base_assets" policy-templates rule-sources -C "$geox_tmp" .runtime
 (cd "$dist" && sha256sum "$base_assets" > "$base_assets.sha256")
 
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -135,7 +135,6 @@ cat > "$dist/localclash-release-manifest.json" <<EOF
     "size": $base_assets_size,
     "install_path": "/root/localclash",
     "contents": [
-      "policies/",
       "policy-templates/",
       "rule-sources/",
       ".runtime/mihomo/Country.mmdb",

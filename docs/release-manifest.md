@@ -24,7 +24,6 @@ localclash-release-manifest.json
 find in its working directory:
 
 ```text
-policies/
 policy-templates/
 rule-sources/
 .runtime/mihomo/Country.mmdb
@@ -59,7 +58,6 @@ Manifest shape:
     "size": 123456,
     "install_path": "/root/localclash",
     "contents": [
-      "policies/",
       "policy-templates/",
       "rule-sources/",
       ".runtime/mihomo/Country.mmdb",

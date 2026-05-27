@@ -25,7 +25,6 @@ type Options struct {
 	SubscriptionRuntime string
 	MihomoRuntimeDir    string
 	CorePath            string
-	PolicyPath          string
 	PacksSelectionPath  string
 	RuntimeProfilePath  string
 	SkipGeneratedConfig bool
@@ -52,7 +51,6 @@ type RuntimePaths struct {
 	SubscriptionRuntime string `json:"subscription_runtime"`
 	MihomoRuntimeDir    string `json:"mihomo_runtime_dir"`
 	CorePath            string `json:"core_path"`
-	PolicyPath          string `json:"policy_path"`
 	PacksSelectionPath  string `json:"packs_selection_path,omitempty"`
 	RuntimeProfilePath  string `json:"runtime_profile_path"`
 }
@@ -112,7 +110,6 @@ func Bootstrap(ctx context.Context, opts Options) RuntimeState {
 			SubscriptionRuntime: opts.SubscriptionRuntime,
 			MihomoRuntimeDir:    opts.MihomoRuntimeDir,
 			CorePath:            opts.CorePath,
-			PolicyPath:          opts.PolicyPath,
 			PacksSelectionPath:  opts.PacksSelectionPath,
 			RuntimeProfilePath:  opts.RuntimeProfilePath,
 		},
@@ -155,9 +152,6 @@ func normalizeOptions(opts Options) Options {
 	}
 	if strings.TrimSpace(opts.MihomoRuntimeDir) == "" {
 		opts.MihomoRuntimeDir = filepath.Join(opts.RuntimeRoot, "mihomo")
-	}
-	if strings.TrimSpace(opts.PolicyPath) == "" {
-		opts.PolicyPath = defaultPath(baseDir, "policies/loyalsoldier.json")
 	}
 	if strings.TrimSpace(opts.PacksSelectionPath) == "" && fileExists(defaultPath(baseDir, "localclash-packs.gob")) {
 		opts.PacksSelectionPath = defaultPath(baseDir, "localclash-packs.gob")
@@ -203,7 +197,6 @@ func hasExplicitPath(opts Options) bool {
 		strings.TrimSpace(opts.SubscriptionRuntime) != "" ||
 		strings.TrimSpace(opts.MihomoRuntimeDir) != "" ||
 		strings.TrimSpace(opts.CorePath) != "" ||
-		strings.TrimSpace(opts.PolicyPath) != "" ||
 		strings.TrimSpace(opts.PacksSelectionPath) != "" ||
 		strings.TrimSpace(opts.RuntimeProfilePath) != ""
 }
@@ -320,7 +313,6 @@ func ensureGeneratedConfig(state *RuntimeState, opts Options) {
 	}
 	renderOpts := configrender.Options{
 		SourcePath:         opts.SubscriptionPath,
-		PolicyPath:         opts.PolicyPath,
 		OutputPath:         opts.GeneratedConfig,
 		RulesCacheDir:      opts.RulesCacheDir,
 		RuntimeProfilePath: opts.RuntimeProfilePath,

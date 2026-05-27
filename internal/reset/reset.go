@@ -146,7 +146,6 @@ func printPlan(out io.Writer, result Result) {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Will keep:")
 	fmt.Fprintln(out, "  - bin/")
-	fmt.Fprintln(out, "  - policies/")
 	fmt.Fprintln(out, "  - policy-templates/")
 	fmt.Fprintln(out, "  - rule-sources/")
 	fmt.Fprintln(out, "  - source code, docs, and scripts")

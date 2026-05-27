@@ -142,36 +142,6 @@ func TestRunProductConfigRenderUsesDurableLocalClashIntent(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	writeMainTestFile(t, filepath.Join("policies", "loyalsoldier.json"), `rule_source:
-  base_url: https://example.com/rules
-  update_interval: 86400
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: PROXY
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-  apple: Apple
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-  proxy:
-    path: proxy.txt
-    behavior: domain
-    target: proxy
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - provider: proxy
-        target: proxy
-      - match: true
-        target: proxy
-`)
 	writeMainTestFile(t, "subscription.gob", `proxies:
   - name: "HK 01"
     type: ss

@@ -141,7 +141,7 @@ enters `/root/localclash`, installs the OpenWrt procd service
 `/etc/init.d/localclash-mcp`, and runs MCP from the same isolated working
 directory by default. On first deployment to that directory it copies existing
 localClash files from `/root` when the target file is missing, installs missing
-base assets from `policies/`, `policy-templates/`, and `rule-sources/` without
+base assets from `policy-templates/` and `rule-sources/` without
 overwriting existing files, and restarts the MCP HTTP server on
 `http://192.168.6.1:8765/mcp`. After
 deployment it follows the router MCP log with `tail -f` until interrupted with
@@ -263,7 +263,7 @@ MCP config tools:
   `policy-templates/localclash-default.d/` are merged during initialization.
   It is the ACL4SSR-like v2fly-dlc/GEOSITE default for open-box use and renders
   a layered Dashboard structure of business group -> exit group -> subscription
-  nodes, while `minimal` keeps the compact base policy for advanced manual
+  nodes, while `minimal` keeps the compact policy-template graph for advanced manual
   customization.
 - `config_status`: inspect source-of-truth state, generated config presence,
   render readiness, and pending patches. The default response is lightweight for
@@ -272,7 +272,7 @@ MCP config tools:
   matches are needed, or `detail: true` when a full generated-summary/overlay
   audit is needed.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable
-  `localclash.json`, subscription, policy, and runtime profile. If
+  `localclash.json`, subscription, policy template, and runtime profile. If
   `localclash.json` does not exist, it renders the base config without an
   overlay. It ignores patches and does not start Mihomo.
 - `routing_explain`: read-only routing discovery for questions like
@@ -542,7 +542,7 @@ agent conversation.
 
 ## Config Render
 
-Render a runtime Mihomo config from a downloaded subscription source and a local policy:
+Render a runtime Mihomo config from a downloaded subscription source and localClash intent:
 
 ```bash
 go run . config render --force
@@ -559,8 +559,7 @@ use `config_render`.
 
 The rule model is documented in `docs/rule-model.md`. In short, localClash
 renders a fixed local safety baseline first, then user overrides, optional rule
-packs, the selected base routing preset, and finally fallback. Loyalsoldier is
-the default base routing preset, not an optional rule pack.
+packs, selected policy-template patches, and finally fallback.
 
 Test the generated config:
 

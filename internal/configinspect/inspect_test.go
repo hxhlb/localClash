@@ -296,7 +296,7 @@ x-localclash:
     rules: []
 `
 		}
-		content += `    insertion: after local safety baseline, before base rules
+		content += `    insertion: after local safety baseline, before DIRECT fallback
 `
 	}
 	path := filepath.Join(t.TempDir(), "mihomo.yaml")

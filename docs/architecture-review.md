@@ -194,7 +194,6 @@ type StageEvent struct {
 | `"localclash-subscriptions.json"` | configplan, subscriptions, localconfig, envinspect, server.go |
 | `".runtime/subscriptions"` | configplan, subscriptions, server.go |
 | `"localclash-packs.gob"` | configplan, subscriptions, bootstrap, rules/model, server.go |
-| `"policies/loyalsoldier.json"` | configplan, subscriptions, server.go, plan.go, doctor.go |
 | `".runtime/mihomo"` | configplan, corerun/start, corerun/run, doctor, rules/catalog |
 
 **六个**不同的包都实现了自己的 `normalizeOptions()` 函数，独立地对相同的回退路径进行硬编码：

@@ -15,40 +15,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestBuildRulesWhitelistFallback(t *testing.T) {
-	pol := policy{
-		Groups: map[string]string{
-			"direct": "DIRECT",
-			"proxy":  "⚡ 自动选择",
-			"reject": "REJECT",
-		},
-		ProviderMapping: map[string]providerDefinition{
-			"applications": {Path: "applications.txt", Behavior: "classical"},
-		},
-	}
-	mode := policyMode{Rules: []ruleSpec{
-		{Provider: "applications", Target: "direct"},
-		{Match: true, Target: "proxy"},
-	}}
-
-	rules, err := buildRules(pol, mode)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := rules[len(rules)-1]; got != "MATCH,⚡ 自动选择" {
-		t.Fatalf("fallback rule = %q, want MATCH,⚡ 自动选择", got)
-	}
-}
-
-func TestBuildRulesSupportsDomainSuffix(t *testing.T) {
-	pol := policy{
-		Groups: map[string]string{"direct": "DIRECT"},
-	}
-	mode := policyMode{Rules: []ruleSpec{
-		{DomainSuffix: "local", Target: "direct"},
-	}}
-
-	rules, err := buildRules(pol, mode)
+func TestRenderRuleSpecsSupportsDomainSuffix(t *testing.T) {
+	rules, err := renderRuleSpecs([]ruleSpec{
+		{DomainSuffix: "local", Target: "DIRECT"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,15 +76,20 @@ func TestWithLocalDNSPolicy(t *testing.T) {
 	}
 }
 
-func TestWithLocalBaselinePrependsRules(t *testing.T) {
-	mode := policyMode{Rules: []ruleSpec{{Match: true, Target: "proxy"}}}
-
-	got := withLocalBaseline(mode)
-	if got.Rules[0].Domain != "localhost" {
-		t.Fatalf("first baseline rule = %+v, want localhost", got.Rules[0])
+func TestBuildOrderedRulesUsesLocalBaselineFragmentAndDirectFallback(t *testing.T) {
+	fragment := &rules.Fragment{Rules: []string{"DOMAIN-SUFFIX,example.com,⚡ 自动选择"}}
+	got, err := buildOrderedRules(fragment)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got.Rules[len(got.Rules)-1].Match != true {
-		t.Fatalf("last rule = %+v, want original match rule", got.Rules[len(got.Rules)-1])
+	if got[0] != "DOMAIN,localhost,DIRECT" {
+		t.Fatalf("first rule = %q, want local baseline", got[0])
+	}
+	if indexOf(got, "DOMAIN-SUFFIX,example.com,⚡ 自动选择") <= 0 {
+		t.Fatalf("rules = %+v, want fragment after local baseline", got)
+	}
+	if got[len(got)-1] != "MATCH,DIRECT" {
+		t.Fatalf("last rule = %q, want DIRECT fallback", got[len(got)-1])
 	}
 }
 
@@ -123,7 +98,6 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "base.yaml"),
 		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
@@ -131,8 +105,8 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RuleCount != len(LocalBaselineRuleLines())+2 {
-		t.Fatalf("RuleCount = %d, want baseline + 2", result.RuleCount)
+	if result.RuleCount != len(LocalBaselineRuleLines())+1 {
+		t.Fatalf("RuleCount = %d, want baseline + direct fallback", result.RuleCount)
 	}
 	config := readTestYAML(t, result.OutputPath)
 	if _, ok := config["rule-providers"].(map[string]any)["sukkaw_ai_non_ip"]; ok {
@@ -157,7 +131,6 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "with-packs.gob"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
@@ -188,15 +161,15 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 
 	rules := testStringSlice(config["rules"])
 	packIndex := indexOf(rules, "RULE-SET,sukkaw_ai_non_ip,AI")
-	baseIndex := indexOf(rules, "RULE-SET,applications,DIRECT")
+	fallbackIndex := indexOf(rules, "MATCH,DIRECT")
 	if packIndex < 0 {
 		t.Fatal("missing sukkaw AI rule")
 	}
-	if baseIndex < 0 {
-		t.Fatal("missing base applications rule")
+	if fallbackIndex < 0 {
+		t.Fatal("missing DIRECT fallback rule")
 	}
-	if packIndex > baseIndex {
-		t.Fatalf("pack rule index %d should be before base rule index %d", packIndex, baseIndex)
+	if packIndex > fallbackIndex {
+		t.Fatalf("pack rule index %d should be before DIRECT fallback index %d", packIndex, fallbackIndex)
 	}
 
 	metadata := config["x-localclash"].(map[string]any)
@@ -217,29 +190,6 @@ func TestRenderWithPacksSelectionIncludesProxyGroupFragment(t *testing.T) {
 
 func TestRenderDefaultOverlayUsesBaseManualAutoSelectors(t *testing.T) {
 	paths := writeRenderFixture(t)
-	writeFile(t, paths.policy, `rule_source:
-  base_url: https://example.com/rules
-  update_interval: 86400
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - match: true
-        target: direct
-`)
 	writeFile(t, paths.selection, `version: 1
 proxy_groups:
   "🎯 手动选择":
@@ -266,7 +216,6 @@ enabled_packs:
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "default-overlay.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
@@ -319,35 +268,11 @@ enabled_packs:
 	}
 }
 
-func TestRenderOmitsLegacyAppleGroupWhenPolicyDoesNotDefineIt(t *testing.T) {
+func TestRenderOmitsLegacyAppleGroupWithoutSelection(t *testing.T) {
 	paths := writeRenderFixture(t)
-	writeFile(t, paths.policy, `rule_source:
-  base_url: https://example.com/rules
-  update_interval: 86400
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - match: true
-        target: direct
-`)
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "without-legacy-apple.yaml"),
 		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
 		Force:              true,
@@ -384,7 +309,6 @@ enabled_packs:
 
 	_, err := Render(Options{
 		SourcePath:         paths.subscriptionNoJP,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "empty-candidates.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
@@ -416,7 +340,6 @@ enabled_packs: []
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "router.yaml"),
 		PacksSelectionPath: paths.selection,
 		RuntimeProfilePath: profilePath,
@@ -468,7 +391,6 @@ enabled_packs:
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
-		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "smart.yaml"),
 		PacksSelectionPath: paths.selection,
 		RulesCacheDir:      paths.cacheDir,
@@ -523,7 +445,6 @@ type renderFixturePaths struct {
 	dir              string
 	subscription     string
 	subscriptionNoJP string
-	policy           string
 	cacheDir         string
 	selection        string
 }
@@ -535,7 +456,6 @@ func writeRenderFixture(t *testing.T) renderFixturePaths {
 		dir:              dir,
 		subscription:     filepath.Join(dir, "subscription.gob"),
 		subscriptionNoJP: filepath.Join(dir, "subscription-no-jp.gob"),
-		policy:           filepath.Join(dir, "policy.json"),
 		cacheDir:         filepath.Join(dir, "packs"),
 		selection:        filepath.Join(dir, "packs.gob"),
 	}
@@ -554,38 +474,6 @@ func writeRenderFixture(t *testing.T) renderFixturePaths {
     port: 443
     cipher: none
     password: test
-`)
-	writeFile(t, paths.policy, `rule_source:
-  base_url: https://example.com/rules
-  update_interval: 86400
-groups:
-  direct: DIRECT
-  reject: REJECT
-  proxy: ⚡ 自动选择
-  auto: ⚡ 自动选择
-  manual: 🎯 手动选择
-  apple: Apple
-provider_mapping:
-  applications:
-    path: applications.txt
-    behavior: classical
-    target: direct
-  proxy:
-    path: proxy.txt
-    behavior: domain
-    target: proxy
-modes:
-  default: whitelist
-  whitelist:
-    rules:
-      - provider: applications
-        target: direct
-      - match: true
-        target: direct
-  blacklist:
-    rules:
-      - match: true
-        target: direct
 `)
 	if err := os.MkdirAll(paths.cacheDir, 0o755); err != nil {
 		t.Fatal(err)

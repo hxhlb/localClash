@@ -41,7 +41,6 @@ type StatusResult struct {
 	Installed               bool     `json:"installed"`
 	Path                    string   `json:"path"`
 	Missing                 []string `json:"missing,omitempty"`
-	Policy                  string   `json:"policy,omitempty"`
 	Default                 string   `json:"default_template,omitempty"`
 	DefaultPatchCount       int      `json:"default_patch_count,omitempty"`
 	DefaultPatchesInstalled bool     `json:"default_patches_installed,omitempty"`
@@ -123,12 +122,10 @@ func Status(outputDir string) StatusResult {
 	}
 	result := StatusResult{
 		Path:          outputDir,
-		Policy:        filepath.Join(outputDir, "policies", "loyalsoldier.json"),
 		Default:       filepath.Join(outputDir, "policy-templates", "localclash-default.json"),
 		RuleSourceDir: filepath.Join(outputDir, "rule-sources"),
 	}
 	required := []string{
-		result.Policy,
 		result.Default,
 		filepath.Join(outputDir, ".runtime", "mihomo", "Country.mmdb"),
 		filepath.Join(outputDir, ".runtime", "mihomo", "geoip.dat"),

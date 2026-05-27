@@ -569,8 +569,6 @@ func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, erro
 		SubscriptionConfig  string `json:"subscription_config"`
 		SubscriptionRuntime string `json:"subscription_runtime"`
 		RulesCache          string `json:"rules_cache"`
-		Policy              string `json:"policy"`
-		Mode                string `json:"mode"`
 		RuntimeProfile      string `json:"runtime_profile"`
 		Limit               int    `json:"limit"`
 	}
@@ -584,7 +582,7 @@ func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, erro
 	if view != "durable" && view != "working" && view != "effective_preview" {
 		return toolResult{}, fmt.Errorf("unsupported config intent view %q", in.View)
 	}
-	s.applyConfigIntentInspectDefaults(&in.Subscription, &in.Policy, &in.RulesCache, &in.RuntimeProfile, &in.SubscriptionConfig, &in.SubscriptionRuntime)
+	s.applyConfigIntentInspectDefaults(&in.Subscription, &in.RulesCache, &in.RuntimeProfile, &in.SubscriptionConfig, &in.SubscriptionRuntime)
 	result, err := configinspect.InspectIntent(configinspect.IntentOptions{
 		ConfigPath:          in.Config,
 		Subscription:        in.Subscription,
@@ -606,8 +604,6 @@ func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, erro
 		SubscriptionConfig:  in.SubscriptionConfig,
 		SubscriptionRuntime: in.SubscriptionRuntime,
 		RulesCache:          in.RulesCache,
-		Policy:              in.Policy,
-		Mode:                in.Mode,
 		RuntimeProfile:      in.RuntimeProfile,
 		Limit:               in.Limit,
 		Intent:              result,
@@ -621,8 +617,6 @@ type configIntentInspectWorkingInput struct {
 	SubscriptionConfig  string
 	SubscriptionRuntime string
 	RulesCache          string
-	Policy              string
-	Mode                string
 	RuntimeProfile      string
 	Limit               int
 	Intent              configinspect.IntentResult
@@ -642,15 +636,12 @@ func (s *Server) configIntentInspectWorkingResult(in configIntentInspectWorkingI
 		SubscriptionAvailable: fileExists(in.Subscription),
 		Inputs: configIntentInspectInputs{
 			Subscription:        in.Subscription,
-			Policy:              in.Policy,
-			Mode:                in.Mode,
 			RulesCache:          in.RulesCache,
 			RuntimeProfilePath:  in.RuntimeProfile,
 			LocalClashConfig:    in.Config,
 			SubscriptionConfig:  in.SubscriptionConfig,
 			SubscriptionRuntime: in.SubscriptionRuntime,
 		},
-		BasePolicy:          configIntentInspectPolicy{Path: in.Policy, Mode: in.Mode},
 		LocalSafetyBaseline: configIntentInspectRuleSlice{RuleCount: len(baseline), Rules: limitStrings(baseline, limit)},
 		Intent:              in.Intent,
 		NextActions:         []string{},
@@ -685,7 +676,6 @@ type configIntentInspectContextResult struct {
 	PreviewSource         string                       `json:"preview_source,omitempty"`
 	Inputs                configIntentInspectInputs    `json:"inputs"`
 	RuntimeProfile        *runtimeprofile.Status       `json:"runtime_profile,omitempty"`
-	BasePolicy            configIntentInspectPolicy    `json:"base_policy"`
 	LocalSafetyBaseline   configIntentInspectRuleSlice `json:"local_safety_baseline"`
 	Intent                configinspect.IntentResult   `json:"intent"`
 	Overlay               *configinspect.OverlayResult `json:"overlay,omitempty"`
@@ -696,18 +686,11 @@ type configIntentInspectContextResult struct {
 
 type configIntentInspectInputs struct {
 	Subscription        string `json:"subscription"`
-	Policy              string `json:"policy"`
-	Mode                string `json:"mode,omitempty"`
 	RulesCache          string `json:"rules_cache"`
 	RuntimeProfilePath  string `json:"runtime_profile"`
 	LocalClashConfig    string `json:"localclash_config"`
 	SubscriptionConfig  string `json:"subscription_config"`
 	SubscriptionRuntime string `json:"subscription_runtime"`
-}
-
-type configIntentInspectPolicy struct {
-	Path string `json:"path"`
-	Mode string `json:"mode,omitempty"`
 }
 
 type configIntentInspectRuleSlice struct {
@@ -752,10 +735,8 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	}
 
 	outputPath := filepath.Join(tempDir, "mihomo.yaml")
-	renderResult, err := configrender.Render(configrender.Options{
+	_, err = configrender.Render(configrender.Options{
 		SourcePath:         in.Subscription,
-		PolicyPath:         in.Policy,
-		Mode:               in.Mode,
 		OutputPath:         outputPath,
 		PacksSelectionPath: selectionPath,
 		RulesCacheDir:      in.RulesCache,
@@ -767,7 +748,6 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	}
 	result.PreviewRendered = true
 	result.PreviewSource = "temporary_render"
-	result.BasePolicy.Mode = renderResult.Mode
 	base, err := configinspect.InspectBase(configinspect.Options{ConfigPath: outputPath, Limit: limit})
 	if err != nil {
 		return err
@@ -780,7 +760,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	result.Overlay = &overlay
 	switch {
 	case !in.Intent.Exists:
-		result.NextActions = append(result.NextActions, "no durable localClash overlay exists; effective rules are local safety baseline plus base policy only", "use proxy_group_build, packs_list or pack_rules_query, then config_patch_create and config_patch_apply to add custom routing")
+		result.NextActions = append(result.NextActions, "no durable localClash overlay exists; effective rules are local safety baseline plus DIRECT fallback only", "use config_configure with policy_template=minimal or localclash-default before adding routing patches")
 	case in.Intent.Resolved:
 		result.NextActions = append(result.NextActions, "review effective_summary and overlay before starting or applying runtime changes")
 	default:
@@ -789,7 +769,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	return nil
 }
 
-func (s *Server) applyConfigIntentInspectDefaults(subscription, policy, rulesCache, runtimeProfile, subscriptionConfig, subscriptionRuntime *string) {
+func (s *Server) applyConfigIntentInspectDefaults(subscription, rulesCache, runtimeProfile, subscriptionConfig, subscriptionRuntime *string) {
 	setDefault := func(value *string, fallback string) {
 		if *value == "" && fallback != "" {
 			*value = fallback
@@ -797,14 +777,12 @@ func (s *Server) applyConfigIntentInspectDefaults(subscription, policy, rulesCac
 	}
 	if s.state != nil {
 		setDefault(subscription, s.state.Paths.SubscriptionPath)
-		setDefault(policy, s.state.Paths.PolicyPath)
 		setDefault(rulesCache, s.state.Paths.RulesCacheDir)
 		setDefault(runtimeProfile, s.state.Paths.RuntimeProfilePath)
 		setDefault(subscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(subscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 	}
 	setDefault(subscription, "subscription.gob")
-	setDefault(policy, "policies/loyalsoldier.json")
 	setDefault(rulesCache, filepath.Join(".runtime", "rules", "packs"))
 	setDefault(runtimeProfile, runtimeprofile.DefaultPath)
 	setDefault(subscriptionConfig, "localclash-subscriptions.json")
@@ -1036,8 +1014,6 @@ type configToolInput struct {
 	Subscription        string `json:"subscription"`
 	SubscriptionConfig  string `json:"subscription_config"`
 	SubscriptionRuntime string `json:"subscription_runtime"`
-	Policy              string `json:"policy"`
-	Mode                string `json:"mode"`
 	RulesCache          string `json:"rules_cache"`
 	RuntimeProfile      string `json:"runtime_profile"`
 	Selection           string `json:"selection"`
@@ -1106,7 +1082,6 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		"source_of_truth": inspectConfigFile(in.Config),
 		"generated":       generated,
 		"subscription":    inspectConfigFile(in.Subscription),
-		"policy":          inspectConfigFile(in.Policy),
 		"runtime_profile": inspectConfigFile(in.RuntimeProfile),
 		"selection":       inspectConfigFile(in.Selection),
 		"inputs": map[string]any{
@@ -1114,8 +1089,6 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 			"subscription":         in.Subscription,
 			"subscription_config":  in.SubscriptionConfig,
 			"subscription_runtime": in.SubscriptionRuntime,
-			"policy":               in.Policy,
-			"mode":                 in.Mode,
 			"rules_cache":          in.RulesCache,
 			"runtime_profile":      in.RuntimeProfile,
 			"selection":            in.Selection,
@@ -1160,7 +1133,7 @@ func trimConfigStatusIntent(intent *configinspect.IntentResult) {
 func (s *Server) configRenderState(in configToolInput, intent configinspect.IntentResult, generatedPresent bool) configRenderState {
 	missing := missingRenderInputs(in)
 	canRender := len(missing) == 0 && (!intent.Exists || intent.Resolved || (intent.Valid && intent.ResolveSkipped && intent.ResolveError == ""))
-	stale := !generatedPresent || isGeneratedStale(in.Output, []string{in.Config, in.Subscription, in.Policy, in.RuntimeProfile, in.Selection})
+	stale := !generatedPresent || isGeneratedStale(in.Output, []string{in.Config, in.Subscription, in.RuntimeProfile, in.Selection})
 	state := configRenderState{
 		Needed:        !generatedPresent || stale,
 		Stale:         generatedPresent && stale,
@@ -1180,13 +1153,6 @@ func configStatusNextActions(render configRenderState) []string {
 			switch missing {
 			case "subscription":
 				actions = append(actions, "call subscriptions_status", "call subscriptions_refresh to create subscription.gob")
-			case "policy":
-				actions = append(actions,
-					"call doctor to inspect localClash base assets and generated config state before choosing a repair path",
-					"localClash base assets are incomplete; policies/loyalsoldier.json must exist before rendering",
-					"on router deployments, rerun scripts/deploy-router.sh so missing policies/, policy-templates/, and rule-sources/ files are installed under the MCP working directory",
-					"do not create a config patch to fix missing base assets",
-				)
 			}
 		}
 		return actions
@@ -1269,8 +1235,6 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 	finish := startTaskStage(ctx, "render_generated_config", map[string]any{"output": in.Output})
 	result, err := configrender.Render(configrender.Options{
 		SourcePath:         in.Subscription,
-		PolicyPath:         in.Policy,
-		Mode:               in.Mode,
 		OutputPath:         in.Output,
 		Force:              force,
 		PacksSelectionPath: selectionPath,
@@ -1299,8 +1263,6 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 	var in struct {
 		PatchName            string                   `json:"patch_name"`
 		Subscription         string                   `json:"subscription"`
-		Policy               string                   `json:"policy"`
-		Mode                 string                   `json:"mode"`
 		RulesCache           string                   `json:"rules_cache"`
 		RuntimeProfileConfig string                   `json:"runtime_profile"`
 		OutputDir            string                   `json:"patches_dir"`
@@ -1322,9 +1284,6 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 	if s.state != nil {
 		if in.Subscription == "" {
 			in.Subscription = s.state.Paths.SubscriptionPath
-		}
-		if in.Policy == "" {
-			in.Policy = s.state.Paths.PolicyPath
 		}
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
@@ -1350,8 +1309,6 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 	result, err := configplan.Render(ctx, configplan.Options{
 		PlanName:            in.PatchName,
 		Subscription:        in.Subscription,
-		Policy:              in.Policy,
-		Mode:                in.Mode,
 		RulesCache:          in.RulesCache,
 		RuntimeProfilePath:  in.RuntimeProfileConfig,
 		OutputDir:           in.OutputDir,
@@ -1376,8 +1333,6 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 		PatchesDir           string `json:"patches_dir"`
 		SummaryPath          string `json:"summary_path"`
 		Subscription         string `json:"subscription"`
-		Policy               string `json:"policy"`
-		Mode                 string `json:"mode"`
 		RulesCache           string `json:"rules_cache"`
 		RuntimeProfileConfig string `json:"runtime_profile"`
 		ConfigPath           string `json:"config"`
@@ -1430,8 +1385,6 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 		PlansDir:            in.PatchesDir,
 		SummaryPath:         in.SummaryPath,
 		Subscription:        in.Subscription,
-		Policy:              in.Policy,
-		Mode:                in.Mode,
 		RulesCache:          in.RulesCache,
 		RuntimeProfilePath:  in.RuntimeProfileConfig,
 		ConfigPath:          in.ConfigPath,
@@ -1747,7 +1700,6 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		UserAgent            string   `json:"user_agent"`
 		LocalClashConfig     string   `json:"localclash_config"`
 		Selection            string   `json:"selection"`
-		Policy               string   `json:"policy"`
 		RulesCache           string   `json:"rules_cache"`
 		RuntimeProfileConfig string   `json:"runtime_profile"`
 		Output               string   `json:"output"`
@@ -1767,9 +1719,6 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		}
 		if in.Selection == "" && s.state.Paths.PacksSelectionPath != "" {
 			in.Selection = s.state.Paths.PacksSelectionPath
-		}
-		if in.Policy == "" {
-			in.Policy = s.state.Paths.PolicyPath
 		}
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
@@ -1817,7 +1766,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		NodeDiff:      buildNodeDiff(beforeNodes, afterNodes),
 	}
 	finish = startTaskStage(ctx, "evaluate_localclash_impact", map[string]any{"config": in.LocalClashConfig})
-	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.Policy, in.RulesCache, in.RuntimeProfileConfig, in.Output, afterNodes, result.MergedDoc)
+	impact := s.evaluateLocalClashAfterRefresh(ctx, in.LocalClashConfig, in.Selection, in.Merged, in.Config, in.RuntimeDir, in.RulesCache, in.RuntimeProfileConfig, in.Output, afterNodes, result.MergedDoc)
 	finishTaskStage(finish, nil, map[string]any{"exists": impact.Exists, "state": impact.State, "valid": impact.Valid})
 	if impact.Exists {
 		toolResultValue.LocalClash = &impact
@@ -1917,7 +1866,7 @@ func buildNodeDiff(before, after []localconfig.SubscriptionNode) nodeDiff {
 	return diff
 }
 
-func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, policyPath, rulesCache, presetPath, outputPath string, subscriptionNodes []localconfig.SubscriptionNode, subscriptionDoc map[string]any) localClashRefreshImpact {
+func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath, selectionPath, subscriptionPath, subscriptionConfig, subscriptionRuntime, rulesCache, presetPath, outputPath string, subscriptionNodes []localconfig.SubscriptionNode, subscriptionDoc map[string]any) localClashRefreshImpact {
 	impact := localClashRefreshImpact{ConfigPath: configPath, GeneratedConfig: outputPath, SelectionPath: selectionPath}
 	finish := startTaskStage(ctx, "evaluate_localclash_impact.load_config", map[string]any{"config": configPath})
 	config, err := localconfig.Load(configPath)
@@ -1970,7 +1919,6 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 	_, err = configrender.Render(configrender.Options{
 		SourcePath:         subscriptionPath,
 		Source:             subscriptionDoc,
-		PolicyPath:         policyPath,
 		OutputPath:         outputPath,
 		Selection:          &resolved.Selection,
 		RulesCacheDir:      rulesCache,
@@ -2082,8 +2030,6 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 		Subscription string `json:"subscription"`
 		Config       string `json:"config"`
 		ConfigPath   string `json:"config_path"`
-		Policy       string `json:"policy"`
-		PolicyPath   string `json:"policy_path"`
 		Dashboard    string `json:"dashboard"`
 		DashboardDir string `json:"dashboard_dir"`
 		WorkDir      string `json:"workdir"`
@@ -2095,7 +2041,6 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 		CorePath:         firstNonEmpty(in.CorePath, in.Core),
 		SubscriptionPath: in.Subscription,
 		ConfigPath:       firstNonEmpty(in.ConfigPath, in.Config),
-		PolicyPath:       firstNonEmpty(in.PolicyPath, in.Policy),
 		DashboardDir:     firstNonEmpty(in.DashboardDir, in.Dashboard),
 		WorkDir:          in.WorkDir,
 	}
@@ -2108,9 +2053,6 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 		}
 		if opts.ConfigPath == "" {
 			opts.ConfigPath = s.state.Paths.GeneratedConfig
-		}
-		if opts.PolicyPath == "" {
-			opts.PolicyPath = s.state.Paths.PolicyPath
 		}
 		if opts.DashboardDir == "" {
 			opts.DashboardDir = filepath.Join(s.state.Paths.MihomoRuntimeDir, "ui", "zashboard")
@@ -2386,7 +2328,6 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 	}
 	if s.state != nil {
 		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
-		setDefault(&in.Policy, s.state.Paths.PolicyPath)
 		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
 		setDefault(&in.RuntimeProfile, s.state.Paths.RuntimeProfilePath)
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
@@ -2398,7 +2339,6 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 	}
 	setDefault(&in.Config, "localclash.json")
 	setDefault(&in.Subscription, "subscription.gob")
-	setDefault(&in.Policy, "policies/loyalsoldier.json")
 	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
 	setDefault(&in.RuntimeProfile, runtimeprofile.DefaultPath)
 	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.json")
@@ -2412,9 +2352,6 @@ func missingRenderInputs(in configToolInput) []string {
 	var missing []string
 	if !fileExists(in.Subscription) {
 		missing = append(missing, "subscription")
-	}
-	if !fileExists(in.Policy) {
-		missing = append(missing, "policy")
 	}
 	return missing
 }

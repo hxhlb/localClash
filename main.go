@@ -91,8 +91,6 @@ Flags for dashboard download:
 
 Flags for config render:
   --source string   downloaded subscription gob (default "subscription.gob")
-  --policy string   localClash policy JSON (default "policies/loyalsoldier.json")
-  --mode string     policy mode; empty means policy default
   --output string   generated Mihomo config path (default "generated/mihomo.yaml")
   --packs-selection string
                  packs selection gob; optional
@@ -151,7 +149,6 @@ Flags for doctor:
   --core string          Mihomo core binary path (default from active runtime profile)
   --subscription string  downloaded subscription gob (default "subscription.gob")
   --config string        generated Mihomo config path (default "generated/mihomo.yaml")
-  --policy string        localClash policy JSON (default "policies/loyalsoldier.json")
   --dashboard string     zashboard directory (default ".runtime/mihomo/ui/zashboard")
   --workdir string       Mihomo runtime data directory for config test (default ".runtime/mihomo")
   --json                print machine-readable JSON report
@@ -363,8 +360,6 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 
 	opts := configrender.Options{}
 	fs.StringVar(&opts.SourcePath, "source", state.Paths.SubscriptionPath, "downloaded subscription gob")
-	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy JSON")
-	fs.StringVar(&opts.Mode, "mode", "", "policy mode; empty means policy default")
 	fs.StringVar(&opts.OutputPath, "output", state.Paths.GeneratedConfig, "generated Mihomo config path")
 	fs.StringVar(&opts.PacksSelectionPath, "packs-selection", "", "packs selection gob; optional")
 	fs.StringVar(&opts.RulesCacheDir, "rules-cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
@@ -386,7 +381,7 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 		return err
 	}
 
-	fmt.Printf("rendered %s mode/%s runtime/%s core config to %s (%d proxies, %d rules)\n", result.Mode, result.RuntimeMode, result.Core, result.OutputPath, result.ProxyCount, result.RuleCount)
+	fmt.Printf("rendered runtime/%s core/%s config to %s (%d proxies, %d rules)\n", result.RuntimeMode, result.Core, result.OutputPath, result.ProxyCount, result.RuleCount)
 	return nil
 }
 
@@ -514,7 +509,6 @@ func runCore(args []string, state appinit.RuntimeState) error {
 		CorePath:         opts.CorePath,
 		SubscriptionPath: state.Paths.SubscriptionPath,
 		ConfigPath:       opts.ConfigPath,
-		PolicyPath:       state.Paths.PolicyPath,
 		DashboardDir:     ".runtime/mihomo/ui/zashboard",
 		WorkDir:          opts.WorkDir,
 	})
@@ -637,7 +631,6 @@ func runDoctor(args []string, state appinit.RuntimeState) error {
 	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
 	fs.StringVar(&opts.SubscriptionPath, "subscription", state.Paths.SubscriptionPath, "downloaded subscription gob")
 	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "generated Mihomo config path")
-	fs.StringVar(&opts.PolicyPath, "policy", state.Paths.PolicyPath, "localClash policy JSON")
 	fs.StringVar(&opts.DashboardDir, "dashboard", filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard"), "zashboard directory")
 	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory for config test")
 	fs.BoolVar(&opts.JSON, "json", false, "print machine-readable JSON report")

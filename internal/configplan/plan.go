@@ -23,8 +23,6 @@ import (
 type Options struct {
 	PlanName            string
 	Subscription        string
-	Policy              string
-	Mode                string
 	RulesCache          string
 	RuntimeProfilePath  string
 	OutputDir           string
@@ -44,8 +42,6 @@ type ApplyOptions struct {
 	PlansDir            string
 	SummaryPath         string
 	Subscription        string
-	Policy              string
-	Mode                string
 	RulesCache          string
 	RuntimeProfilePath  string
 	ConfigPath          string
@@ -121,8 +117,6 @@ type Result struct {
 
 type PlanInputs struct {
 	Subscription        string `json:"subscription"`
-	Policy              string `json:"policy"`
-	Mode                string `json:"mode,omitempty"`
 	RulesCache          string `json:"rules_cache"`
 	RuntimeProfilePath  string `json:"runtime_profile"`
 	SubscriptionConfig  string `json:"subscription_config,omitempty"`
@@ -294,8 +288,6 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	finish = stage("render_candidate", map[string]any{"output": outputPath})
 	if _, err := configrender.Render(configrender.Options{
 		SourcePath:         opts.Subscription,
-		PolicyPath:         opts.Policy,
-		Mode:               renderMode(opts.Mode),
 		OutputPath:         outputPath,
 		PacksSelectionPath: selectionPath,
 		RulesCacheDir:      opts.RulesCache,
@@ -315,8 +307,6 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		ConfigPath:  configPath,
 		Inputs: PlanInputs{
 			Subscription:        opts.Subscription,
-			Policy:              opts.Policy,
-			Mode:                opts.Mode,
 			RulesCache:          opts.RulesCache,
 			RuntimeProfilePath:  opts.RuntimeProfilePath,
 			SubscriptionConfig:  opts.SubscriptionConfig,
@@ -427,8 +417,6 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	finish = stage("render_candidate", map[string]any{"output": tempOutput})
 	renderResult, err := configrender.Render(configrender.Options{
 		SourcePath:         opts.Subscription,
-		PolicyPath:         opts.Policy,
-		Mode:               renderMode(opts.Mode),
 		OutputPath:         tempOutput,
 		PacksSelectionPath: tempSelection,
 		RulesCacheDir:      opts.RulesCache,
@@ -572,9 +560,6 @@ func normalizeOptions(opts Options) Options {
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.gob"
 	}
-	if opts.Policy == "" {
-		opts.Policy = "policies/loyalsoldier.json"
-	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
 	}
@@ -611,9 +596,6 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 	}
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.gob"
-	}
-	if opts.Policy == "" {
-		opts.Policy = "policies/loyalsoldier.json"
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = ".runtime/rules/packs"
@@ -672,12 +654,6 @@ func normalizeApplyLocatorOptions(opts ApplyOptions) ApplyOptions {
 func applyPlanInputDefaults(opts ApplyOptions, inputs PlanInputs) ApplyOptions {
 	if opts.Subscription == "" {
 		opts.Subscription = inputs.Subscription
-	}
-	if opts.Policy == "" {
-		opts.Policy = inputs.Policy
-	}
-	if opts.Mode == "" {
-		opts.Mode = inputs.Mode
 	}
 	if opts.RulesCache == "" {
 		opts.RulesCache = inputs.RulesCache
@@ -1465,13 +1441,6 @@ func slugify(value string) string {
 	re := regexp.MustCompile(`[^a-z0-9]+`)
 	value = re.ReplaceAllString(value, "-")
 	return strings.Trim(value, "-")
-}
-
-func renderMode(mode string) string {
-	if strings.EqualFold(strings.TrimSpace(mode), "rule") {
-		return ""
-	}
-	return mode
 }
 
 func fileExists(path string) bool {

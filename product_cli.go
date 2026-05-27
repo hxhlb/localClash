@@ -952,7 +952,6 @@ func subscriptionStatusOptions(state appinit.RuntimeState) subscriptions.StatusO
 func configRenderOptions(state appinit.RuntimeState) configrender.Options {
 	return configrender.Options{
 		SourcePath:         state.Paths.SubscriptionPath,
-		PolicyPath:         state.Paths.PolicyPath,
 		OutputPath:         state.Paths.GeneratedConfig,
 		PacksSelectionPath: state.Paths.PacksSelectionPath,
 		RulesCacheDir:      state.Paths.RulesCacheDir,
