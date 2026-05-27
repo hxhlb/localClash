@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"localclash/internal/configrender"
+	"localclash/internal/mihomotest"
 	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
@@ -492,7 +493,7 @@ func checkMihomoTest(ctx context.Context, opts Options, coreStatus, configStatus
 		check.Summary = "workdir snapshot source is not a directory"
 		return check
 	}
-	workDir, cleanup, err := runtimeSnapshot(opts.WorkDir)
+	workDir, cleanup, err := mihomotest.SnapshotRuntimeDir(opts.WorkDir, "localclash-doctor-mihomo-*")
 	if err != nil {
 		check.Status = statusFail
 		check.Summary = fmt.Sprintf("cannot create runtime snapshot: %v", err)
@@ -517,85 +518,6 @@ func checkMihomoTest(ctx context.Context, opts Options, coreStatus, configStatus
 		check.Details = []string{line}
 	}
 	return check
-}
-
-func runtimeSnapshot(sourceDir string) (string, func(), error) {
-	targetDir, err := os.MkdirTemp("", "localclash-doctor-mihomo-*")
-	if err != nil {
-		return "", func() {}, err
-	}
-	cleanup := func() { _ = os.RemoveAll(targetDir) }
-	if err := copyRuntimeCache(sourceDir, targetDir); err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-	return targetDir, cleanup, nil
-}
-
-func copyRuntimeCache(sourceDir, targetDir string) error {
-	entries, err := os.ReadDir(sourceDir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == "logs" || name == "ui" || name == "mihomo.log" {
-			continue
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			continue
-		}
-		sourcePath := filepath.Join(sourceDir, name)
-		targetPath := filepath.Join(targetDir, name)
-		if entry.IsDir() {
-			if err := copyDir(sourcePath, targetPath); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := copyFile(sourcePath, targetPath); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func copyDir(sourceDir, targetDir string) error {
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(sourceDir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.Type()&os.ModeSymlink != 0 {
-			continue
-		}
-		sourcePath := filepath.Join(sourceDir, entry.Name())
-		targetPath := filepath.Join(targetDir, entry.Name())
-		if entry.IsDir() {
-			if err := copyDir(sourcePath, targetPath); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := copyFile(sourcePath, targetPath); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func copyFile(sourcePath, targetPath string) error {
-	data, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(targetPath, data, 0o644)
 }
 
 func PrintText(report Report) {

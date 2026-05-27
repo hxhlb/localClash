@@ -238,7 +238,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-patch-apply."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true. Setting false bypasses Mihomo validation and should only be used after explicit user confirmation."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
-				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
+				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
 				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
 				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
@@ -415,7 +415,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
 				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test for this review artifact. Defaults to false; config_patch_apply is the normal validation boundary."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
-				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo work directory for config test. Defaults to .runtime/mihomo."},
+				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
 				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
 				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 				"overlay": map[string]any{

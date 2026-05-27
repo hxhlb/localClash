@@ -15,6 +15,7 @@ import (
 
 	"localclash/internal/configrender"
 	"localclash/internal/localconfig"
+	"localclash/internal/mihomotest"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 )
@@ -150,13 +151,16 @@ type BackupResult struct {
 }
 
 type MihomoTestResult struct {
-	Enabled    bool   `json:"enabled"`
-	Passed     bool   `json:"passed"`
-	Output     string `json:"output"`
-	Error      string `json:"error,omitempty"`
-	TimedOut   bool   `json:"timed_out,omitempty"`
-	DurationMS int64  `json:"duration_ms,omitempty"`
-	ExitCode   int    `json:"exit_code,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	Passed        bool   `json:"passed"`
+	Output        string `json:"output"`
+	Error         string `json:"error,omitempty"`
+	TimedOut      bool   `json:"timed_out,omitempty"`
+	DurationMS    int64  `json:"duration_ms,omitempty"`
+	ExitCode      int    `json:"exit_code,omitempty"`
+	Isolated      bool   `json:"isolated,omitempty"`
+	WorkDir       string `json:"work_dir,omitempty"`
+	SourceWorkDir string `json:"source_work_dir,omitempty"`
 }
 
 type OverlaySummary struct {
@@ -330,13 +334,14 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		},
 	}
 	if opts.Test {
-		finish = stage("mihomo_test", map[string]any{"core": opts.CorePath, "work_dir": opts.WorkDir})
+		finish = stage("mihomo_test", map[string]any{"core": opts.CorePath, "source_work_dir": opts.WorkDir, "isolated": true})
 		result.MihomoTest = runMihomoTest(ctx, opts, outputPath)
 		finish(mihomoStageError(result.MihomoTest), map[string]any{
 			"passed":      result.MihomoTest.Passed,
 			"timed_out":   result.MihomoTest.TimedOut,
 			"duration_ms": result.MihomoTest.DurationMS,
 			"exit_code":   result.MihomoTest.ExitCode,
+			"work_dir":    result.MihomoTest.WorkDir,
 		})
 		result.Valid = result.MihomoTest.Passed
 		if !result.Valid {
@@ -457,7 +462,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	result.Warnings = append(result.Warnings, warnings...)
 	result.Render.OutputPath = opts.OutputPath
 	if opts.Test {
-		finish = stage("mihomo_test", map[string]any{"core": opts.CorePath, "work_dir": opts.WorkDir})
+		finish = stage("mihomo_test", map[string]any{"core": opts.CorePath, "source_work_dir": opts.WorkDir, "isolated": true})
 		result.MihomoTest = runMihomoTest(ctx, Options{
 			CorePath: opts.CorePath,
 			WorkDir:  opts.WorkDir,
@@ -467,6 +472,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 			"timed_out":   result.MihomoTest.TimedOut,
 			"duration_ms": result.MihomoTest.DurationMS,
 			"exit_code":   result.MihomoTest.ExitCode,
+			"work_dir":    result.MihomoTest.WorkDir,
 		})
 		result.Valid = result.MihomoTest.Passed
 		if !result.Valid {
@@ -1357,16 +1363,32 @@ func copyFile(src, dst string) error {
 }
 
 func runMihomoTest(ctx context.Context, opts Options, configPath string) MihomoTestResult {
+	start := time.Now()
+	workDir, cleanup, err := mihomotest.SnapshotRuntimeDir(opts.WorkDir, "localclash-mihomo-test-*")
+	if err != nil {
+		return MihomoTestResult{
+			Enabled:       true,
+			Passed:        false,
+			Error:         "cannot create isolated mihomo test runtime dir: " + err.Error(),
+			Output:        "cannot create isolated mihomo test runtime dir: " + err.Error(),
+			DurationMS:    time.Since(start).Milliseconds(),
+			Isolated:      true,
+			SourceWorkDir: opts.WorkDir,
+		}
+	}
+	defer cleanup()
 	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, opts.CorePath, "-d", opts.WorkDir, "-f", configPath, "-t")
-	start := time.Now()
+	cmd := exec.CommandContext(runCtx, opts.CorePath, "-d", workDir, "-f", configPath, "-t")
 	output, err := cmd.CombinedOutput()
 	result := MihomoTestResult{
-		Enabled:    true,
-		Passed:     err == nil,
-		Output:     compactOutput(output, err),
-		DurationMS: time.Since(start).Milliseconds(),
+		Enabled:       true,
+		Passed:        err == nil,
+		Output:        compactOutput(output, err),
+		DurationMS:    time.Since(start).Milliseconds(),
+		Isolated:      true,
+		WorkDir:       workDir,
+		SourceWorkDir: opts.WorkDir,
 	}
 	if err == nil {
 		return result

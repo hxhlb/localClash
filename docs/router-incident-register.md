@@ -71,6 +71,37 @@ Required evidence for the next reproduction:
 - DNS upstream errors and rule match samples for Telegram and other affected
   services
 
+### Smart Config-Test Isolation
+
+Observed symptom:
+
+- On the real router, Smart core config validation could report
+  `[Smart] DB Cache file load failed` while the active transparent-proxy runtime
+  was already serving traffic.
+- The active Smart process used a relative runtime directory:
+  `-d .runtime/mihomo` from `/root/localclash`, and held
+  `.runtime/mihomo/cache.db` open.
+- `runtime_status` could report the live process as not using the configured
+  runtime directory when comparing configured absolute paths with the relative
+  command-line `-d` value.
+
+Safety boundary:
+
+- Do not run `mihomo -t` directly against the live `.runtime/mihomo` directory
+  while the router network depends on localClash.
+- Do not restart, stop, or start the runtime merely to validate a candidate
+  config during this incident class.
+- Config validation should use an isolated temporary runtime directory populated
+  only with validation artifacts such as `Model.bin`, geodata/mmdb files, and
+  rule-provider data. Live `cache.db`, PID files, logs, and UI assets are not
+  validation inputs and must not be copied.
+
+Follow-up:
+
+- Fix runtime status path matching separately by resolving process cwd plus
+  relative `-d` arguments before deciding whether a live process belongs to the
+  configured runtime directory.
+
 ### OpenClash Baseline
 
 Observed baseline:

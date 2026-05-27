@@ -403,6 +403,61 @@ func TestRunMihomoTestFailureIncludesErrorMetadata(t *testing.T) {
 	}
 }
 
+func TestRunMihomoTestUsesIsolatedRuntimeWithoutCache(t *testing.T) {
+	dir := t.TempDir()
+	sourceWorkDir := filepath.Join(dir, "runtime")
+	writeFile(t, filepath.Join(sourceWorkDir, "Model.bin"), "model")
+	writeFile(t, filepath.Join(sourceWorkDir, "geoip.dat"), "geoip")
+	writeFile(t, filepath.Join(sourceWorkDir, "cache.db"), "live-cache")
+	writeFile(t, filepath.Join(sourceWorkDir, "rule-packs", "OpenAI.yaml"), "payload")
+	argsPath := filepath.Join(dir, "mihomo.args")
+	corePath := filepath.Join(dir, "mihomo")
+	writeExecutable(t, corePath, fmt.Sprintf(`#!/bin/sh
+work_dir=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-d" ]; then
+    shift
+    work_dir="$1"
+  fi
+  shift
+done
+printf '%%s\n' "$work_dir" > %[1]q
+if [ "$work_dir" = %[2]q ]; then
+  echo "used live runtime dir" >&2
+  exit 40
+fi
+if [ -e "$work_dir/cache.db" ]; then
+  echo "copied cache.db" >&2
+  exit 41
+fi
+if [ ! -f "$work_dir/Model.bin" ] || [ ! -f "$work_dir/geoip.dat" ] || [ ! -f "$work_dir/rule-packs/OpenAI.yaml" ]; then
+  echo "missing validation artifacts" >&2
+  exit 42
+fi
+echo "configuration file test is successful"
+`, argsPath, sourceWorkDir))
+	configPath := filepath.Join(dir, "mihomo.yaml")
+	writeFile(t, configPath, "mode: rule\n")
+
+	result := runMihomoTest(context.Background(), Options{
+		CorePath: corePath,
+		WorkDir:  sourceWorkDir,
+	}, configPath)
+
+	if !result.Enabled || !result.Passed || !result.Isolated {
+		t.Fatalf("mihomo test = %+v, want passing isolated validation", result)
+	}
+	if result.SourceWorkDir != sourceWorkDir || result.WorkDir == "" || result.WorkDir == sourceWorkDir {
+		t.Fatalf("mihomo test dirs = %+v, want isolated work dir from source %q", result, sourceWorkDir)
+	}
+	if _, err := os.Stat(result.WorkDir); !os.IsNotExist(err) {
+		t.Fatalf("isolated work dir still exists after cleanup: %s err=%v", result.WorkDir, err)
+	}
+	if got := strings.TrimSpace(readFile(t, argsPath)); got == "" || got == sourceWorkDir {
+		t.Fatalf("recorded work dir = %q, want isolated dir", got)
+	}
+}
+
 func TestMihomoTestFailureNextActionsWarnBeforeBypass(t *testing.T) {
 	actions := strings.Join(mihomoTestFailureNextActions(MihomoTestResult{TimedOut: true}), "\n")
 	for _, want := range []string{"Do not apply this patch", "timed out", "test=false", "explicitly accepts"} {
