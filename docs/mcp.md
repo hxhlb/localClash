@@ -34,7 +34,7 @@
 
 - `config_status`：看 `localclash.json`、`generated/mihomo.yaml`、render readiness、patch 狀態。預設輕量，`resolve=true/detail=true` 才做重查。
 - `config_configure`：改核心、runtime profile、policy template。
-- `proxy_group_build`：建立出口組，例如 HK/JP/US/AUTO。
+- `proxy_group_build`：建立出口組，例如 HK/JP/US/⚡ 自动选择。
 - `policy_group_build`：建立業務組，例如 Steam -> HK/JP/US。
 - `custom_rules_build`：建立自訂 domain/CIDR 規則。
 - `rule_provider_build`：建立外部 rule-provider intent。

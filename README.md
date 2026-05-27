@@ -316,7 +316,7 @@ MCP patch-building tools:
   patch should use it.
 - `policy_group_build`: build and validate a business-layer policy group such as
   `Steam` or `AI`. A policy group is a Dashboard-facing rule target whose
-  `exits` point to existing `proxy_groups` such as `HK`, `JP`, `AUTO`, or to
+  `exits` point to existing `proxy_groups` such as `HK`, `JP`, `⚡ 自动选择`, or to
   built-in targets such as `DIRECT`.
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, or CIDRs that share one target.

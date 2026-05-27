@@ -242,6 +242,12 @@ modes:
 `)
 	writeFile(t, paths.selection, `version: 1
 proxy_groups:
+  "🎯 手动选择":
+    nodes: ["🇯🇵日本01 | JP"]
+    manual: true
+  "⚡ 自动选择":
+    nodes: ["🇯🇵日本01 | JP"]
+    auto: true
   "🌐 全球直连":
     direct: true
   "🇭🇰 香港节点":
@@ -250,7 +256,7 @@ proxy_groups:
     optional: true
 policy_groups:
   "🎮 Steam":
-    exits: [AUTO, MANUAL, "🌐 全球直连", "🇭🇰 香港节点"]
+    exits: ["⚡ 自动选择", "🎯 手动选择", "🌐 全球直连", "🇭🇰 香港节点"]
     manual: true
 enabled_packs:
   - source: blackmatrix7
@@ -294,7 +300,7 @@ enabled_packs:
 		}
 	}
 	manual := proxyGroupFromConfig(t, config, "🎯 手动选择")
-	wantManualPrefix := []string{"⚡ 自动选择", "🇭🇰 香港节点", "🇯🇵日本01 | JP"}
+	wantManualPrefix := []string{"🇯🇵日本01 | JP"}
 	if got := manual["proxies"].([]any); len(got) < len(wantManualPrefix) {
 		t.Fatalf("manual proxies = %+v, want prefix %+v", got, wantManualPrefix)
 	} else {
@@ -322,8 +328,8 @@ groups:
   direct: DIRECT
   reject: REJECT
   proxy: PROXY
-  auto: AUTO
-  manual: MANUAL
+  auto: ⚡ 自动选择
+  manual: 🎯 手动选择
 provider_mapping:
   applications:
     path: applications.txt
@@ -460,7 +466,7 @@ enabled_packs:
 		t.Fatalf("core = %q, want smart", result.Core)
 	}
 	config := readTestYAML(t, result.OutputPath)
-	for _, name := range []string{"AUTO", "AI"} {
+	for _, name := range []string{"⚡ 自动选择", "AI"} {
 		group := proxyGroupFromConfig(t, config, name)
 		if group["type"] != "smart" {
 			t.Fatalf("%s type = %v, want smart", name, group["type"])
@@ -547,8 +553,8 @@ groups:
   direct: DIRECT
   reject: REJECT
   proxy: PROXY
-  auto: AUTO
-  manual: MANUAL
+  auto: ⚡ 自动选择
+  manual: 🎯 手动选择
   apple: Apple
 provider_mapping:
   applications:

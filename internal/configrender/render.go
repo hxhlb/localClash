@@ -597,10 +597,6 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 	if dns, ok := source["dns"]; ok {
 		config["dns"] = withLocalDNSPolicy(dns)
 	}
-	if fragment != nil {
-		rewritten := rewriteFragmentBuiltInTargets(*fragment, pol.Groups)
-		fragment = &rewritten
-	}
 
 	providerNames := providersUsed(mode)
 	ruleProviders := buildRuleProviders(pol, providerNames)
@@ -629,66 +625,16 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 	return config, nil
 }
 
-func rewriteFragmentBuiltInTargets(fragment rulespkg.Fragment, groups map[string]string) rulespkg.Fragment {
-	rewrite := func(value string) string {
-		switch strings.ToUpper(strings.TrimSpace(value)) {
-		case "PROXY":
-			if groups["proxy"] != "" {
-				return groups["proxy"]
-			}
-		case "AUTO":
-			if groups["auto"] != "" {
-				return groups["auto"]
-			}
-		case "MANUAL":
-			if groups["manual"] != "" {
-				return groups["manual"]
-			}
-		case "DIRECT":
-			if groups["direct"] != "" {
-				return groups["direct"]
-			}
-		case "REJECT":
-			if groups["reject"] != "" {
-				return groups["reject"]
-			}
-		}
-		return value
-	}
-
-	out := fragment
-	out.Rules = append([]string{}, fragment.Rules...)
-	for i, rule := range out.Rules {
-		parts := strings.Split(rule, ",")
-		if len(parts) >= 3 {
-			parts[2] = rewrite(parts[2])
-			out.Rules[i] = strings.Join(parts, ",")
-		}
-	}
-	out.ProxyGroups = make([]map[string]any, 0, len(fragment.ProxyGroups))
-	for _, group := range fragment.ProxyGroups {
-		cloned := cloneMap(group)
-		if proxies, ok := stringListFromAny(cloned["proxies"]); ok {
-			for i, choice := range proxies {
-				proxies[i] = rewrite(choice)
-			}
-			cloned["proxies"] = proxies
-		}
-		out.ProxyGroups = append(out.ProxyGroups, cloned)
-	}
-	out.BaseManualChoices = append([]string{}, fragment.BaseManualChoices...)
-	return out
-}
-
 func baseProxyGroupsUsed(groups map[string]string, rules []string, fragment *rulespkg.Fragment) map[string]bool {
 	if fragment == nil {
 		return nil
 	}
+	fragmentGroups := proxyGroupNameSet(fragment.ProxyGroups)
 	used := map[string]bool{}
 	mark := func(value string) {
 		value = strings.TrimSpace(value)
 		for _, name := range []string{groups["proxy"], groups["auto"], groups["manual"]} {
-			if name != "" && value == name {
+			if name != "" && value == name && !fragmentGroups[name] {
 				used[name] = true
 			}
 		}
@@ -706,13 +652,30 @@ func baseProxyGroupsUsed(groups map[string]string, rules []string, fragment *rul
 		}
 	}
 	if used[groups["proxy"]] {
-		used[groups["auto"]] = true
-		used[groups["manual"]] = true
+		if !fragmentGroups[groups["auto"]] {
+			used[groups["auto"]] = true
+		}
+		if !fragmentGroups[groups["manual"]] {
+			used[groups["manual"]] = true
+		}
 	}
 	if used[groups["manual"]] {
-		used[groups["auto"]] = true
+		if !fragmentGroups[groups["auto"]] {
+			used[groups["auto"]] = true
+		}
 	}
 	return used
+}
+
+func proxyGroupNameSet(groups []map[string]any) map[string]bool {
+	out := map[string]bool{}
+	for _, group := range groups {
+		name, _ := group["name"].(string)
+		if strings.TrimSpace(name) != "" {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func ruleTarget(rule string) (string, bool) {

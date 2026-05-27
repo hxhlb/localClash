@@ -177,17 +177,17 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if summary.ID != TemplateLocalClashDefault || config.Version != 2 {
 		t.Fatalf("template = %+v config version = %d, want v2 localclash default", summary, config.Version)
 	}
-	if len(config.ProxyGroups) != 7 || len(config.PolicyGroups) != 25 || len(config.Packs) != 32 || len(config.CustomRules) != 1 {
-		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d custom_rules=%d, want 7/25/32/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.CustomRules))
+	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 25 || len(config.Packs) != 32 || len(config.CustomRules) != 1 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d custom_rules=%d, want 9/25/32/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.CustomRules))
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
 	}
-	if _, exists := config.ProxyGroups["🎯 手动选择"]; exists {
-		t.Fatalf("default template should use base manual selector, not define its own: %+v", config.ProxyGroups["🎯 手动选择"])
+	if group := config.ProxyGroups["🎯 手动选择"]; group.Mode != "manual" || group.Match == nil || group.Match.Pattern != ".*" {
+		t.Fatalf("default template manual selector = %+v, want explicit all-node selector", group)
 	}
-	if _, exists := config.ProxyGroups["⚡ 自动选择"]; exists {
-		t.Fatalf("default template should use base auto selector, not define its own: %+v", config.ProxyGroups["⚡ 自动选择"])
+	if group := config.ProxyGroups["⚡ 自动选择"]; group.Mode != "auto" || group.Match == nil || group.Match.Pattern != ".*" {
+		t.Fatalf("default template auto selector = %+v, want explicit all-node selector", group)
 	}
 	if !config.ProxyGroups["🇭🇰 香港节点"].Optional {
 		t.Fatalf("香港节点 group = %+v, want optional region selector", config.ProxyGroups["🇭🇰 香港节点"])
@@ -200,11 +200,11 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 		t.Fatalf("default template still has old game policy group name")
 	}
 	wantExitsByGroup := map[string][]string{
-		"🎮 Steam":   {"🌐 全球直连", "MANUAL", "AUTO", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
-		"🎮 游戏平台":    {"🌐 全球直连", "MANUAL", "AUTO", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
-		"🕹 Bahamut": {"🇹🇼 台湾节点", "MANUAL", "🌐 全球直连"},
-		"🤖 ChatGPT": {"MANUAL", "AUTO", "🇸🇬 新加坡节点", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
-		"🍎 Apple":   {"🌐 全球直连", "MANUAL", "AUTO", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🎮 Steam":   {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🎮 游戏平台":    {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🕹 Bahamut": {"🇹🇼 台湾节点", "🎯 手动选择", "🌐 全球直连"},
+		"🤖 ChatGPT": {"🎯 手动选择", "⚡ 自动选择", "🇸🇬 新加坡节点", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🍎 Apple":   {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
 	}
 	for id, wantExits := range wantExitsByGroup {
 		group, exists := config.PolicyGroups[id]

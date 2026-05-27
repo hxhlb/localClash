@@ -246,7 +246,7 @@ proxy-groups:
   - name: PROXY
     type: select
     proxies: [JP 01, SG 01]
-  - name: AUTO
+  - name: ⚡ 自动选择
     type: url-test
     proxies: [JP 01, SG 01]
 rule-providers:

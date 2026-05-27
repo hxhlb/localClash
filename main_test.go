@@ -149,8 +149,8 @@ groups:
   direct: DIRECT
   reject: REJECT
   proxy: PROXY
-  auto: AUTO
-  manual: MANUAL
+  auto: ⚡ 自动选择
+  manual: 🎯 手动选择
   apple: Apple
 provider_mapping:
   applications:

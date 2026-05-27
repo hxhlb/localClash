@@ -364,6 +364,13 @@ func TestToolsCallRoutingExplainExplainsLayeredDefaultRoute(t *testing.T) {
 	writeMCPFile(t, configPath, `version: 2
 policy_template: localclash-default
 proxy_groups:
+  "⚡ 自动选择":
+    mode: auto
+    match:
+      type: name_regex
+      pattern: .*
+    reason: Auto selector.
+    boundary: all_subscription_nodes
   HK:
     mode: auto
     match:
@@ -382,7 +389,7 @@ policy_groups:
     exits:
       - DIRECT-EXIT
       - HK
-      - AUTO
+      - "⚡ 自动选择"
     reason: Steam defaults to direct with fallback exits.
     boundary: business_to_exit_layer
 packs:
@@ -441,7 +448,7 @@ packs:
 	}
 	policy := route["policy_group"].(map[string]any)
 	exits := policy["exits"].([]any)
-	if len(exits) != 3 || exits[0] != "DIRECT-EXIT" || exits[1] != "HK" || exits[2] != "AUTO" {
+	if len(exits) != 3 || exits[0] != "DIRECT-EXIT" || exits[1] != "HK" || exits[2] != "⚡ 自动选择" {
 		t.Fatalf("policy exits = %+v, want layered exits", exits)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
@@ -2724,8 +2731,8 @@ groups:
   direct: DIRECT
   reject: REJECT
   proxy: PROXY
-  auto: AUTO
-  manual: MANUAL
+  auto: ⚡ 自动选择
+  manual: 🎯 手动选择
   apple: Apple
 provider_mapping:
   applications:

@@ -17,8 +17,8 @@ func TestRenderEmitsSelectionComplexityCounters(t *testing.T) {
 	}
 	policyPath := filepath.Join(dir, "policy.json")
 	writeFile(t, policyPath, `groups:
-  manual: MANUAL
-  auto: AUTO
+  manual: 🎯 手动选择
+  auto: ⚡ 自动选择
   direct: DIRECT
 provider_mapping:
   default:

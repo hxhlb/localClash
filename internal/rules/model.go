@@ -864,7 +864,7 @@ func candidatePolicyExits(group PolicyGroup, targets preparedTargets) ([]string,
 
 func canonicalBuiltInTarget(target string) string {
 	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "proxy", "direct", "reject", "manual", "auto":
+	case "proxy", "direct", "reject":
 		return strings.ToUpper(strings.TrimSpace(target))
 	default:
 		return ""

@@ -73,7 +73,7 @@ func Registry() []Tool {
 		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config patch."},
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read rules for one pack by id, downloading missing provider-cache entries for that pack only, and return backend metadata such as rule_provider/RULE-SET or geosite/GEOSITE."},
-		{Name: "policy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a business-layer policy group that routes one rule domain, app, or scenario to existing exits such as HK, JP, US, AUTO, or DIRECT. This does not persist state; copy the returned policy_group into config_patch_create.overlay.policy_groups."},
+		{Name: "policy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a business-layer policy group that routes one rule domain, app, or scenario to existing exits such as HK, JP, US, ⚡ 自动选择, or DIRECT. This does not persist state; copy the returned policy_group into config_patch_create.overlay.policy_groups."},
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_create.overlay.proxy_groups when a patch should use it."},
 		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_create.overlay.rule_providers."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
@@ -693,7 +693,7 @@ func policyGroupInputSchema(idDescription string) map[string]any {
 		"properties": map[string]any{
 			"id":       map[string]any{"type": "string", "description": idDescription},
 			"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Desired policy-group mode. manual becomes a Dashboard select group over exits; auto becomes url-test over exits; smart becomes a smart group over exits."},
-			"exits":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exit targets for this business layer, for example HK, JP, US, AUTO, DIRECT, or PROXY. Non-built-in exits must be provided by overlay.proxy_groups or existing durable proxy_groups."},
+			"exits":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exit targets for this business layer, for example HK, JP, US, ⚡ 自动选择, DIRECT, or PROXY. Non-built-in exits must be provided by overlay.proxy_groups or existing durable proxy_groups."},
 			"reason":   map[string]any{"type": "string", "description": "Short durable reason for this business routing group."},
 			"boundary": map[string]any{"type": "string", "description": "Boundary note, for example business_layer_selects_exit_groups."},
 		},

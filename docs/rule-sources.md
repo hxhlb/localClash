@@ -52,7 +52,7 @@ it would create competing runtime groups for the same target.
 
 `policy_groups` are the optional business layer for ACL4SSR-style UX. Rules and
 packs can target a visible group such as `Steam`; that group then offers exits
-such as `HK`, `JP`, `AUTO`, or `DIRECT` in Dashboard. Non-built-in exits must
+such as `HK`, `JP`, `⚡ 自动选择`, or `DIRECT` in Dashboard. Non-built-in exits must
 refer to `proxy_groups`; policy groups do not directly select subscription
 nodes.
 

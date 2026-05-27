@@ -4,6 +4,26 @@
   "config": {
     "version": 2,
     "proxy_groups": {
+      "🎯 手动选择": {
+        "mode": "manual",
+        "match": {
+          "type": "name_regex",
+          "pattern": ".*",
+          "min": 1
+        },
+        "reason": "面向 Dashboard 的手动出口选择，包含全部订阅节点。",
+        "boundary": "all_subscription_nodes"
+      },
+      "⚡ 自动选择": {
+        "mode": "auto",
+        "match": {
+          "type": "name_regex",
+          "pattern": ".*",
+          "min": 1
+        },
+        "reason": "面向 Dashboard 的自动出口选择，包含全部订阅节点。",
+        "boundary": "all_subscription_nodes"
+      },
       "🌐 全球直连": {
         "mode": "direct",
         "reason": "面向 Dashboard 的 DIRECT 出口选择。",
