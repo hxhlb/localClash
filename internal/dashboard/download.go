@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Options struct {
@@ -45,6 +47,14 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
+	if opts.Version == "latest" {
+		result, err := downloadDirectLatest(ctx, opts)
+		if err == nil {
+			return result, nil
+		}
+		fmt.Fprintf(os.Stderr, "download: dashboard latest asset direct path failed, falling back to github api: %v\n", err)
+	}
+
 	rel, err := fetchRelease(ctx, opts.Repo, opts.Version)
 	if err != nil {
 		return Result{}, err
@@ -72,6 +82,25 @@ func Download(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	return Result{Version: rel.TagName, AssetName: selected.Name, OutputDir: opts.OutputDir}, nil
+}
+
+func downloadDirectLatest(ctx context.Context, opts Options) (Result, error) {
+	if err := prepareOutputDir(opts.OutputDir, opts.Force); err != nil {
+		return Result{}, err
+	}
+	url := fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", opts.Repo, opts.AssetName)
+	tmpZip, err := downloadAsset(ctx, url)
+	if err != nil {
+		return Result{}, err
+	}
+	defer os.Remove(tmpZip)
+	if err := extractZip(tmpZip, opts.OutputDir); err != nil {
+		return Result{}, err
+	}
+	if err := verifyDashboard(opts.OutputDir); err != nil {
+		return Result{}, err
+	}
+	return Result{Version: "latest", AssetName: opts.AssetName, OutputDir: opts.OutputDir}, nil
 }
 
 func normalizeOptions(opts Options) Options {
@@ -133,7 +162,7 @@ func fetchReleaseURL(ctx context.Context, endpoint string) (release, error) {
 	req.Header.Set("User-Agent", "localclash-dashboard-downloader")
 	fmt.Fprintf(os.Stderr, "download: requesting dashboard release metadata %s\n", endpoint)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return release{}, err
 	}
@@ -200,7 +229,7 @@ func downloadAssetURL(ctx context.Context, url string) (string, error) {
 	req.Header.Set("User-Agent", "localclash-dashboard-downloader")
 	fmt.Fprintf(os.Stderr, "download: requesting dashboard asset %s\n", url)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -266,6 +295,22 @@ func envWords(name, fallback string) []string {
 		value = fallback
 	}
 	return strings.Fields(value)
+}
+
+func httpClient() *http.Client {
+	return &http.Client{Timeout: httpTimeout()}
+}
+
+func httpTimeout() time.Duration {
+	value := strings.TrimSpace(os.Getenv("LOCALCLASH_HTTP_TIMEOUT"))
+	if value == "" {
+		return 45 * time.Second
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds <= 0 {
+		return 45 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func uniqueStrings(values []string) []string {

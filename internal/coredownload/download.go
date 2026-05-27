@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Options struct {
@@ -81,7 +83,14 @@ func Download(ctx context.Context, opts Options) ([]Result, error) {
 
 func downloadFlavor(ctx context.Context, opts Options, flavor string) (Result, error) {
 	if flavor == FlavorSmart {
-		return downloadSmart(ctx, opts)
+		return downloadOpenClashCore(ctx, opts, FlavorSmart)
+	}
+	if flavor == FlavorMeta && shouldUseOpenClashMeta(opts) {
+		result, err := downloadOpenClashCore(ctx, opts, FlavorMeta)
+		if err == nil {
+			return result, nil
+		}
+		fmt.Fprintf(os.Stderr, "download: openclash meta core failed, falling back to github release: %v\n", err)
 	}
 	rel, err := fetchRelease(ctx, opts.Repo, opts.Version)
 	if err != nil {
@@ -128,22 +137,29 @@ func downloadFlavor(ctx context.Context, opts Options, flavor string) (Result, e
 	return result, nil
 }
 
-func downloadSmart(ctx context.Context, opts Options) (Result, error) {
+func shouldUseOpenClashMeta(opts Options) bool {
+	return opts.Target == TargetRouter &&
+		opts.TargetOS == "linux" &&
+		opts.Version == "latest" &&
+		opts.Repo == "MetaCubeX/mihomo"
+}
+
+func downloadOpenClashCore(ctx context.Context, opts Options, flavor string) (Result, error) {
 	name, err := openClashCoreAssetName(opts.TargetOS, opts.TargetArch)
 	if err != nil {
 		return Result{}, err
 	}
-	version, err := fetchOpenClashSmartVersion(ctx, opts.SmartBranch)
+	version, err := fetchOpenClashCoreVersion(ctx, opts.SmartBranch, flavor)
 	if err != nil {
 		return Result{}, err
 	}
-	url := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/smart/%s", opts.SmartBranch, name)
+	url := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/%s/%s", opts.SmartBranch, flavor, name)
 	result := Result{
 		Version:     version,
 		AssetName:   name,
 		DownloadURL: url,
-		OutputPath:  outputPath(opts, FlavorSmart),
-		Flavor:      FlavorSmart,
+		OutputPath:  outputPath(opts, flavor),
+		Flavor:      flavor,
 		Target:      opts.Target,
 	}
 	if opts.DryRun {
@@ -285,7 +301,7 @@ func fetchReleaseURL(ctx context.Context, endpoint string) (release, error) {
 	req.Header.Set("User-Agent", "localclash-core-downloader")
 	fmt.Fprintf(os.Stderr, "download: requesting release metadata %s\n", endpoint)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return release{}, err
 	}
@@ -305,28 +321,28 @@ func fetchReleaseURL(ctx context.Context, endpoint string) (release, error) {
 	return rel, nil
 }
 
-func fetchOpenClashSmartVersion(ctx context.Context, branch string) (string, error) {
+func fetchOpenClashCoreVersion(ctx context.Context, branch, flavor string) (string, error) {
 	endpoint := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/core_version", branch)
 	var lastErr error
 	for _, candidate := range downloadCandidates(endpoint) {
-		version, err := fetchOpenClashSmartVersionURL(ctx, candidate)
+		version, err := fetchOpenClashCoreVersionURL(ctx, candidate, flavor)
 		if err == nil {
 			return version, nil
 		}
 		lastErr = err
-		fmt.Fprintf(os.Stderr, "download: smart version failed from %s: %v\n", candidate, err)
+		fmt.Fprintf(os.Stderr, "download: %s version failed from %s: %v\n", flavor, candidate, err)
 	}
 	return "", lastErr
 }
 
-func fetchOpenClashSmartVersionURL(ctx context.Context, endpoint string) (string, error) {
+func fetchOpenClashCoreVersionURL(ctx context.Context, endpoint, flavor string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "localclash-core-downloader")
-	fmt.Fprintf(os.Stderr, "download: requesting smart core version %s\n", endpoint)
-	resp, err := http.DefaultClient.Do(req)
+	fmt.Fprintf(os.Stderr, "download: requesting %s core version %s\n", flavor, endpoint)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -340,10 +356,14 @@ func fetchOpenClashSmartVersionURL(ctx context.Context, endpoint string) (string
 		return "", err
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) < 2 || strings.TrimSpace(lines[1]) == "" {
-		return "", errors.New("openclash core_version did not include smart version")
+	index := 0
+	if flavor == FlavorSmart {
+		index = 1
 	}
-	return strings.TrimSpace(lines[1]), nil
+	if len(lines) <= index || strings.TrimSpace(lines[index]) == "" {
+		return "", fmt.Errorf("openclash core_version did not include %s version", flavor)
+	}
+	return strings.TrimSpace(lines[index]), nil
 }
 
 func openClashCoreAssetName(targetOS, targetArch string) (string, error) {
@@ -452,7 +472,7 @@ func downloadAssetURL(ctx context.Context, url, name, outputPath string) error {
 	req.Header.Set("User-Agent", "localclash-core-downloader")
 	fmt.Fprintf(os.Stderr, "download: requesting asset %s\n", url)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -561,6 +581,22 @@ func envWords(name, fallback string) []string {
 		value = fallback
 	}
 	return strings.Fields(value)
+}
+
+func httpClient() *http.Client {
+	return &http.Client{Timeout: httpTimeout()}
+}
+
+func httpTimeout() time.Duration {
+	value := strings.TrimSpace(os.Getenv("LOCALCLASH_HTTP_TIMEOUT"))
+	if value == "" {
+		return 45 * time.Second
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil || seconds <= 0 {
+		return 45 * time.Second
+	}
+	return time.Duration(seconds) * time.Second
 }
 
 func uniqueStrings(values []string) []string {
