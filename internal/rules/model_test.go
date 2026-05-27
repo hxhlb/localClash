@@ -490,6 +490,31 @@ func TestRenderFragmentRendersCustomRulesBeforePacks(t *testing.T) {
 	}
 }
 
+func TestRenderFragmentSupportsCustomMatchRule(t *testing.T) {
+	selection := Selection{
+		PolicyGroups: map[string]PolicyGroup{
+			"🧭 漏网之鱼": {
+				Exits:  []string{"DIRECT"},
+				Manual: true,
+			},
+		},
+		CustomRules: []CustomRule{
+			{
+				ID:     "tail",
+				Target: "🧭 漏网之鱼",
+				Rules:  []CustomRuleLine{{Type: "match", Value: "*"}},
+			},
+		},
+	}
+	fragment, err := RenderFragment(selection, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fragment.Rules[0]; got != "MATCH,🧭 漏网之鱼" {
+		t.Fatalf("match rule = %q, want MATCH,🧭 漏网之鱼", got)
+	}
+}
+
 func TestRenderFragmentRejectsConflictingProxyGroupModes(t *testing.T) {
 	selection := Selection{
 		ProxyGroups: map[string]ProxyGroup{

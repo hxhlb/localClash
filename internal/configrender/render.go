@@ -855,13 +855,47 @@ func buildOrderedRules(pol policy, mode policyMode, fragment *rulespkg.Fragment)
 	if err != nil {
 		return nil, err
 	}
-	rules := make([]string, 0, len(baseline)+len(base))
-	rules = append(rules, baseline...)
-	if fragment != nil {
-		rules = append(rules, fragment.Rules...)
+	fragmentRules, fragmentTailRules := splitFragmentTailRules(fragment)
+	if len(fragmentTailRules) > 0 {
+		base = withoutMatchRules(base)
 	}
+	rules := make([]string, 0, len(baseline)+len(fragmentRules)+len(base)+len(fragmentTailRules))
+	rules = append(rules, baseline...)
+	rules = append(rules, fragmentRules...)
 	rules = append(rules, base...)
+	rules = append(rules, fragmentTailRules...)
 	return rules, nil
+}
+
+func splitFragmentTailRules(fragment *rulespkg.Fragment) ([]string, []string) {
+	if fragment == nil {
+		return nil, nil
+	}
+	rules := make([]string, 0, len(fragment.Rules))
+	tailRules := make([]string, 0, 1)
+	for _, rule := range fragment.Rules {
+		if isMatchRule(rule) {
+			tailRules = append(tailRules, rule)
+			continue
+		}
+		rules = append(rules, rule)
+	}
+	return rules, tailRules
+}
+
+func withoutMatchRules(rules []string) []string {
+	filtered := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		if isMatchRule(rule) {
+			continue
+		}
+		filtered = append(filtered, rule)
+	}
+	return filtered
+}
+
+func isMatchRule(rule string) bool {
+	return strings.EqualFold(strings.TrimSpace(strings.SplitN(rule, ",", 2)[0]), "MATCH")
 }
 
 func mergeRuleProviders(base map[string]any, extra map[string]map[string]any) error {

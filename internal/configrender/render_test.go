@@ -40,6 +40,34 @@ func TestBuildRulesWhitelistFallback(t *testing.T) {
 	}
 }
 
+func TestBuildOrderedRulesAllowsFragmentTailMatchOverride(t *testing.T) {
+	pol := policy{
+		Groups: map[string]string{
+			"direct": "DIRECT",
+			"proxy":  "PROXY",
+		},
+	}
+	mode := policyMode{Rules: []ruleSpec{
+		{GeoIP: "CN", Target: "direct"},
+		{Match: true, Target: "direct"},
+	}}
+	fragment := &rules.Fragment{Rules: []string{
+		"GEOSITE,geolocation-cn,PROXY",
+		"MATCH,PROXY",
+	}}
+
+	got, err := buildOrderedRules(pol, mode, fragment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(got, "\n"), "MATCH,DIRECT") {
+		t.Fatalf("rules = %#v, must remove base MATCH,DIRECT when fragment supplies tail match", got)
+	}
+	if got[len(got)-1] != "MATCH,PROXY" {
+		t.Fatalf("tail rule = %q, want MATCH,PROXY", got[len(got)-1])
+	}
+}
+
 func TestBuildRulesSupportsDomainSuffix(t *testing.T) {
 	pol := policy{
 		Groups: map[string]string{"direct": "DIRECT"},

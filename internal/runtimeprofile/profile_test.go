@@ -135,16 +135,15 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 			t.Fatalf("router dns %s = %+v, must not depend on Ronnie's local mosDNS", key, dns[key])
 		}
 	}
-	if !strings.Contains(fmt.Sprint(dns["fallback"]), "tls://1.1.1.1") || !strings.Contains(fmt.Sprint(dns["fallback"]), "tls://8.8.8.8") {
-		t.Fatalf("router dns fallback = %+v, want global encrypted fallback resolvers", dns["fallback"])
+	for _, key := range []string{"fallback", "fallback-filter"} {
+		if _, ok := dns[key]; ok {
+			t.Fatalf("router dns must not use mainland-hostile DNS %s defaults: %+v", key, dns[key])
+		}
 	}
-	filter, ok := dns["fallback-filter"].(map[string]any)
-	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || filter["geosite"] != nil {
-		t.Fatalf("router dns fallback-filter = %+v, want geoip CN and no deprecated geosite filter", dns["fallback-filter"])
-	}
-	policy, ok := dns["nameserver-policy"].(map[string]any)
-	if !ok || !strings.Contains(fmt.Sprint(policy["geosite:gfw"]), "tls://1.1.1.1") || !strings.Contains(fmt.Sprint(policy["geosite:gfw"]), "tls://8.8.8.8") {
-		t.Fatalf("router dns nameserver-policy = %+v, want geosite:gfw to use global encrypted resolvers", dns["nameserver-policy"])
+	if policy, ok := dns["nameserver-policy"].(map[string]any); ok {
+		if _, exists := policy["geosite:gfw"]; exists {
+			t.Fatalf("router dns nameserver-policy must not send geosite:gfw to foreign DoT by default: %+v", policy)
+		}
 	}
 	if _, ok := mihomo["interface-name"]; ok {
 		t.Fatalf("router default must not pin Ronnie's WAN device: %+v", mihomo["interface-name"])
