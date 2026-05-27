@@ -243,34 +243,23 @@ func configPlanStageEmitter(...) { ... }
 
 **建议**：为转换函数和两边类型添加注释说明职责边界即可，不建议合并。
 
-### 6.3 `configplan.go` 过长（优先级：中）
+### 6.3 `configplan.go` 过长（暂不处理）
 
-**问题**：`internal/configplan/plan.go` 约 1450 行，包含了 patch 创建、应用、验证、备份、Mihomo 测试等所有逻辑。
+**说明**：`internal/configplan/plan.go` 约 1450 行，包含 patch 创建、应用、验证、备份、Mihomo 测试等逻辑。当前虽然文件偏长，但边界仍集中在 config patch 生命周期内，且测试覆盖较完整。
 
-**建议**：拆分为：
-- `plan_create.go`：patch 创建逻辑
-- `plan_apply.go`：patch 应用逻辑
-- `plan_backup.go`：备份逻辑
-- `plan_mihomotest.go`：Mihomo 测试逻辑
+**决策**：暂不处理。除非后续修改同一区域时已经出现明确维护成本，否则不因行数本身拆分文件。
 
-### 6.4 `config.go` 过长（优先级：中）
+### 6.4 `config.go` 过长（暂不处理）
 
-**问题**：`internal/localconfig/config.go` 约 1220 行，混合了类型定义、节点加载、Gob 读取、代理组解析、策略组验证、Pack 验证、自定义规则验证、外部提供者验证。
+**说明**：`internal/localconfig/config.go` 约 1220 行，覆盖 durable config 类型、节点加载、Gob 读取、proxy/policy group 解析、pack/custom rule/rule provider 验证等逻辑。它承担的是 localClash intent 解析边界，当前仍是一个可追踪的责任域。
 
-**建议**：拆分为：
-- `config.go`：核心类型定义 + Load/Write
-- `resolve.go`：Resolve 主逻辑
-- `resolve_proxy.go`：代理组解析
-- `resolve_policy.go`：策略组解析
-- `resolve_packs.go`：Pack 解析
-- `resolve_rules.go`：自定义规则 + 外部提供者解析
-- `subscription_nodes.go`：订阅节点加载
+**决策**：暂不处理。优先解决 `localconfig.Resolve` 的真实性能/缓存问题，不把文件拆分作为独立目标。
 
-### 6.5 `main.go` 过于庞大（优先级：低）
+### 6.5 `main.go` / `product_cli.go` 偏长（暂不处理）
 
-**问题**：`main.go` 约 759 行，包含所有 CLI 子命令的路由和实现。`product_cli.go` 约 1105 行，包含大批 CLI 辅助函数。
+**说明**：`main.go` 约 759 行，`product_cli.go` 约 1105 行，确实承担较多 CLI 命令路由和辅助函数。但当前构建通过，CLI 入口偏长本身不是比 MCP/Bootstrap/config apply 更高优先级的问题。
 
-**建议**：后续可考虑将 CLI 命令拆分到 `internal/cli/` 下各子命令文件。
+**决策**：不因行数本身拆分文件。双 CLI 系统本身造成的产品入口和测试门禁问题另见 6.13。
 
 ### 6.6 规则层第 3 层为设计目标，尚未完全落地（优先级：中）
 
@@ -299,11 +288,11 @@ func configPlanStageEmitter(...) { ... }
 
 **建议**：补充关键路径的集成测试和回归保护。
 
-### 6.9 配置版本迁移路径未明确（优先级：低）
+### 6.9 配置版本迁移路径（不构成当前问题）
 
-**问题**：`localclash.json` 的 `version` 字段在 policy_groups 存在时自动升级为 2，但没有定义 v1→v2 的迁移逻辑或兼容性文档。
+**说明**：`localclash.json` 的 `policy_groups` / version 语义仍属于未发布内容，还不是对外稳定格式。当前代码中曾经出现的 v2 语义不应被视为已经发布的兼容性承诺。
 
-**建议**：文档化 config 版本 schema 变更历史，确保向后兼容。
+**决策**：不按 v1→v2 迁移债处理。正式发布前可以把 schema 直接收敛并落到 version 1；只有发布后形成用户可依赖格式时，才需要记录 schema 历史和迁移路径。
 
 ### 6.10 config_patch_apply 非原子事务（优先级：中）
 
@@ -327,9 +316,11 @@ func configPlanStageEmitter(...) { ... }
 
 **建议**：将 bootstrap 中的 config render 改为仅在 `generated/mihomo.yaml` 不存在时才自动生成（首次启动引导），或者完全移除，改为由 Agent 通过 `config_render` MCP 工具显式触发。
 
-### 6.13 CLI 命令入口分散（优先级：中）
+### 6.13 双 CLI 系统造成产品入口和测试门禁断裂（优先级：高）
 
-**问题**：`main.go`（765 行）和 `product_cli.go`（1105 行）共同承担 CLI 命令路由和产品命令实现。当前构建是通过的，但命令入口分散会增加后续维护、测试和参数默认值对齐成本。
+**问题**：`main.go`（765 行）和 `product_cli.go`（1105 行）共同承担 CLI 命令路由和产品命令实现，`main.go` 的 usage 也仍保留 "Legacy/internal commands still available during the CLI rewrite"。这不是单纯文件长度问题，而是当前存在两套命令入口、两套默认值/状态组装路径、两套测试覆盖面的产品边界问题。
+
+当前验证结果也已经暴露红灯：`go build ./...` 可通过，但 `go test -count=1 ./...` 失败在 `internal/appinit.TestBootstrapBuildsRuntimeStateFromLocalArtifacts`，说明 bootstrap/CLI/runtime state 的整合门禁已经不干净。若另一路 CLI 变更继续扩张，这类断裂会更难定位。
 
 **建议**：统一 CLI 入口，将 product_cli.go 的命令合并到 main.go 或拆分到 `internal/cli/`。
 
@@ -349,8 +340,7 @@ func configPlanStageEmitter(...) { ... }
 ### 7.2 值得关注的点
 
 1. **MCP HTTP 默认绑定 127.0.0.1**：安全，但部署到路由器时文档中示例绑定 `192.168.6.1:8765`，需确保局域网访问受控
-2. **Mihomo 测试超时 90s**：对于路由器低性能 CPU 可能不够，但当前够用
-3. **无认证机制**：MCP HTTP 端点无认证，依赖网络隔离
+2. **无认证机制**：MCP HTTP 端点无认证，依赖网络隔离
 
 ---
 
@@ -365,12 +355,11 @@ localClash 的架构设计体现了清晰的系统工程思维：
 - **安全基线硬编码**保证了本地网络在错误配置下的稳定性
 
 主要改进方向：
-1. **Bootstrap 不应静默写入 generated/mihomo.yaml**（6.12）
-2. **减少 MCP server 中 31 次 json.Unmarshal 样板**（6.11）
-3. config_patch_apply 改为 temp+rename 原子事务提交（6.10）
-4. 梳理 CLI 命令入口边界（6.13）
-5. 拆分过长文件（configplan.go、config.go、main.go）
-6. 补充关键路径的集成测试
-7. 按文档计划添加本地 rule pack 支持
+1. **修复双 CLI 系统导致的产品入口和测试门禁断裂**（6.13）
+2. **Bootstrap 不应静默写入 generated/mihomo.yaml**（6.12）
+3. **减少 MCP server 中 31 次 json.Unmarshal 样板**（6.11）
+4. config_patch_apply 改为 temp+rename 原子事务提交（6.10）
+5. 补充关键路径的集成测试
+6. 按文档计划添加本地 rule pack 支持
 
 整体而言，项目在 33 个 MCP 工具、4 个规则适配器、2 种运行时模式、2 套策略模板的复杂度下，保持了良好的模块边界和一致的设计模式。
