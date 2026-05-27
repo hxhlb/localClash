@@ -77,19 +77,6 @@
         "target": "DIRECT",
         "reason": "Keep China domains direct."
       }
-    ],
-    "custom_rules": [
-      {
-        "id": "default-tail-match",
-        "target": "🧭 漏网之鱼",
-        "reason": "Route unmatched traffic through the fallback selector instead of direct.",
-        "rules": [
-          {
-            "type": "match",
-            "value": "*"
-          }
-        ]
-      }
     ]
   }
 }

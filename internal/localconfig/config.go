@@ -987,12 +987,6 @@ func resolveCustomRules(customRules []CustomRule, proxyGroups map[string]rules.P
 func normalizeCustomRuleLine(id string, rule CustomRuleLine) (CustomRuleLine, error) {
 	rule.Type = strings.ToLower(strings.TrimSpace(rule.Type))
 	rule.Value = strings.TrimSpace(rule.Value)
-	if rule.Type == "match" {
-		if rule.Value == "" {
-			rule.Value = "*"
-		}
-		return rule, nil
-	}
 	if rule.Value == "" {
 		return CustomRuleLine{}, fmt.Errorf("custom rule %q contains an empty value", id)
 	}

@@ -551,8 +551,6 @@ func renderCustomRuleLine(id string, rule CustomRuleLine, target string) (string
 		kind = "IP-CIDR"
 	case "ip_cidr6":
 		kind = "IP-CIDR6"
-	case "match":
-		return fmt.Sprintf("MATCH,%s", target), nil
 	default:
 		return "", fmt.Errorf("custom rule %q type %q is unsupported", id, rule.Type)
 	}
