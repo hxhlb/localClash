@@ -27,6 +27,10 @@ find in its working directory:
 policies/
 policy-templates/
 rule-sources/
+.runtime/mihomo/Country.mmdb
+.runtime/mihomo/geoip.dat
+.runtime/mihomo/geosite.dat
+.runtime/mihomo/ASN.mmdb
 ```
 
 Manifest shape:
@@ -57,7 +61,11 @@ Manifest shape:
     "contents": [
       "policies/",
       "policy-templates/",
-      "rule-sources/"
+      "rule-sources/",
+      ".runtime/mihomo/Country.mmdb",
+      ".runtime/mihomo/geoip.dat",
+      ".runtime/mihomo/geosite.dat",
+      ".runtime/mihomo/ASN.mmdb"
     ]
   }
 }

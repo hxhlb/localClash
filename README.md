@@ -147,6 +147,15 @@ overwriting existing files, and restarts the MCP HTTP server on
 deployment it follows the router MCP log with `tail -f` until interrupted with
 `Ctrl+C`; use `--no-tail` for non-interactive automation.
 
+For release-based installs, the Go core owns base asset setup:
+
+```bash
+localclash component update assets --json
+```
+
+The OpenWrt LuCI package may guide users to install the core and then call this
+command, but it should not hard-code policy/template/rule-source filenames.
+
 Tool safety levels are part of the tool metadata:
 
 - `safe_read`: observation and diagnostics.

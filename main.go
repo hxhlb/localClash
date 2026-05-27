@@ -31,6 +31,7 @@ Usage:
   localclash subscription set --input subscriptions.json --json
   localclash subscription refresh --json
   localclash component status --json
+  localclash component update assets --json
   localclash component update mihomo --json
   localclash component update dashboard --json
   localclash config status --json

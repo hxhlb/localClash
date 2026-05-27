@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"localclash/internal/appinit"
+	"localclash/internal/baseassets"
 	"localclash/internal/configinspect"
 	"localclash/internal/configrender"
 	"localclash/internal/coredownload"
@@ -233,6 +234,15 @@ func runProductComponentUpdate(args []string) error {
 			message:     "localClash core install/update is owned by the LuCI helper when the core is missing; Go self-update is not implemented yet.",
 			nextActions: []string{"Use the LuCI helper bootstrap_core method to install or update /usr/local/bin/localclash."},
 		}
+	case "assets", "base-assets":
+		result, err := baseassets.Install(ctx, baseassets.Options{
+			OutputDir: ".",
+			Force:     true,
+		})
+		if err != nil {
+			return err
+		}
+		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Base assets updated.", Status: result, Changes: []string{"base_assets_updated"}, Warnings: []string{}})
 	case "mihomo":
 		result, err := coredownload.Download(ctx, coredownload.Options{
 			Version:    "latest",
@@ -844,6 +854,7 @@ func componentStatus(state appinit.RuntimeState) map[string]any {
 	exe, _ := os.Executable()
 	dashboardPath := filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard")
 	return map[string]any{
+		"base_assets": baseassets.Status("."),
 		"localclash": map[string]any{
 			"path":      exe,
 			"installed": exe != "",
