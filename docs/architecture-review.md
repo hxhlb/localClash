@@ -217,6 +217,8 @@ generated/mihomo.yaml
 
 ### 6.0 应该完成的改善目标
 
+这组目标既覆盖发布前必须解决的高风险问题，也收纳低优先级维护任务。排序含义如下：P0-P2 是发布前应优先完成或明确关闭的风险；P3 是产品边界收敛；P4 是发布后能力；P5 是低优先级维护池，只有在修改相邻代码、出现行为不一致或影响新功能落地时才处理。
+
 #### P0：让路由器运行状态始终可观察、可恢复
 
 目标不是增加更多日志，而是让真实路由器上的事故能被复盘：
@@ -283,6 +285,22 @@ localClash 的核心产品价值是“Agent 产生意图，localClash 编译为 
 - 当前版本优先完成路由器可观测性、热路径成本上限、配置事务化和入口收敛。
 - 发布版本后再提供本地 rule pack 能力支持，并确保 UI / Agent 写入 durable localClash intent，而不是直接 patch `generated/mihomo.yaml`。
 - 后续实现时，optional pack 与 policy template patch 仍应在文档、MCP 输出和渲染顺序中保持可解释。
+
+#### P5：低优先级维护池，随相邻改动吸收
+
+这些项目不应单独驱动大重构，但应该被记录进改善目标，避免长期散落在问题列表中：
+
+- StageEvent 重复：保留各 package 的输出契约；只有当日志汇总或 MCP task artifact 需要统一字段时，抽取薄 helper。
+- 同名类型重复：保留 `localconfig` durable intent 与 `rules` render-ready selection 的边界，为转换函数和类型补充职责注释。
+- 长文件问题：`configplan.go`、`config.go`、`main.go`、`product_cli.go` 不因行数本身拆分；只在同一区域修改已经造成维护成本时拆小。
+- 小工具函数重复：`stringValue`、`anyMapSlice`、`appendUnique` 等只在出现行为分叉或扩张时收敛到薄 helper。
+- schema/version 语义：发布前可以直接收敛 schema；发布后再记录历史版本与迁移路径。
+- 测试补强的非阻塞部分：除 P0-P2 的风险导向测试外，普通 package 单元测试随功能改动补齐，不为了覆盖率数字做机械补测。
+
+完成标准：
+
+- 每个低优先级项都有明确触发条件：相邻代码被修改、重复开始产生行为分叉、或它阻碍 P0-P3 目标。
+- 不引入宽泛 `internal/x` 式工具包来吞掉边界；公共 helper 必须薄、命名具体、依赖方向清楚。
 
 ### 6.1 Stage 事件代码重复（优先级：低）
 
@@ -433,6 +451,7 @@ localClash 的架构设计体现了清晰的系统工程思维：
 3. **配置生命周期显式事务化**：Bootstrap 不静默写入 generated config，`config_patch_apply` 改为 temp+fsync+rename 原子提交（6.0 P2、6.10、6.12）
 4. **产品入口收敛**：统一 CLI 边界，减少 MCP 参数解析样板，但不为消除小重复牺牲核心 package 边界（6.0 P3、6.11、6.13）
 5. **发布后补齐用户可配置规则层**：本地 rule pack 支持暂时挂起，发布版本后再让 optional pack 成为独立 UI/Agent 自定义层（6.0 P4、6.6）
-6. **补充风险导向测试**：优先覆盖 patch apply 原子性、bootstrap 写入边界、restart 验证缓存、router takeover smoke 和 MCP performance smoke（6.8）
+6. **低优先级维护池**：StageEvent、类型边界、长文件、小工具函数、schema/version 语义随相邻改动吸收，不单独驱动大重构（6.0 P5、6.1-6.7、6.9）
+7. **补充风险导向测试**：优先覆盖 patch apply 原子性、bootstrap 写入边界、restart 验证缓存、router takeover smoke 和 MCP performance smoke（6.8）
 
 整体而言，项目在 33 个 MCP 工具、4 个规则适配器、2 种运行时模式、2 套策略模板的复杂度下，保持了良好的模块边界和一致的设计模式。
