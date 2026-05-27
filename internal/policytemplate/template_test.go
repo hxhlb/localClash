@@ -177,8 +177,8 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if summary.ID != TemplateLocalClashDefault || config.Version != 2 {
 		t.Fatalf("template = %+v config version = %d, want v2 localclash default", summary, config.Version)
 	}
-	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 25 || len(config.Packs) != 32 || len(config.CustomRules) != 1 {
-		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d custom_rules=%d, want 9/25/32/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.CustomRules))
+	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 26 || len(config.Packs) != 32 || len(config.CustomRules) != 1 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d custom_rules=%d, want 9/26/32/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.CustomRules))
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])

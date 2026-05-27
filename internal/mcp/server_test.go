@@ -1336,7 +1336,7 @@ func TestToolsCallRuleProviderBuildReturnsReusableIntent(t *testing.T) {
 			"name": "rule_provider_build",
 			"arguments": map[string]any{
 				"id":       "US-Proxy",
-				"target":   "PROXY",
+				"target":   "⚡ 自动选择",
 				"url":      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
 				"behavior": "classical",
 				"reason":   "User supplied qoli US proxy rules.",
@@ -1348,8 +1348,8 @@ func TestToolsCallRuleProviderBuildReturnsReusableIntent(t *testing.T) {
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["id"] != "US-Proxy" || content["target"] != "PROXY" {
-		t.Fatalf("rule provider content = %+v, want US-Proxy target PROXY", content)
+	if content["id"] != "US-Proxy" || content["target"] != "⚡ 自动选择" {
+		t.Fatalf("rule provider content = %+v, want US-Proxy target ⚡ 自动选择", content)
 	}
 	provider := content["rule_provider"].(map[string]any)
 	if provider["path"] != "./rule_provider/US-Proxy.yaml" || provider["interval"] != float64(86400) {
@@ -1424,7 +1424,7 @@ func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
 					"rule_providers": []map[string]any{
 						{
 							"id":       "US-Proxy",
-							"target":   "PROXY",
+							"target":   "⚡ 自动选择",
 							"type":     "http",
 							"behavior": "classical",
 							"format":   "yaml",
@@ -1432,6 +1432,9 @@ func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
 							"url":      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
 							"interval": 86400,
 						},
+					},
+					"proxy_groups": []map[string]any{
+						{"id": "⚡ 自动选择", "nodes": []string{"SG 01"}, "mode": "auto"},
 					},
 				},
 			},
@@ -1446,7 +1449,7 @@ func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
 		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
 	}
 	config := readMCPFile(t, content["output"].(string))
-	if !strings.Contains(config, "RULE-SET,US-Proxy,PROXY") || !strings.Contains(config, "US-Proxy:") || !strings.Contains(config, "us_proxy.yaml") {
+	if !strings.Contains(config, "RULE-SET,US-Proxy,⚡ 自动选择") || !strings.Contains(config, "US-Proxy:") || !strings.Contains(config, "us_proxy.yaml") {
 		t.Fatalf("candidate config missing external rule-provider:\n%s", config)
 	}
 }
@@ -2730,7 +2733,7 @@ func setupMCPPlanFixture(t *testing.T) mcpPlanFixture {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
   apple: Apple
@@ -2746,7 +2749,7 @@ modes:
       - provider: applications
         target: direct
       - match: true
-        target: proxy
+        target: direct
   blacklist:
     rules:
       - match: true

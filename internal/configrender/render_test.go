@@ -19,7 +19,7 @@ func TestBuildRulesWhitelistFallback(t *testing.T) {
 	pol := policy{
 		Groups: map[string]string{
 			"direct": "DIRECT",
-			"proxy":  "PROXY",
+			"proxy":  "⚡ 自动选择",
 			"reject": "REJECT",
 		},
 		ProviderMapping: map[string]providerDefinition{
@@ -35,8 +35,8 @@ func TestBuildRulesWhitelistFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := rules[len(rules)-1]; got != "MATCH,PROXY" {
-		t.Fatalf("fallback rule = %q, want MATCH,PROXY", got)
+	if got := rules[len(rules)-1]; got != "MATCH,⚡ 自动选择" {
+		t.Fatalf("fallback rule = %q, want MATCH,⚡ 自动选择", got)
 	}
 }
 
@@ -131,8 +131,8 @@ func TestRenderWithoutPacksSelectionPreservesBaseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RuleCount != len(LocalBaselineRuleLines())+3 {
-		t.Fatalf("RuleCount = %d, want baseline + 3", result.RuleCount)
+	if result.RuleCount != len(LocalBaselineRuleLines())+2 {
+		t.Fatalf("RuleCount = %d, want baseline + 2", result.RuleCount)
 	}
 	config := readTestYAML(t, result.OutputPath)
 	if _, ok := config["rule-providers"].(map[string]any)["sukkaw_ai_non_ip"]; ok {
@@ -223,7 +223,7 @@ func TestRenderDefaultOverlayUsesBaseManualAutoSelectors(t *testing.T) {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
 provider_mapping:
@@ -327,7 +327,7 @@ func TestRenderOmitsLegacyAppleGroupWhenPolicyDoesNotDefineIt(t *testing.T) {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
 provider_mapping:
@@ -342,7 +342,7 @@ modes:
       - provider: applications
         target: direct
       - match: true
-        target: proxy
+        target: direct
 `)
 
 	result, err := Render(Options{
@@ -402,11 +402,23 @@ func TestRenderAppliesActiveRuntimeProfile(t *testing.T) {
 	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
 		t.Fatal(err)
 	}
+	writeFile(t, paths.selection, `version: 1
+proxy_groups:
+  "⚡ 自动选择":
+    nodes: ["🇯🇵日本01 | JP"]
+    auto: true
+policy_groups:
+  DNSProxy:
+    exits: ["⚡ 自动选择"]
+    manual: true
+enabled_packs: []
+`)
 
 	result, err := Render(Options{
 		SourcePath:         paths.subscription,
 		PolicyPath:         paths.policy,
 		OutputPath:         filepath.Join(paths.dir, "router.yaml"),
+		PacksSelectionPath: paths.selection,
 		RuntimeProfilePath: profilePath,
 		RulesCacheDir:      paths.cacheDir,
 		Force:              true,
@@ -430,6 +442,10 @@ func TestRenderAppliesActiveRuntimeProfile(t *testing.T) {
 	dns := config["dns"].(map[string]any)
 	if dns["listen"] != "0.0.0.0:7874" {
 		t.Fatalf("dns.listen = %v, want router DNS listen", dns["listen"])
+	}
+	groups := proxyGroupNamesFromConfig(config)
+	if !groups["DNSProxy"] {
+		t.Fatalf("router runtime DNSProxy group was not materialized: %+v", groups)
 	}
 }
 
@@ -466,7 +482,7 @@ enabled_packs:
 		t.Fatalf("core = %q, want smart", result.Core)
 	}
 	config := readTestYAML(t, result.OutputPath)
-	for _, name := range []string{"⚡ 自动选择", "AI"} {
+	for _, name := range []string{"AI"} {
 		group := proxyGroupFromConfig(t, config, name)
 		if group["type"] != "smart" {
 			t.Fatalf("%s type = %v, want smart", name, group["type"])
@@ -491,13 +507,6 @@ func TestMergeRuleProvidersRejectsConflict(t *testing.T) {
 	err := mergeRuleProviders(base, map[string]map[string]any{"applications": {}})
 	if err == nil {
 		t.Fatal("expected provider conflict error")
-	}
-}
-
-func TestMergeProxyGroupsRejectsConflict(t *testing.T) {
-	_, err := mergeProxyGroups([]map[string]any{{"name": "PROXY"}}, []map[string]any{{"name": "PROXY"}})
-	if err == nil {
-		t.Fatal("expected proxy-group conflict error")
 	}
 }
 
@@ -552,7 +561,7 @@ func writeRenderFixture(t *testing.T) renderFixturePaths {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
   apple: Apple
@@ -571,10 +580,8 @@ modes:
     rules:
       - provider: applications
         target: direct
-      - provider: proxy
-        target: proxy
       - match: true
-        target: proxy
+        target: direct
   blacklist:
     rules:
       - match: true

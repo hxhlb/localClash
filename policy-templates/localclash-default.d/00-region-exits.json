@@ -89,6 +89,16 @@
         "reason": "香港地区出口组，按节点名称自动筛选。",
         "boundary": "name_based_region_selector"
       }
+    },
+    "policy_groups": {
+      "DNSProxy": {
+        "mode": "manual",
+        "exits": [
+          "⚡ 自动选择"
+        ],
+        "reason": "DNS 海外解析出口，默认对齐自动选择策略。",
+        "boundary": "dns_proxy_exit"
+      }
     }
   }
 }

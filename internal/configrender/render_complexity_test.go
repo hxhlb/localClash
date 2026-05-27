@@ -49,7 +49,11 @@ meta:
 	selection := rulespkg.Selection{
 		Version: 1,
 		ProxyGroups: map[string]rulespkg.ProxyGroup{
-			"HK": {Manual: true, Nodes: []string{"HK 01"}},
+			"HK":     {Manual: true, Nodes: []string{"HK 01"}},
+			"⚡ 自动选择": {Auto: true, Nodes: []string{"JP 01"}},
+		},
+		PolicyGroups: map[string]rulespkg.PolicyGroup{
+			"DNSProxy": {Manual: true, Exits: []string{"⚡ 自动选择"}},
 		},
 		EnabledPack: []rulespkg.SelectedPack{{Source: "blackmatrix7", Pack: "OpenAI", Target: "HK"}},
 	}
@@ -73,7 +77,8 @@ meta:
 	}
 	event := findRenderStageEvent(t, events, "render_pack_selection", "done")
 	assertRenderStageField(t, event, "proxy_names", 2)
-	assertRenderStageField(t, event, "proxy_groups", 1)
+	assertRenderStageField(t, event, "proxy_groups", 2)
+	assertRenderStageField(t, event, "policy_groups", 1)
 	assertRenderStageField(t, event, "enabled_packs", 1)
 	assertRenderStageField(t, event, "rendered_rules", 1)
 }

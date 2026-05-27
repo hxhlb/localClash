@@ -59,7 +59,18 @@ const (
 	QuerySourceProviderCache = "provider_cache"
 	QuerySourceRawDLC        = "raw_dlc_provider_cache"
 	GeoSiteDataFileDLC       = "dlc.dat"
+	TerminalDirect           = "DIRECT"
+	TerminalReject           = "REJECT"
 )
+
+func IsTerminalAction(target string) bool {
+	switch strings.TrimSpace(target) {
+	case TerminalDirect, TerminalReject:
+		return true
+	default:
+		return false
+	}
+}
 
 type PackBackend struct {
 	Type               string `json:"type"`
@@ -71,12 +82,13 @@ type PackBackend struct {
 }
 
 type Selection struct {
-	Version       int                    `json:"version"`
-	ProxyGroups   map[string]ProxyGroup  `json:"proxy_groups,omitempty"`
-	PolicyGroups  map[string]PolicyGroup `json:"policy_groups,omitempty"`
-	CustomRules   []CustomRule           `json:"custom_rules,omitempty"`
-	RuleProviders []ExternalRuleProvider `json:"rule_providers,omitempty"`
-	EnabledPack   []SelectedPack         `json:"enabled_packs"`
+	Version         int                    `json:"version"`
+	ProxyGroups     map[string]ProxyGroup  `json:"proxy_groups,omitempty"`
+	PolicyGroups    map[string]PolicyGroup `json:"policy_groups,omitempty"`
+	CustomRules     []CustomRule           `json:"custom_rules,omitempty"`
+	RuleProviders   []ExternalRuleProvider `json:"rule_providers,omitempty"`
+	EnabledPack     []SelectedPack         `json:"enabled_packs"`
+	RequiredTargets []string               `json:"required_targets,omitempty"`
 }
 
 type ProxyGroup struct {
@@ -475,6 +487,13 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 			fragment.Rules = append(fragment.Rules, fmt.Sprintf("RULE-SET,%s,%s", providerName, target))
 		}
 	}
+	for _, required := range selection.RequiredTargets {
+		target, kind, err := renderTarget(required, targets)
+		if err != nil {
+			return Fragment{}, err
+		}
+		markUsedTarget(target, kind, usedProxyGroups, usedPolicyGroups)
+	}
 	policyGroups, referencedProxyGroups, err := materializePolicyGroups(usedPolicyGroups, targets)
 	if err != nil {
 		return Fragment{}, err
@@ -650,11 +669,11 @@ func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, 
 				continue
 			}
 			seen[exit] = true
-			if isBuiltInTarget(exit) {
+			if IsTerminalAction(exit) {
 				continue
 			}
 			if _, ok := selection.ProxyGroups[exit]; !ok {
-				return preparedTargets{}, fmt.Errorf("policy group %q exit %q requires a built-in target or matching proxy group", groupName, exit)
+				return preparedTargets{}, fmt.Errorf("policy group %q exit %q requires a terminal action or matching proxy group", groupName, exit)
 			}
 		}
 	}
@@ -664,15 +683,15 @@ func prepareTargets(selection Selection, proxyNames []string) (preparedTargets, 
 type targetKind int
 
 const (
-	targetKindBuiltIn targetKind = iota
+	targetKindTerminal targetKind = iota
 	targetKindProxyGroup
 	targetKindPolicyGroup
 )
 
 func renderTarget(target string, targets preparedTargets) (string, targetKind, error) {
 	trimmed := strings.TrimSpace(target)
-	if builtIn := canonicalBuiltInTarget(trimmed); builtIn != "" {
-		return builtIn, targetKindBuiltIn, nil
+	if IsTerminalAction(trimmed) {
+		return trimmed, targetKindTerminal, nil
 	}
 	if _, ok := targets.proxyGroups[trimmed]; ok {
 		return trimmed, targetKindProxyGroup, nil
@@ -680,7 +699,7 @@ func renderTarget(target string, targets preparedTargets) (string, targetKind, e
 	if _, ok := targets.policyGroups[trimmed]; ok {
 		return trimmed, targetKindPolicyGroup, nil
 	}
-	return "", targetKindBuiltIn, fmt.Errorf("unknown pack target %q", target)
+	return "", targetKindTerminal, fmt.Errorf("unknown pack target %q", target)
 }
 
 func markUsedTarget(target string, kind targetKind, usedProxyGroups map[string]bool, usedPolicyGroups map[string]bool) {
@@ -860,19 +879,6 @@ func candidatePolicyExits(group PolicyGroup, targets preparedTargets) ([]string,
 		}
 	}
 	return candidates, referencedProxyGroups, nil
-}
-
-func canonicalBuiltInTarget(target string) string {
-	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "proxy", "direct", "reject":
-		return strings.ToUpper(strings.TrimSpace(target))
-	default:
-		return ""
-	}
-}
-
-func isBuiltInTarget(target string) bool {
-	return canonicalBuiltInTarget(target) != ""
 }
 
 func appendUniqueString(values []string, value string) []string {

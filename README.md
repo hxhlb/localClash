@@ -317,7 +317,7 @@ MCP patch-building tools:
 - `policy_group_build`: build and validate a business-layer policy group such as
   `Steam` or `AI`. A policy group is a Dashboard-facing rule target whose
   `exits` point to existing `proxy_groups` such as `HK`, `JP`, `⚡ 自动选择`, or to
-  built-in targets such as `DIRECT`.
+  terminal targets such as `DIRECT`.
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, or CIDRs that share one target.
 - `rule_provider_build`: build and validate a user-supplied external Mihomo
@@ -344,7 +344,7 @@ build or reuse regional `proxy_groups`, build a `Steam` `policy_group` whose
 `exits` reference those groups, and target the Steam pack at `Steam`. For domain
 routing such as "huggingface.co through temporary line", inspect status,
 search/build or reuse the proxy group, call `custom_rules_build`, then create a
-patch with desired `proxy_groups` and `custom_rules`. For built-in targets such
+patch with desired `proxy_groups` and `custom_rules`. For terminal targets such
 as "xxx direct", skip proxy group creation and build custom rules with target
 `DIRECT`. For external provider routing such as adding a raw `US-Proxy`
 rule-provider URL, call `rule_provider_build`, then create a patch with desired

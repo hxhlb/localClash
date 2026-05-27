@@ -123,7 +123,7 @@ func TestGetPackReturnsGeoSiteBackend(t *testing.T) {
 			{
 				ID:         "google",
 				Name:       "google",
-				Target:     "PROXY",
+				Target:     "⚡ 自动选择",
 				Renderable: true,
 				Components: []Component{
 					{
@@ -150,10 +150,10 @@ func TestGetPackReturnsGeoSiteBackend(t *testing.T) {
 	if pack.Backend.Type != PackTypeGeoSite || pack.Backend.QuerySource != QuerySourceRawDLC || pack.Backend.DataFile != GeoSiteDataFileDLC {
 		t.Fatalf("backend = %+v, want raw DLC geosite backend", pack.Backend)
 	}
-	if pack.RenderRuleTemplate != "GEOSITE,google,PROXY" {
+	if pack.RenderRuleTemplate != "GEOSITE,google,⚡ 自动选择" {
 		t.Fatalf("render template = %q, want GEOSITE template", pack.RenderRuleTemplate)
 	}
-	if len(pack.Rules) != 1 || pack.Rules[0] != "GEOSITE,google,PROXY" {
+	if len(pack.Rules) != 1 || pack.Rules[0] != "GEOSITE,google,⚡ 自动选择" {
 		t.Fatalf("rules = %+v, want GEOSITE rule", pack.Rules)
 	}
 }
@@ -270,7 +270,7 @@ func writeCatalogTestCaches(t *testing.T) string {
 			Adapter:    "blackmatrix7",
 			Renderable: true,
 			Packs: []Pack{
-				testCatalogPack("GitHub", "PROXY"),
+				testCatalogPack("GitHub", "⚡ 自动选择"),
 				testCatalogPack("OpenAI", "AI"),
 			},
 		},

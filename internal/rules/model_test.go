@@ -11,9 +11,14 @@ import (
 )
 
 func TestRenderFragmentUsesSelectionAndPackCache(t *testing.T) {
-	selection := Selection{EnabledPack: []SelectedPack{
-		{Source: "blackmatrix7", Pack: "OpenAI", Target: "proxy"},
-	}}
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"⚡ 自动选择": {Nodes: []string{"JP 01"}, Auto: true},
+		},
+		EnabledPack: []SelectedPack{
+			{Source: "blackmatrix7", Pack: "OpenAI", Target: "⚡ 自动选择"},
+		},
+	}
 	caches := map[string]PackCache{
 		"blackmatrix7": {
 			Source:  "blackmatrix7",
@@ -37,22 +42,27 @@ func TestRenderFragmentUsesSelectionAndPackCache(t *testing.T) {
 		},
 	}
 
-	fragment, err := RenderFragment(selection, caches)
+	fragment, err := RenderFragment(selection, caches, []string{"JP 01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fragment.RuleProviders) != 1 {
 		t.Fatalf("providers = %d, want 1", len(fragment.RuleProviders))
 	}
-	if got := fragment.Rules[0]; got != "RULE-SET,blackmatrix7_OpenAI,PROXY" {
-		t.Fatalf("rule = %q, want RULE-SET,blackmatrix7_OpenAI,PROXY", got)
+	if got := fragment.Rules[0]; got != "RULE-SET,blackmatrix7_OpenAI,⚡ 自动选择" {
+		t.Fatalf("rule = %q, want RULE-SET,blackmatrix7_OpenAI,⚡ 自动选择", got)
 	}
 }
 
 func TestRenderFragmentRendersV2FlyDLCAsGeoSite(t *testing.T) {
-	selection := Selection{EnabledPack: []SelectedPack{
-		{Source: "v2fly-dlc", Pack: "google", Target: "proxy"},
-	}}
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"⚡ 自动选择": {Nodes: []string{"JP 01"}, Auto: true},
+		},
+		EnabledPack: []SelectedPack{
+			{Source: "v2fly-dlc", Pack: "google", Target: "⚡ 自动选择"},
+		},
+	}
 	caches := map[string]PackCache{
 		"v2fly-dlc": {
 			Source: "v2fly-dlc",
@@ -72,21 +82,21 @@ func TestRenderFragmentRendersV2FlyDLCAsGeoSite(t *testing.T) {
 		},
 	}
 
-	fragment, err := RenderFragment(selection, caches)
+	fragment, err := RenderFragment(selection, caches, []string{"JP 01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fragment.RuleProviders) != 0 {
 		t.Fatalf("providers = %+v, want none for GEOSITE pack", fragment.RuleProviders)
 	}
-	if got := fragment.Rules[0]; got != "GEOSITE,google,PROXY" {
+	if got := fragment.Rules[0]; got != "GEOSITE,google,⚡ 自动选择" {
 		t.Fatalf("rule = %q, want GEOSITE google rule", got)
 	}
 }
 
 func TestRenderFragmentRendersV2FlyDLCGeoSiteAttribute(t *testing.T) {
 	selection := Selection{EnabledPack: []SelectedPack{
-		{Source: "v2fly-dlc", Pack: "category-games@cn", Target: "direct"},
+		{Source: "v2fly-dlc", Pack: "category-games@cn", Target: "DIRECT"},
 	}}
 	caches := map[string]PackCache{
 		"v2fly-dlc": {
@@ -517,6 +527,15 @@ func TestRenderFragmentRejectsUnknownTarget(t *testing.T) {
 	}
 }
 
+func TestRenderFragmentRejectsLegacyProxyAlias(t *testing.T) {
+	selection := Selection{EnabledPack: []SelectedPack{
+		{Source: "sukkaw", Pack: "ai", Target: "PROXY"},
+	}}
+	if _, err := RenderFragment(selection, testPackCaches()); err == nil || !strings.Contains(err.Error(), `unknown pack target "PROXY"`) {
+		t.Fatalf("error = %v, want legacy PROXY alias rejected", err)
+	}
+}
+
 func TestRenderFragmentRejectsMissingProxyGroupNode(t *testing.T) {
 	selection := Selection{
 		ProxyGroups: map[string]ProxyGroup{
@@ -580,8 +599,8 @@ func TestAdaptSyncnextBuildsAppMaintenancePacks(t *testing.T) {
 	if !cache.Renderable || len(cache.Packs) != 2 {
 		t.Fatalf("cache = %+v, want two renderable packs", cache)
 	}
-	if cache.Packs[0].ID != "SyncnextProxy" || cache.Packs[0].Target != "PROXY" {
-		t.Fatalf("first pack = %+v, want SyncnextProxy target PROXY", cache.Packs[0])
+	if cache.Packs[0].ID != "SyncnextProxy" || cache.Packs[0].Target != "⚡ 自动选择" {
+		t.Fatalf("first pack = %+v, want SyncnextProxy target ⚡ 自动选择", cache.Packs[0])
 	}
 	if cache.Packs[1].ID != "SyncnextUnbreak" || cache.Packs[1].Target != "DIRECT" {
 		t.Fatalf("second pack = %+v, want SyncnextUnbreak target DIRECT", cache.Packs[1])

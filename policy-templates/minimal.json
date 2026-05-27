@@ -27,6 +27,16 @@
         "boundary": "all_subscription_nodes"
       }
     },
+    "policy_groups": {
+      "DNSProxy": {
+        "mode": "manual",
+        "exits": [
+          "⚡ 自动选择"
+        ],
+        "reason": "DNS 海外解析出口，默认对齐自动选择策略。",
+        "boundary": "dns_proxy_exit"
+      }
+    },
     "packs": []
   }
 }

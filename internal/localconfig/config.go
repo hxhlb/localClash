@@ -907,10 +907,7 @@ func normalizePolicyGroupExits(rawExits []string) []string {
 	exits := make([]string, 0, len(rawExits))
 	seen := map[string]bool{}
 	for _, raw := range rawExits {
-		exit := canonicalBuiltInTarget(raw)
-		if exit == "" {
-			exit = strings.TrimSpace(raw)
-		}
+		exit := strings.TrimSpace(raw)
 		if seen[exit] {
 			continue
 		}
@@ -928,11 +925,11 @@ func validatePolicyGroupExits(id string, exits []string, proxyGroups map[string]
 		if strings.TrimSpace(exit) == "" {
 			return fmt.Errorf("policy group %q contains an empty exit", id)
 		}
-		if isBuiltInTarget(exit) {
+		if rules.IsTerminalAction(exit) {
 			continue
 		}
 		if _, ok := proxyGroups[exit]; !ok {
-			return fmt.Errorf("policy group %q exit %q requires a built-in target or matching proxy group", id, exit)
+			return fmt.Errorf("policy group %q exit %q requires a terminal action or matching proxy group", id, exit)
 		}
 	}
 	return nil
@@ -1207,21 +1204,8 @@ func uniqueNameMeasured(name string, used map[string]bool) (string, int) {
 	}
 }
 
-func isBuiltInTarget(target string) bool {
-	return canonicalBuiltInTarget(target) != ""
-}
-
-func canonicalBuiltInTarget(target string) string {
-	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "direct", "reject", "proxy":
-		return strings.ToUpper(strings.TrimSpace(target))
-	default:
-		return ""
-	}
-}
-
 func isKnownTarget(target string, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) bool {
-	if isBuiltInTarget(target) {
+	if rules.IsTerminalAction(target) {
 		return true
 	}
 	trimmed := strings.TrimSpace(target)

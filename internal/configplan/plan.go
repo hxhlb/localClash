@@ -1089,7 +1089,7 @@ func buildSelection(opts Options, proxyNames []string) (rules.Selection, Overlay
 		return rules.Selection{}, OverlaySummary{}, nil, err
 	}
 	for _, pack := range selected {
-		if isBuiltInTarget(pack.Target) {
+		if rules.IsTerminalAction(pack.Target) {
 			continue
 		}
 		if _, ok := proxyGroups[pack.Target]; ok {
@@ -1166,10 +1166,10 @@ func validatePolicyGroupExits(groupID string, rawExits []string, proxyGroups map
 		if exit == "" {
 			return nil, fmt.Errorf("policy group %q has an empty exit", groupID)
 		}
-		if builtIn := canonicalBuiltInTarget(exit); builtIn != "" {
-			exit = builtIn
-		} else if _, ok := proxyGroups[exit]; !ok {
-			return nil, fmt.Errorf("policy group %q exit %q requires a built-in target or matching proxy group", groupID, exit)
+		if !rules.IsTerminalAction(exit) {
+			if _, ok := proxyGroups[exit]; !ok {
+				return nil, fmt.Errorf("policy group %q exit %q requires a terminal action or matching proxy group", groupID, exit)
+			}
 		}
 		if seen[exit] {
 			continue
@@ -1472,19 +1472,6 @@ func renderMode(mode string) string {
 		return ""
 	}
 	return mode
-}
-
-func isBuiltInTarget(target string) bool {
-	return canonicalBuiltInTarget(target) != ""
-}
-
-func canonicalBuiltInTarget(target string) string {
-	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "direct", "reject", "proxy":
-		return strings.ToUpper(strings.TrimSpace(target))
-	default:
-		return ""
-	}
 }
 
 func fileExists(path string) bool {

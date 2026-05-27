@@ -174,6 +174,7 @@ func Render(opts Options) (Result, error) {
 		return Result{}, err
 	}
 	finish(nil, map[string]any{"proxy_count": len(proxyNames)})
+	requiredTargets := dnsProxyGroupReferences(source["dns"], profile.Mihomo["dns"])
 
 	var fragment *rulespkg.Fragment
 	var selection *rulespkg.Selection
@@ -189,6 +190,7 @@ func Render(opts Options) (Result, error) {
 			}
 			selection = &loadedSelection
 		}
+		selection = selectionWithRequiredTargets(selection, requiredTargets)
 		renderedFragment, renderStats, err := rulespkg.RenderSelectionWithStats(*selection, opts.RulesCacheDir, proxyNames)
 		if err != nil {
 			finish(err, nil)
@@ -218,6 +220,14 @@ func Render(opts Options) (Result, error) {
 	finish = stage("apply_runtime_profile", map[string]any{"runtime_mode": runtimeFile.Mode, "core": runtimeFile.Core})
 	runtimeprofile.ApplyToConfig(rendered, profile)
 	finish(nil, nil)
+
+	finish = stage("validate_dns_proxy_groups", map[string]any{"required_targets": len(requiredTargets)})
+	if err := validateDNSProxyGroupReferences(rendered); err != nil {
+		finish(err, nil)
+		return Result{}, err
+	}
+	finish(nil, nil)
+
 	rendered[configmeta.Key] = buildLocalClashMetadata(selection, fragment)
 
 	finish = stage("write_output", map[string]any{"output": opts.OutputPath})
@@ -290,6 +300,108 @@ func mergeRenderFields(base map[string]any, extra map[string]any) map[string]any
 	return base
 }
 
+func selectionWithRequiredTargets(selection *rulespkg.Selection, targets []string) *rulespkg.Selection {
+	if selection == nil || len(targets) == 0 {
+		return selection
+	}
+	cloned := *selection
+	required := append([]string{}, cloned.RequiredTargets...)
+	for _, target := range targets {
+		required = appendUnique(required, target)
+	}
+	cloned.RequiredTargets = required
+	return &cloned
+}
+
+func dnsProxyGroupReferences(values ...any) []string {
+	seen := map[string]bool{}
+	var refs []string
+	var walk func(any)
+	walk = func(value any) {
+		switch typed := value.(type) {
+		case string:
+			ref := dnsProxyGroupReference(typed)
+			if ref == "" || seen[ref] {
+				return
+			}
+			seen[ref] = true
+			refs = append(refs, ref)
+		case []string:
+			for _, item := range typed {
+				walk(item)
+			}
+		case []any:
+			for _, item := range typed {
+				walk(item)
+			}
+		case map[string]string:
+			for _, item := range typed {
+				walk(item)
+			}
+		case map[string]any:
+			for _, item := range typed {
+				walk(item)
+			}
+		}
+	}
+	for _, value := range values {
+		walk(value)
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func dnsProxyGroupReference(value string) string {
+	index := strings.LastIndex(value, "#")
+	if index < 0 || index == len(value)-1 {
+		return ""
+	}
+	ref := strings.TrimSpace(value[index+1:])
+	if cut := strings.IndexAny(ref, "&?"); cut >= 0 {
+		ref = strings.TrimSpace(ref[:cut])
+	}
+	return ref
+}
+
+func validateDNSProxyGroupReferences(config map[string]any) error {
+	refs := dnsProxyGroupReferences(config["dns"])
+	if len(refs) == 0 {
+		return nil
+	}
+	groups := renderedProxyGroupNames(config["proxy-groups"])
+	for _, ref := range refs {
+		if !groups[ref] {
+			return fmt.Errorf("dns references proxy group %q but rendered config does not define it", ref)
+		}
+	}
+	return nil
+}
+
+func renderedProxyGroupNames(raw any) map[string]bool {
+	out := map[string]bool{}
+	switch groups := raw.(type) {
+	case []map[string]any:
+		for _, group := range groups {
+			name := stringValue(group["name"])
+			if name != "" {
+				out[name] = true
+			}
+		}
+	case []any:
+		for _, item := range groups {
+			group, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := stringValue(group["name"])
+			if name != "" {
+				out[name] = true
+			}
+		}
+	}
+	return out
+}
+
 func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.Fragment) configmeta.Metadata {
 	metadata := configmeta.Metadata{
 		Version: 1,
@@ -339,6 +451,9 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 		}
 		for _, provider := range selection.RuleProviders {
 			markTarget(provider.Target)
+		}
+		for _, target := range selection.RequiredTargets {
+			markTarget(target)
 		}
 		proxyGroupIDs := make([]string, 0, len(usedProxyGroups))
 		for id := range usedProxyGroups {
@@ -611,86 +726,15 @@ func buildRuntimeConfig(source map[string]any, pol policy, mode policyMode, prox
 	if err != nil {
 		return nil, err
 	}
-	proxyGroups := buildProxyGroups(pol.Groups, proxyNames, baseProxyGroupsUsed(pol.Groups, rules, fragment), baseManualChoices(fragment))
+	proxyGroups := []map[string]any{}
 	if fragment != nil {
-		proxyGroups, err = mergeProxyGroups(proxyGroups, fragment.ProxyGroups)
-		if err != nil {
-			return nil, err
-		}
+		proxyGroups = append(proxyGroups, fragment.ProxyGroups...)
 	}
 	sortProxyGroupsByDisplay(proxyGroups, baseManualChoiceSet(fragment))
 	config["proxy-groups"] = proxyGroups
 
 	config["rules"] = rules
 	return config, nil
-}
-
-func baseProxyGroupsUsed(groups map[string]string, rules []string, fragment *rulespkg.Fragment) map[string]bool {
-	if fragment == nil {
-		return nil
-	}
-	fragmentGroups := proxyGroupNameSet(fragment.ProxyGroups)
-	used := map[string]bool{}
-	mark := func(value string) {
-		value = strings.TrimSpace(value)
-		for _, name := range []string{groups["proxy"], groups["auto"], groups["manual"]} {
-			if name != "" && value == name && !fragmentGroups[name] {
-				used[name] = true
-			}
-		}
-	}
-	for _, rule := range rules {
-		if target, ok := ruleTarget(rule); ok {
-			mark(target)
-		}
-	}
-	for _, group := range fragment.ProxyGroups {
-		if proxies, ok := stringListFromAny(group["proxies"]); ok {
-			for _, choice := range proxies {
-				mark(choice)
-			}
-		}
-	}
-	if used[groups["proxy"]] {
-		if !fragmentGroups[groups["auto"]] {
-			used[groups["auto"]] = true
-		}
-		if !fragmentGroups[groups["manual"]] {
-			used[groups["manual"]] = true
-		}
-	}
-	if used[groups["manual"]] {
-		if !fragmentGroups[groups["auto"]] {
-			used[groups["auto"]] = true
-		}
-	}
-	return used
-}
-
-func proxyGroupNameSet(groups []map[string]any) map[string]bool {
-	out := map[string]bool{}
-	for _, group := range groups {
-		name, _ := group["name"].(string)
-		if strings.TrimSpace(name) != "" {
-			out[name] = true
-		}
-	}
-	return out
-}
-
-func ruleTarget(rule string) (string, bool) {
-	parts := strings.Split(rule, ",")
-	if len(parts) < 3 {
-		return "", false
-	}
-	return strings.TrimSpace(parts[2]), true
-}
-
-func baseManualChoices(fragment *rulespkg.Fragment) []string {
-	if fragment == nil {
-		return nil
-	}
-	return append([]string{}, fragment.BaseManualChoices...)
 }
 
 func baseManualChoiceSet(fragment *rulespkg.Fragment) map[string]bool {
@@ -744,25 +788,6 @@ func proxyGroupDisplaySortKey(name string) string {
 		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
 	})
 	return strings.TrimSpace(trimmed)
-}
-
-func stringListFromAny(raw any) ([]string, bool) {
-	switch values := raw.(type) {
-	case []string:
-		return append([]string{}, values...), true
-	case []any:
-		out := make([]string, 0, len(values))
-		for _, value := range values {
-			text, ok := value.(string)
-			if !ok {
-				return nil, false
-			}
-			out = append(out, text)
-		}
-		return out, true
-	default:
-		return nil, false
-	}
 }
 
 func applySmartCoreProxyGroups(config map[string]any, opts runtimeprofile.SmartOptions) {
@@ -835,30 +860,6 @@ func mergeRuleProviders(base map[string]any, extra map[string]map[string]any) er
 		base[name] = provider
 	}
 	return nil
-}
-
-func mergeProxyGroups(base []map[string]any, extra []map[string]any) ([]map[string]any, error) {
-	seen := map[string]bool{}
-	for _, group := range base {
-		name, ok := group["name"].(string)
-		if !ok || name == "" {
-			return nil, fmt.Errorf("proxy-group without name: %v", group)
-		}
-		seen[name] = true
-	}
-	merged := append([]map[string]any{}, base...)
-	for _, group := range extra {
-		name, ok := group["name"].(string)
-		if !ok || name == "" {
-			return nil, fmt.Errorf("proxy-group without name: %v", group)
-		}
-		if seen[name] {
-			return nil, fmt.Errorf("proxy-group %q already exists", name)
-		}
-		seen[name] = true
-		merged = append(merged, group)
-	}
-	return merged, nil
 }
 
 func withLocalBaseline(mode policyMode) policyMode {
@@ -956,62 +957,6 @@ func buildRuleProviders(pol policy, names []string) map[string]any {
 		}
 	}
 	return out
-}
-
-func buildProxyGroups(groups map[string]string, proxyNames []string, used map[string]bool, manualExtraChoices []string) []map[string]any {
-	direct := groups["direct"]
-	proxy := groups["proxy"]
-	auto := groups["auto"]
-	manual := groups["manual"]
-
-	manualChoices := appendUnique(nil, auto)
-	for _, choice := range manualExtraChoices {
-		manualChoices = appendUnique(manualChoices, choice)
-	}
-	for _, proxyName := range proxyNames {
-		manualChoices = appendUnique(manualChoices, proxyName)
-	}
-	autoChoices := append([]string{}, proxyNames...)
-	proxyChoices := []string{auto, manual, direct}
-	var out []map[string]any
-	if shouldBuildBaseGroup(proxy, used) {
-		out = append(out, map[string]any{
-			"name":    proxy,
-			"type":    "select",
-			"proxies": proxyChoices,
-		})
-	}
-	if shouldBuildBaseGroup(auto, used) {
-		out = append(out, map[string]any{
-			"name":     auto,
-			"type":     "url-test",
-			"proxies":  autoChoices,
-			"url":      "http://www.gstatic.com/generate_204",
-			"interval": 300,
-		})
-	}
-	if shouldBuildBaseGroup(manual, used) {
-		out = append(out, map[string]any{
-			"name":    manual,
-			"type":    "select",
-			"proxies": manualChoices,
-		})
-	}
-	if apple := groups["apple"]; shouldBuildBaseGroup(apple, used) {
-		out = append(out, map[string]any{
-			"name":    apple,
-			"type":    "select",
-			"proxies": []string{direct, proxy},
-		})
-	}
-	return out
-}
-
-func shouldBuildBaseGroup(name string, used map[string]bool) bool {
-	if strings.TrimSpace(name) == "" {
-		return false
-	}
-	return used == nil || used[name]
 }
 
 func buildRules(pol policy, mode policyMode) ([]string, error) {

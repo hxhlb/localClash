@@ -304,7 +304,7 @@ func TestRenderExternalRuleProviderPlan(t *testing.T) {
 			RuleProviders: []OverlayRuleProviderIntent{
 				{
 					ID:       "US-Proxy",
-					Target:   "PROXY",
+					Target:   "⚡ 自动选择",
 					Type:     "http",
 					Behavior: "classical",
 					Format:   "yaml",
@@ -313,6 +313,9 @@ func TestRenderExternalRuleProviderPlan(t *testing.T) {
 					Interval: 86400,
 					Reason:   "User supplied qoli US proxy rule-provider.",
 				},
+			},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "⚡ 自动选择", Nodes: []string{"US 01"}, Mode: "auto"},
 			},
 		},
 	})
@@ -332,7 +335,7 @@ func TestRenderExternalRuleProviderPlan(t *testing.T) {
 		t.Fatalf("provider = %+v, want qoli url", provider)
 	}
 	rules := config["rules"].([]any)
-	if !containsRule(rules, "RULE-SET,US-Proxy,PROXY") {
+	if !containsRule(rules, "RULE-SET,US-Proxy,⚡ 自动选择") {
 		t.Fatalf("rules missing external provider rule: %+v", rules)
 	}
 	metadata := config["x-localclash"].(map[string]any)
@@ -768,7 +771,7 @@ func writePlanFixture(t *testing.T) planFixturePaths {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
   apple: Apple
@@ -780,17 +783,15 @@ provider_mapping:
   proxy:
     path: proxy.txt
     behavior: domain
-    target: proxy
+    target: direct
 modes:
   default: whitelist
   whitelist:
     rules:
       - provider: applications
         target: direct
-      - provider: proxy
-        target: proxy
       - match: true
-        target: proxy
+        target: direct
   blacklist:
     rules:
       - match: true

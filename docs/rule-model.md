@@ -186,10 +186,16 @@ custom policy.
 
 Examples:
 
-- whitelist mode: unmatched traffic goes `PROXY`
-- blacklist mode: unmatched traffic goes `DIRECT`
+- whitelist-style routing: unmatched traffic goes to an explicitly defined proxy or policy group
+- blacklist-style routing: unmatched traffic goes `DIRECT`
 
 Optional packs and overrides must be rendered before fallback.
+
+Targets are graph references, not Go-side aliases. The only terminal runtime
+actions are `DIRECT` and `REJECT`. Names such as `⚡ 自动选择`, `🎯 手动选择`,
+`DNSProxy`, and regional exits must be defined by the policy template or patch
+before any rule, rule-provider, pack, policy group, or DNS `#group` reference can
+use them.
 
 ## Renderer Contract
 

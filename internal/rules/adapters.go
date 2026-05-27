@@ -161,7 +161,7 @@ func adaptV2FlyDLC(ctx context.Context, source Source) (PackCache, error) {
 func adaptSyncnext(source Source) PackCache {
 	rawBaseURL := strings.TrimRight(source.RawBaseURL, "/")
 	packs := []Pack{
-		syncnextPack(source.ID, "SyncnextProxy", "Proxy domains maintained for Ronnie's apps", "PROXY", rawBaseURL+"/proxy-classical.yaml"),
+		syncnextPack(source.ID, "SyncnextProxy", "Proxy domains maintained for Ronnie's apps", "⚡ 自动选择", rawBaseURL+"/proxy-classical.yaml"),
 		syncnextPack(source.ID, "SyncnextUnbreak", "Direct/unbreak domains maintained for Ronnie's apps", "DIRECT", rawBaseURL+"/Unbreak-classical.yaml"),
 	}
 	return PackCache{Version: 1, Source: source.ID, Adapter: source.Adapter, Renderable: true, Packs: packs}

@@ -189,7 +189,7 @@ func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
 				"JP": {Mode: "auto", Nodes: []string{"JP Tokyo 01"}},
 			},
 			PolicyGroups: map[string]PolicyGroup{
-				"Steam": {Mode: "manual", Exits: []string{"HK", "JP", "direct"}},
+				"Steam": {Mode: "manual", Exits: []string{"HK", "JP", "DIRECT"}},
 			},
 			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "Steam"}},
 		},
@@ -206,6 +206,29 @@ func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
 	}
 	if len(resolved.PolicyGroups) != 1 || resolved.PolicyGroups[0].ExitCount != 3 {
 		t.Fatalf("resolved policy groups = %+v, want one group with three exits", resolved.PolicyGroups)
+	}
+}
+
+func TestResolveRejectsLowercaseTerminalPolicyExit(t *testing.T) {
+	dir := t.TempDir()
+	subscriptionPath := filepath.Join(dir, "subscription.gob")
+	writeTestFile(t, subscriptionPath, `proxies:
+  - name: HK 01
+    type: ss
+`)
+	_, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"HK": {Mode: "manual", Nodes: []string{"HK 01"}},
+			},
+			PolicyGroups: map[string]PolicyGroup{
+				"Steam": {Mode: "manual", Exits: []string{"HK", "direct"}},
+			},
+		},
+		SubscriptionPath: subscriptionPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), `policy group "Steam" exit "direct" requires a terminal action or matching proxy group`) {
+		t.Fatalf("error = %v, want lowercase terminal exit rejected", err)
 	}
 }
 
@@ -237,7 +260,7 @@ func TestResolveOptionalProxyGroupCanBeEmpty(t *testing.T) {
 				"韩国节点": {Mode: "auto", Match: &Match{Type: "name_regex", Pattern: "KR"}, Optional: true},
 			},
 			PolicyGroups: map[string]PolicyGroup{
-				"Steam": {Mode: "manual", Exits: []string{"香港节点", "韩国节点", "direct"}},
+				"Steam": {Mode: "manual", Exits: []string{"香港节点", "韩国节点", "DIRECT"}},
 			},
 			Packs: []Pack{{ID: "v2fly_dlc_steam", Target: "Steam"}},
 		},
@@ -327,7 +350,7 @@ func TestResolveEmitsStageTimings(t *testing.T) {
 				"香港节点": {Mode: "manual", Match: &Match{Type: "name_regex", Pattern: "HK"}},
 			},
 			PolicyGroups: map[string]PolicyGroup{
-				"Steam": {Mode: "manual", Exits: []string{"香港节点", "direct"}},
+				"Steam": {Mode: "manual", Exits: []string{"香港节点", "DIRECT"}},
 			},
 			Packs: []Pack{{ID: "blackmatrix7_Steam", Target: "Steam"}},
 		},

@@ -177,13 +177,13 @@ func assertMainlandReachableDNS(t *testing.T, mihomo map[string]any, listen stri
 			t.Fatalf("%s dns must not ship foreign DoT default %q: %+v", label, forbidden, dns)
 		}
 	}
-	globalResolvers := []any{"https://cloudflare-dns.com/dns-query#PROXY", "https://dns.google/dns-query#PROXY"}
+	globalResolvers := []any{"https://cloudflare-dns.com/dns-query#DNSProxy", "https://dns.google/dns-query#DNSProxy"}
 	if !reflect.DeepEqual(dns["fallback"], globalResolvers) {
-		t.Fatalf("%s dns fallback = %+v, want global DoH through PROXY %+v", label, dns["fallback"], globalResolvers)
+		t.Fatalf("%s dns fallback = %+v, want global DoH through DNSProxy %+v", label, dns["fallback"], globalResolvers)
 	}
 	policy, ok := dns["nameserver-policy"].(map[string]any)
 	if !ok || !reflect.DeepEqual(policy["geosite:gfw"], globalResolvers) {
-		t.Fatalf("%s dns nameserver-policy = %+v, want geosite:gfw through PROXY DoH", label, dns["nameserver-policy"])
+		t.Fatalf("%s dns nameserver-policy = %+v, want geosite:gfw through DNSProxy DoH", label, dns["nameserver-policy"])
 	}
 	filter, ok := dns["fallback-filter"].(map[string]any)
 	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || filter["geosite"] != nil {

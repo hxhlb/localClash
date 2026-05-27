@@ -31,7 +31,7 @@ func TestBootstrapBuildsRuntimeStateFromLocalArtifacts(t *testing.T) {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
   apple: Apple
@@ -47,7 +47,7 @@ modes:
       - provider: applications
         target: direct
       - match: true
-        target: proxy
+        target: direct
   blacklist:
     rules:
       - match: true
@@ -133,7 +133,7 @@ func TestBootstrapCanSkipGeneratedConfigRender(t *testing.T) {
 groups:
   direct: DIRECT
   reject: REJECT
-  proxy: PROXY
+  proxy: ⚡ 自动选择
   auto: ⚡ 自动选择
   manual: 🎯 手动选择
 modes:
@@ -141,7 +141,7 @@ modes:
   whitelist:
     rules:
       - match: true
-        target: proxy
+        target: direct
 `, 0o644)
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 

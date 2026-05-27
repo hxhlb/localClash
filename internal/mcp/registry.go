@@ -330,7 +330,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
-				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, a proxy group id built by proxy_group_build, or a policy group id built by policy_group_build."},
+				"target": map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id built by proxy_group_build, or a policy group id built by policy_group_build."},
 				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
 				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
 			},
@@ -358,7 +358,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"id":     map[string]any{"type": "string", "description": "Pack id, for example blackmatrix7_OpenAI, sukkaw_ai_non_ip, or v2fly_dlc_google."},
 				"type":   map[string]any{"type": "string", "enum": []string{"rule_provider", "geosite"}, "description": "Optional assertion for the catalog pack type. It validates the path but does not choose render behavior."},
-				"target": map[string]any{"type": "string", "description": "Desired rule target, for example DIRECT, REJECT, PROXY, or AI."},
+				"target": map[string]any{"type": "string", "description": "Desired rule target, for example DIRECT, REJECT, ⚡ 自动选择, or AI."},
 				"reason": map[string]any{"type": "string", "description": "Short durable reason for this pack routing choice."},
 			},
 			"required": []string{"id", "target"},
@@ -378,7 +378,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
-				"target": map[string]any{"type": "string", "description": "Built-in target such as DIRECT/REJECT/PROXY, a proxy group id, or a policy group id."},
+				"target": map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id, or a policy group id."},
 				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
 				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
 			},
@@ -420,7 +420,7 @@ func inputSchemaForTool(name string) map[string]any {
 				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 				"overlay": map[string]any{
 					"type":                 "object",
-					"description":          "Desired localClash overlay. If a target references a proxy group or policy group that is not already in durable localclash.json, include it in overlay.proxy_groups or overlay.policy_groups in this same call. policy_groups are business-layer entries whose exits point to proxy_groups or built-in targets.",
+					"description":          "Desired localClash overlay. If a target references a proxy group or policy group that is not already in durable localclash.json, include it in overlay.proxy_groups or overlay.policy_groups in this same call. policy_groups are business-layer entries whose exits point to proxy_groups or terminal targets.",
 					"additionalProperties": false,
 					"properties": map[string]any{
 						"packs":          map[string]any{"type": "array", "items": packIntent},
@@ -673,7 +673,7 @@ func ruleProviderInputSchema(idDescription string) map[string]any {
 		"additionalProperties": false,
 		"properties": map[string]any{
 			"id":       map[string]any{"type": "string", "description": idDescription},
-			"target":   map[string]any{"type": "string", "description": "Rule target such as DIRECT, REJECT, PROXY, a proxy group id, or a policy group id."},
+			"target":   map[string]any{"type": "string", "description": "Rule target such as DIRECT, REJECT, ⚡ 自动选择, a proxy group id, or a policy group id."},
 			"reason":   map[string]any{"type": "string", "description": "Short durable reason for this external provider."},
 			"type":     map[string]any{"type": "string", "enum": []string{"http", "file"}, "description": "Mihomo rule-provider type. Defaults to http."},
 			"behavior": map[string]any{"type": "string", "enum": []string{"classical", "domain", "ipcidr"}, "description": "Mihomo rule-provider behavior. Defaults to classical."},
@@ -693,7 +693,7 @@ func policyGroupInputSchema(idDescription string) map[string]any {
 		"properties": map[string]any{
 			"id":       map[string]any{"type": "string", "description": idDescription},
 			"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart"}, "description": "Desired policy-group mode. manual becomes a Dashboard select group over exits; auto becomes url-test over exits; smart becomes a smart group over exits."},
-			"exits":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exit targets for this business layer, for example HK, JP, US, ⚡ 自动选择, DIRECT, or PROXY. Non-built-in exits must be provided by overlay.proxy_groups or existing durable proxy_groups."},
+			"exits":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exit targets for this business layer, for example HK, JP, US, ⚡ 自动选择, or DIRECT. Non-terminal exits must be provided by overlay.proxy_groups or existing durable proxy_groups."},
 			"reason":   map[string]any{"type": "string", "description": "Short durable reason for this business routing group."},
 			"boundary": map[string]any{"type": "string", "description": "Boundary note, for example business_layer_selects_exit_groups."},
 		},

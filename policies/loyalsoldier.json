@@ -12,7 +12,7 @@
   "groups": {
     "direct": "DIRECT",
     "reject": "REJECT",
-    "proxy": "PROXY",
+    "proxy": "⚡ 自动选择",
     "auto": "⚡ 自动选择",
     "manual": "🎯 手动选择"
   },

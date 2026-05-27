@@ -50,13 +50,13 @@
         "119.29.29.29"
       ],
       "fallback": [
-        "https://cloudflare-dns.com/dns-query#PROXY",
-        "https://dns.google/dns-query#PROXY"
+        "https://cloudflare-dns.com/dns-query#DNSProxy",
+        "https://dns.google/dns-query#DNSProxy"
       ],
       "nameserver-policy": {
         "geosite:gfw": [
-          "https://cloudflare-dns.com/dns-query#PROXY",
-          "https://dns.google/dns-query#PROXY"
+          "https://cloudflare-dns.com/dns-query#DNSProxy",
+          "https://dns.google/dns-query#DNSProxy"
         ]
       },
       "fallback-filter": {
