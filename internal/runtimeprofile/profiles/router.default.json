@@ -1,5 +1,5 @@
 {
-  "description": "Router transparent proxy based on Ronnie's redir-host-mix defaults.",
+  "description": "Router transparent proxy profile with mainland-reachable DNS and no direct foreign DoT fallback.",
   "mihomo": {
     "mixed-port": 7893,
     "redir-port": 7892,
@@ -50,13 +50,13 @@
         "119.29.29.29"
       ],
       "fallback": [
-        "tls://1.1.1.1",
-        "tls://8.8.8.8"
+        "https://cloudflare-dns.com/dns-query#PROXY",
+        "https://dns.google/dns-query#PROXY"
       ],
       "nameserver-policy": {
         "geosite:gfw": [
-          "tls://1.1.1.1",
-          "tls://8.8.8.8"
+          "https://cloudflare-dns.com/dns-query#PROXY",
+          "https://dns.google/dns-query#PROXY"
         ]
       },
       "fallback-filter": {

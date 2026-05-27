@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -126,26 +127,7 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		t.Fatalf("router geox-url = %+v, want Loyalsoldier geosite.dat", geoxURL)
 	}
 
-	dns := mihomo["dns"].(map[string]any)
-	if dns["enhanced-mode"] != "redir-host" || dns["listen"] != "0.0.0.0:7874" || dns["respect-rules"] != true {
-		t.Fatalf("router dns = %+v, want redir-host dns on 0.0.0.0:7874 with respect-rules", dns)
-	}
-	for _, key := range []string{"nameserver", "proxy-server-nameserver", "direct-nameserver", "default-nameserver"} {
-		if strings.Contains(fmt.Sprint(dns[key]), "127.0.0.1:5335") {
-			t.Fatalf("router dns %s = %+v, must not depend on Ronnie's local mosDNS", key, dns[key])
-		}
-	}
-	if !strings.Contains(fmt.Sprint(dns["fallback"]), "tls://1.1.1.1") || !strings.Contains(fmt.Sprint(dns["fallback"]), "tls://8.8.8.8") {
-		t.Fatalf("router dns fallback = %+v, want global encrypted fallback resolvers", dns["fallback"])
-	}
-	filter, ok := dns["fallback-filter"].(map[string]any)
-	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || filter["geosite"] != nil {
-		t.Fatalf("router dns fallback-filter = %+v, want geoip CN and no deprecated geosite filter", dns["fallback-filter"])
-	}
-	policy, ok := dns["nameserver-policy"].(map[string]any)
-	if !ok || !strings.Contains(fmt.Sprint(policy["geosite:gfw"]), "tls://1.1.1.1") || !strings.Contains(fmt.Sprint(policy["geosite:gfw"]), "tls://8.8.8.8") {
-		t.Fatalf("router dns nameserver-policy = %+v, want geosite:gfw to use global encrypted resolvers", dns["nameserver-policy"])
-	}
+	assertMainlandReachableDNS(t, mihomo, "0.0.0.0:7874", "router")
 	if _, ok := mihomo["interface-name"]; ok {
 		t.Fatalf("router default must not pin Ronnie's WAN device: %+v", mihomo["interface-name"])
 	}
@@ -162,6 +144,50 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 	}
 	if _, ok := profile.Deploy["wan-interface"]; ok {
 		t.Fatalf("router deploy must not pin Ronnie's WAN interface: %+v", profile.Deploy)
+	}
+}
+
+func assertMainlandReachableDNS(t *testing.T, mihomo map[string]any, listen string, label string) {
+	t.Helper()
+	dns, ok := mihomo["dns"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s profile must define DNS defaults", label)
+	}
+	if dns["enhanced-mode"] != "redir-host" || dns["listen"] != listen || dns["respect-rules"] != true {
+		t.Fatalf("%s dns = %+v, want redir-host dns on %s with respect-rules", label, dns, listen)
+	}
+	for _, key := range []string{"nameserver", "proxy-server-nameserver", "direct-nameserver", "default-nameserver"} {
+		if strings.Contains(fmt.Sprint(dns[key]), "127.0.0.1:5335") {
+			t.Fatalf("%s dns %s = %+v, must not depend on Ronnie's local mosDNS", label, key, dns[key])
+		}
+	}
+	for key, want := range map[string][]any{
+		"nameserver":              {"https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"},
+		"proxy-server-nameserver": {"https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"},
+		"direct-nameserver":       {"https://dns.alidns.com/dns-query", "https://doh.pub/dns-query"},
+		"default-nameserver":      {"223.5.5.5", "119.29.29.29"},
+	} {
+		if !reflect.DeepEqual(dns[key], want) {
+			t.Fatalf("%s dns %s = %+v, want mainland-reachable defaults %+v", label, key, dns[key], want)
+		}
+	}
+	dnsText := fmt.Sprint(dns)
+	for _, forbidden := range []string{"tls://1.1.1.1", "tls://8.8.8.8", "1.1.1.1:853", "8.8.8.8:853"} {
+		if strings.Contains(dnsText, forbidden) {
+			t.Fatalf("%s dns must not ship foreign DoT default %q: %+v", label, forbidden, dns)
+		}
+	}
+	globalResolvers := []any{"https://cloudflare-dns.com/dns-query#PROXY", "https://dns.google/dns-query#PROXY"}
+	if !reflect.DeepEqual(dns["fallback"], globalResolvers) {
+		t.Fatalf("%s dns fallback = %+v, want global DoH through PROXY %+v", label, dns["fallback"], globalResolvers)
+	}
+	policy, ok := dns["nameserver-policy"].(map[string]any)
+	if !ok || !reflect.DeepEqual(policy["geosite:gfw"], globalResolvers) {
+		t.Fatalf("%s dns nameserver-policy = %+v, want geosite:gfw through PROXY DoH", label, dns["nameserver-policy"])
+	}
+	filter, ok := dns["fallback-filter"].(map[string]any)
+	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || filter["geosite"] != nil {
+		t.Fatalf("%s dns fallback-filter = %+v, want geoip CN and no deprecated geosite filter", label, dns["fallback-filter"])
 	}
 }
 
