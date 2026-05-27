@@ -2,7 +2,7 @@
 
 ## 1. 项目概要
 
-localClash 是一个 Go 1.24 编写的 Mihomo 运行时管理工具（`internal/` 下一级包 22 个，Go 源文件 67 个，测试文件 31 个），通过 MCP（Model Context Protocol）接口让 AI Agent 管理本地代理运行时。项目运行于本地机器、NAS、家庭服务器或 OpenWrt 路由器上，负责 Mihomo 内核的下载、配置生成、运行生命周期管理以及路由器透明代理（redir-host-mix）接管。
+localClash 是一个 Go 1.24 编写的 Mihomo 运行时管理工具（`internal/` 下一级包 22 个，非测试 Go 源文件 36 个，测试文件 31 个），通过 MCP（Model Context Protocol）接口让 AI Agent 管理本地代理运行时。项目运行于本地机器、NAS、家庭服务器或 OpenWrt 路由器上，负责 Mihomo 内核的下载、配置生成、运行生命周期管理以及路由器透明代理（redir-host-mix）接管。
 
 ### 核心设计原则
 
@@ -213,6 +213,77 @@ generated/mihomo.yaml
 
 ## 6. 架构问题与改进建议
 
+本节不把“文件长度”或“代码重复”作为主要排序依据。localClash 的主要风险来自它运行在资源受限路由器上，并且会改变代理进程、防火墙、DNS 和策略路由状态。因此改善目标应按产品安全、可观测性、热路径成本和配置事务性排序。
+
+### 6.0 应该完成的改善目标
+
+#### P0：让路由器运行状态始终可观察、可恢复
+
+目标不是增加更多日志，而是让真实路由器上的事故能被复盘：
+
+- MCP HTTP、runtime start/restart、config render、patch apply、router takeover apply/stop 都应有持久、有限大小、可通过 MCP 读取的阶段日志。
+- LuCI、deploy script、procd service 等部署路径应一致保留已有 stderr request summary，避免只在某个安装方式下可观察。
+- `run_runtime` / `restart_runtime` 与 `router_takeover_apply` / `router_takeover_stop` 必须继续分离，不能为了“一键接管”把 Mihomo 进程状态和 OpenWrt 网络状态合成一个不透明动作。
+- 路由器接管失败时要留下可执行的恢复指引，且不写入持久 firewall 配置；重启路由器应能清除 runtime takeover 状态。
+
+完成标准：
+
+- 一次失败的 router takeover 或 runtime restart，可以仅凭 MCP task log、service log 和 status artifact 判断卡在 config test、process start、TUN ready、nft chain、DNS hijack 还是 verification。
+- 发布默认仍保持轻量：没有无界日志、没有高频轮询、没有默认 verbose。
+
+#### P1：让热路径成本有上限，并能重复测量
+
+`index.gob` runtime contract 已经把主要 `localconfig.Resolve` 热点从十秒级降到秒内；后续目标应转向仍然昂贵或容易回归的路径：
+
+- 为 Mihomo `-t` 建立验证缓存，缓存维度至少包含 generated config SHA-256、core 类型/版本、验证时间和结果。
+- generated config 与 core 未变化时，`restart_runtime` 应复用已通过的验证结果；配置变更后的第一次验证仍保留 `mihomo -t`。
+- 整理订阅 source artifact 状态，避免 `.runtime/subscriptions/<source>.gob` 长期缺失时隐式 fallback 到 `subscription.gob`。
+- 固化真机或 OpenWrt VM 的 MCP performance smoke 脚本，记录工具耗时、阶段耗时、localClash/Mihomo/背景 Clash CPU、输出 JSON artifact。
+
+完成标准：
+
+- 基础 `routing_explain` 保持 2s 内，完整证据模式可以更慢但必须显式标记。
+- 无配置变更的 `restart_runtime` 目标低于 3s。
+- `config_render`、`config_patch_create/apply`、`routing_explain` 的阶段耗时有可重复的 smoke 结果，避免再次把 CPU 问题归因到“整个 MCP server 很贵”。
+
+#### P2：把配置生命周期做成显式事务
+
+localClash 的核心产品价值是“Agent 产生意图，localClash 编译为 Mihomo 配置”。因此配置生命周期不能有隐藏写入或部分提交：
+
+- `Bootstrap()` 不应在普通进程启动时静默重写 `generated/mihomo.yaml`；最多只允许首次引导生成，或完全改由 `config_render` / patch apply 显式触发。
+- `config_patch_apply` 应改成 temp+fsync+rename 的原子提交模型，三个输出文件全部准备成功后再切换 active state。
+- 失败时应能明确回答：active config 未变、candidate 已保存、backup 在哪里、下一步如何重试或恢复。
+- `config_status`、`doctor --json` 和 patch task log 应能表达当前 durable intent、generated artifact 和 validation metadata 是否一致。
+
+完成标准：
+
+- 不存在“进程启动就改 generated config”的常规路径。
+- patch apply 任意一步失败后，不会留下 localclash.json、packs gob、generated yaml 互相不匹配的 active 状态。
+
+#### P3：收敛产品入口与 Agent 工具面
+
+当前 MCP 工具面已经能覆盖观察、规划、patch、运行和接管，但入口代码仍有可维护性风险：
+
+- 统一 CLI 产品入口，明确 legacy/internal command 的边界，避免两套路由、两套默认值和两套测试门禁继续扩张。
+- 抽取 MCP 参数解析 helper，减少 `server.go` 中重复 `json.Unmarshal(args, &in)` 的样板，但不要引入过重 framework。
+- 保留各核心 package 的 StageEvent 输出契约；只有当重复结构妨碍日志汇总时，再抽薄 helper。
+
+完成标准：
+
+- 新增 MCP 工具时，registry metadata、JSON schema、server dispatch、安全级别和测试能按固定模板落地。
+- CLI usage 不再依赖“rewrite 期间 legacy command 暂存”的叙述。
+
+#### P4：暂时挂起，发布版本后提供本地 rule pack 能力支持
+
+规则模型文档已经定义 5 层优先级：安全基线、用户 override、可选 rule pack、policy template patch、fallback。当前第 3 层 standalone local rule pack 仍是目标契约，不是已完成能力。
+
+当前决策：
+
+- 发布前暂时不把 `rule-packs/*.json` 本地规则包作为必须完成项。
+- 当前版本优先完成路由器可观测性、热路径成本上限、配置事务化和入口收敛。
+- 发布版本后再提供本地 rule pack 能力支持，并确保 UI / Agent 写入 durable localClash intent，而不是直接 patch `generated/mihomo.yaml`。
+- 后续实现时，optional pack 与 policy template patch 仍应在文档、MCP 输出和渲染顺序中保持可解释。
+
 ### 6.1 Stage 事件代码重复（优先级：低）
 
 **问题**：五个包（`localconfig`、`configrender`、`configplan`、`subscriptions`、`routertakeover`）各自定义了 `StageEvent` 类型和 emitter 函数，结构几乎相同。
@@ -253,7 +324,9 @@ func configPlanStageEmitter(...) { ... }
 
 **说明**：`internal/localconfig/config.go` 约 1220 行，覆盖 durable config 类型、节点加载、Gob 读取、proxy/policy group 解析、pack/custom rule/rule provider 验证等逻辑。它承担的是 localClash intent 解析边界，当前仍是一个可追踪的责任域。
 
-**决策**：暂不处理。优先解决 `localconfig.Resolve` 的真实性能/缓存问题，不把文件拆分作为独立目标。
+**当前状态**：`localconfig.Resolve` 的主要性能瓶颈已经通过 `index.gob` runtime contract 收敛，常见 config/routing 解析路径从十秒级降到秒内。因此不应再把“拆分 config.go”当成解决 CPU 问题的前置动作。
+
+**决策**：暂不处理。后续只在修改同一区域时顺手改善局部可读性；真正的性能目标转向 Mihomo `-t` 验证缓存、订阅 source artifact 状态整理和可重复 performance smoke。
 
 ### 6.5 `main.go` / `product_cli.go` 偏长（暂不处理）
 
@@ -261,7 +334,7 @@ func configPlanStageEmitter(...) { ... }
 
 **决策**：不因行数本身拆分文件。双 CLI 系统本身造成的产品入口和测试门禁问题另见 6.13。
 
-### 6.6 规则层第 3 层为设计目标，尚未完全落地（优先级：中）
+### 6.6 规则层第 3 层为设计目标，发布后支持（暂时挂起）
 
 **说明**：`docs/rule-model.md` 定义的 5 层规则优先级是目标契约，其中第 3 层"可选规则包"（standalone `rule-packs/*.json`）在当前代码中尚未实现。文档自身也明确写明了这一状态：
 
@@ -269,24 +342,24 @@ func configPlanStageEmitter(...) { ... }
 
 当前渲染器实际为 `baseline + fragment(custom_rules/packs/external_providers) + MATCH,DIRECT`（`buildOrderedRules()`），所有用户侧内容通过同一个 `RenderFragment` 渲染。
 
-**建议**：按 `rule-model.md` 的开发计划，在第 2 步（routing_explain 已完成）之后启动第 3 步：添加 `rule-packs/*.json` 本地规则包文件支持，使第 3 层成为独立可选项。
+**决策**：暂时挂起，不作为发布前必须完成的改善目标。发布版本后再添加 `rule-packs/*.json` 本地规则包文件支持，使第 3 层成为独立可选项。
 
 ### 6.7 `stringValue` / `anyMapSlice` 等工具函数重复（优先级：低）
 
 **问题**：`stringValue`、`anyMapSlice`、`appendUnique` 等工具函数在 `localconfig`、`configrender`、`rules` 中都有独立定义。
 
-**建议**：抽取到公共包（如 `internal/x` 或直接使用 Go 泛型）。
+**建议**：只有当重复逻辑继续扩张或开始出现不一致行为时，才抽取到极薄的公共 helper。不要为了消除几处小函数重复而引入通用工具包依赖，避免核心 package 边界变模糊。
 
 ### 6.8 测试覆盖以单元测试为主，缺少集成级风险导向测试（优先级：中）
 
-**现状**：项目已有 31 个 `*_test.go` 文件，覆盖 23 个 package，`go test ./...` 全部通过（280 passed）。测试涵盖 MCP registry、安全分级、config render、config plan、localconfig、router takeover 等核心模块。
+**现状**：项目已有 31 个 `*_test.go` 文件，覆盖 23 个 package；本次复核 `go test ./...` 通过（280 passed）。测试涵盖 MCP registry、安全分级、config render、config plan、localconfig、router takeover 等核心模块。
 
 **不足**：
 - 缺少跨模块的集成测试（如完整的 subscribe → configure → render → validate 流程）
-- 缺少 router takeover 的端到端测试
+- 缺少 router takeover 的真机/VM smoke 测试
 - 缺少 patch apply 失败、部分写入、回滚/原子性等风险路径测试
 
-**建议**：补充关键路径的集成测试和回归保护。
+**建议**：补充关键路径的集成测试和回归保护，优先覆盖 P0-P2 目标：runtime restart 验证缓存、patch apply 原子性、bootstrap 不静默写入、router takeover 状态验证、MCP performance smoke 输出格式。
 
 ### 6.9 配置版本迁移路径（不构成当前问题）
 
@@ -298,7 +371,7 @@ func configPlanStageEmitter(...) { ... }
 
 **问题**：`config_patch_apply` 在备份后顺序写入三个文件（`localclash.json` → `localclash-packs.gob` → `generated/mihomo.yaml`），如果中途失败，已写入的文件不回滚，可能留下部分更新的状态。create/review 阶段是完全隔离的，但 apply 阶段不是 temp+rename 原子提交。
 
-**建议**：改为先写到临时文件，全部成功后 rename，失败时回滚。
+**建议**：改为先写到临时文件，全部成功后 fsync+rename，失败时保持 active state 不变。这个目标应高于单纯的 CLI 拆分或工具函数去重，因为它直接影响 Agent 修改配置时的可恢复性。
 
 ### 6.11 MCP server 中 json.Unmarshal(args, ...) 样板代码严重（优先级：中）
 
@@ -314,15 +387,15 @@ func configPlanStageEmitter(...) { ... }
 - 绕过了 create-review-apply 审查流程
 - Bootstrap 本应是只读初始化，却执行了写操作
 
-**建议**：将 bootstrap 中的 config render 改为仅在 `generated/mihomo.yaml` 不存在时才自动生成（首次启动引导），或者完全移除，改为由 Agent 通过 `config_render` MCP 工具显式触发。
+**建议**：将 bootstrap 中的 config render 改为仅在 `generated/mihomo.yaml` 不存在时才自动生成（首次启动引导），或者完全移除，改为由 Agent 通过 `config_render` MCP 工具显式触发。长期目标是让 bootstrap 成为只读状态组装，所有写入都进入明确的配置生命周期。
 
 ### 6.13 双 CLI 系统造成产品入口和测试门禁断裂（优先级：高）
 
 **问题**：`main.go`（765 行）和 `product_cli.go`（1105 行）共同承担 CLI 命令路由和产品命令实现，`main.go` 的 usage 也仍保留 "Legacy/internal commands still available during the CLI rewrite"。这不是单纯文件长度问题，而是当前存在两套命令入口、两套默认值/状态组装路径、两套测试覆盖面的产品边界问题。
 
-当前验证结果也已经暴露红灯：`go build ./...` 可通过，但 `go test -count=1 ./...` 失败在 `internal/appinit.TestBootstrapBuildsRuntimeStateFromLocalArtifacts`，说明 bootstrap/CLI/runtime state 的整合门禁已经不干净。若另一路 CLI 变更继续扩张，这类断裂会更难定位。
+当前 `go test ./...` 已通过，说明门禁没有处于红灯状态。但双入口仍会放大 bootstrap、runtime profile、MCP execution tool 和 product command 之间的行为漂移风险。若另一路 CLI 继续扩张，后续问题会更难定位。
 
-**建议**：统一 CLI 入口，将 product_cli.go 的命令合并到 main.go 或拆分到 `internal/cli/`。
+**建议**：统一 CLI 入口，将 product_cli.go 的命令合并到 main.go 或拆分到 `internal/cli/`。排序上应放在 bootstrap 隐式写入、patch apply 原子性、Mihomo 验证缓存之后；它是产品边界收敛目标，不是当前最急的路由器安全问题。
 
 ---
 
@@ -354,12 +427,12 @@ localClash 的架构设计体现了清晰的系统工程思维：
 - **MCP 原生设计**让 AI Agent 可以安全地观察、规划、审查和应用配置变更
 - **安全基线硬编码**保证了本地网络在错误配置下的稳定性
 
-主要改进方向：
-1. **修复双 CLI 系统导致的产品入口和测试门禁断裂**（6.13）
-2. **Bootstrap 不应静默写入 generated/mihomo.yaml**（6.12）
-3. **减少 MCP server 中 31 次 json.Unmarshal 样板**（6.11）
-4. config_patch_apply 改为 temp+rename 原子事务提交（6.10）
-5. 补充关键路径的集成测试
-6. 按文档计划添加本地 rule pack 支持
+应该完成的改善目标：
+1. **路由器运行状态可观察、可恢复**：统一保留 MCP/runtime/takeover 阶段日志，让真机事故能从 artifact 复盘（6.0 P0）
+2. **热路径成本有上限**：保留 `index.gob` 成果，继续做 Mihomo `-t` 验证缓存、订阅 artifact 整理和 performance smoke（6.0 P1）
+3. **配置生命周期显式事务化**：Bootstrap 不静默写入 generated config，`config_patch_apply` 改为 temp+fsync+rename 原子提交（6.0 P2、6.10、6.12）
+4. **产品入口收敛**：统一 CLI 边界，减少 MCP 参数解析样板，但不为消除小重复牺牲核心 package 边界（6.0 P3、6.11、6.13）
+5. **发布后补齐用户可配置规则层**：本地 rule pack 支持暂时挂起，发布版本后再让 optional pack 成为独立 UI/Agent 自定义层（6.0 P4、6.6）
+6. **补充风险导向测试**：优先覆盖 patch apply 原子性、bootstrap 写入边界、restart 验证缓存、router takeover smoke 和 MCP performance smoke（6.8）
 
 整体而言，项目在 33 个 MCP 工具、4 个规则适配器、2 种运行时模式、2 套策略模板的复杂度下，保持了良好的模块边界和一致的设计模式。
