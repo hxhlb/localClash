@@ -109,6 +109,15 @@ type ConfiguredSource struct {
 	URL string `json:"url"`
 }
 
+type GetResult struct {
+	Config     string             `json:"config"`
+	Configured bool               `json:"configured"`
+	Sources    []ConfiguredSource `json:"sources"`
+	URLs       []string           `json:"urls"`
+	Count      int                `json:"count"`
+	Message    string             `json:"message,omitempty"`
+}
+
 type RefreshResult struct {
 	Refreshed bool                   `json:"refreshed"`
 	Sources   []RefreshSourceSummary `json:"sources"`
@@ -184,6 +193,28 @@ func Status(opts StatusOptions) (StatusResult, error) {
 		})
 	}
 	result.Merged = summarizeArtifact(opts.MergedPath)
+	return result, nil
+}
+
+func Get(opts StatusOptions) (GetResult, error) {
+	opts = normalizeStatusOptions(opts)
+	result := GetResult{
+		Config: opts.ConfigPath,
+	}
+	config, err := readConfig(opts.ConfigPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			result.Message = "subscription sources are not configured; ask the user for one or more subscription URLs, then run subscriptions_configure"
+			return result, nil
+		}
+		return GetResult{}, err
+	}
+	result.Configured = true
+	for _, source := range config.Sources {
+		result.Sources = append(result.Sources, ConfiguredSource{ID: source.ID, URL: source.URL})
+		result.URLs = append(result.URLs, source.URL)
+	}
+	result.Count = len(result.Sources)
 	return result, nil
 }
 

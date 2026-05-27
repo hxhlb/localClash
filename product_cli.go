@@ -148,7 +148,7 @@ func runProductStatus(args []string, state appinit.RuntimeState) error {
 
 func runProductSubscription(args []string, state appinit.RuntimeState) error {
 	if len(args) == 0 {
-		return fmt.Errorf("subscription subcommand is required: status, set, or refresh")
+		return fmt.Errorf("subscription subcommand is required: status, get, set, or refresh")
 	}
 	switch args[0] {
 	case "status":
@@ -160,6 +160,15 @@ func runProductSubscription(args []string, state appinit.RuntimeState) error {
 			return err
 		}
 		return printProductOK(productEnvelope{OK: true, Summary: "Subscription status read.", Status: result, Changes: []string{}, Warnings: []string{}})
+	case "get":
+		if err := parseJSONOnly("subscription get", args[1:]); err != nil {
+			return err
+		}
+		result, err := subscriptions.Get(subscriptionStatusOptions(state))
+		if err != nil {
+			return err
+		}
+		return printProductOK(productEnvelope{OK: true, Summary: "Subscription sources read.", Status: result, Changes: []string{}, Warnings: []string{}})
 	case "set":
 		input, err := parseSubscriptionInput(args[1:])
 		if err != nil {

@@ -38,12 +38,14 @@ type Result struct {
 }
 
 type StatusResult struct {
-	Installed     bool     `json:"installed"`
-	Path          string   `json:"path"`
-	Missing       []string `json:"missing,omitempty"`
-	Policy        string   `json:"policy,omitempty"`
-	Default       string   `json:"default_template,omitempty"`
-	RuleSourceDir string   `json:"rule_source_dir,omitempty"`
+	Installed               bool     `json:"installed"`
+	Path                    string   `json:"path"`
+	Missing                 []string `json:"missing,omitempty"`
+	Policy                  string   `json:"policy,omitempty"`
+	Default                 string   `json:"default_template,omitempty"`
+	DefaultPatchCount       int      `json:"default_patch_count,omitempty"`
+	DefaultPatchesInstalled bool     `json:"default_patches_installed,omitempty"`
+	RuleSourceDir           string   `json:"rule_source_dir,omitempty"`
 }
 
 type manifest struct {
@@ -141,13 +143,18 @@ func Status(outputDir string) StatusResult {
 	if !hasJSONFile(result.RuleSourceDir) {
 		result.Missing = append(result.Missing, "rule-sources/*.json")
 	}
-	for _, patch := range defaultPatchPaths(result.Default) {
+	defaultPatchesInstalled := true
+	patches := defaultPatchPaths(result.Default)
+	result.DefaultPatchCount = len(patches)
+	for _, patch := range patches {
 		path := filepath.Join(outputDir, "policy-templates", patch)
 		if !regularFile(path) {
+			defaultPatchesInstalled = false
 			result.Missing = append(result.Missing, rel(outputDir, path))
 		}
 	}
 	result.Installed = len(result.Missing) == 0
+	result.DefaultPatchesInstalled = result.Installed && result.DefaultPatchCount > 0 && defaultPatchesInstalled
 	return result
 }
 

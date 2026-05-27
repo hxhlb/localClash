@@ -28,6 +28,7 @@ const usage = `localclash
 Usage:
   localclash status --json
   localclash subscription status --json
+  localclash subscription get --json
   localclash subscription set --input subscriptions.json --json
   localclash subscription refresh --json
   localclash component status --json

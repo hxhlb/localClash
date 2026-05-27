@@ -45,6 +45,9 @@ func TestInstallDownloadsAndExtractsBaseAssets(t *testing.T) {
 	if !status.Installed {
 		t.Fatalf("status = %+v, want installed", status)
 	}
+	if status.DefaultPatchCount != 1 || !status.DefaultPatchesInstalled {
+		t.Fatalf("default patch status = count %d installed %v, want 1/true", status.DefaultPatchCount, status.DefaultPatchesInstalled)
+	}
 }
 
 func TestStatusReportsMissingJSONAssets(t *testing.T) {

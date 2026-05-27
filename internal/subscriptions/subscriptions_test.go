@@ -75,9 +75,10 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	replace := true
 	url1 := "https://example.com/sub?token=secret-token"
 	url2 := "https://example.net/path/profile?token=backup-secret"
+	config := filepath.Join(dir, "localclash-subscriptions.json")
 
 	result, err := Configure(ConfigureOptions{
-		ConfigPath: filepath.Join(dir, "localclash-subscriptions.json"),
+		ConfigPath: config,
 		Replace:    &replace,
 		URLs:       []string{url1, url2},
 	})
@@ -95,6 +96,14 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 		t.Fatal("config should contain the real URL token on disk")
 	}
 	assertNoTokenLeak(t, result)
+
+	raw, err := Get(StatusOptions{ConfigPath: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Count != 2 || len(raw.URLs) != 2 || raw.URLs[0] != url1 || raw.URLs[1] != url2 {
+		t.Fatalf("get = %+v, want original URLs", raw)
+	}
 }
 
 func TestConfigureRejectsInvalidInputs(t *testing.T) {
