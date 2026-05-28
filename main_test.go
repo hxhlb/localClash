@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/gob"
 	"encoding/json"
 	"io"
@@ -12,7 +13,10 @@ import (
 	"strings"
 	"testing"
 
+	"localclash/internal/appinit"
+	"localclash/internal/coredownload"
 	"localclash/internal/rules"
+	"localclash/internal/runtimeprofile"
 
 	"gopkg.in/yaml.v3"
 )
@@ -289,6 +293,122 @@ proxy_groups:
 	}
 }
 
+func TestRunProductComponentUpdateMihomoRefreshesCoreVersionCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	core := filepath.Join(dir, runtimeprofile.MetaCorePath)
+	oldDownloadCore := downloadCore
+	downloadCore = func(ctx context.Context, opts coredownload.Options) ([]coredownload.Result, error) {
+		writeMainExecutableCore(t, core, "Mihomo component update")
+		return []coredownload.Result{{OutputPath: core, Flavor: coredownload.FlavorMeta, Target: opts.Target}}, nil
+	}
+	t.Cleanup(func() {
+		downloadCore = oldDownloadCore
+	})
+
+	output := captureStdout(t, func() error {
+		return run([]string{"component", "update", "mihomo", "--json"})
+	})
+	var result struct {
+		OK       bool     `json:"ok"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("component update JSON = %q, error = %v", output, err)
+	}
+	if !result.OK || len(result.Warnings) != 0 {
+		t.Fatalf("component update result = %+v, want ok without cache warning", result)
+	}
+	cache := readMainCoreCache(t, appinit.CoreVersionCachePath(filepath.Join(dir, ".runtime")))
+	if cache.CorePath != core || cache.Version != "Mihomo component update" {
+		t.Fatalf("cache = %+v, want refreshed component update core %s", cache, core)
+	}
+}
+
+func TestExecuteDesiredConfigRefreshesCoreVersionCacheAfterRuntimeProfileSwitch(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	meta := filepath.Join(dir, runtimeprofile.MetaCorePath)
+	smart := filepath.Join(dir, runtimeprofile.SmartCorePath)
+	writeMainExecutableCore(t, meta, "Mihomo meta")
+	writeMainExecutableCore(t, smart, "Mihomo smart")
+	state := appinit.Bootstrap(context.Background(), appinit.Options{})
+
+	changed, warnings, err := executeDesiredConfig(context.Background(), &desiredConfig{
+		RuntimeProfile: runtimeprofile.ModeRouter,
+		Core:           runtimeprofile.CoreSmart,
+	}, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || len(warnings) != 0 {
+		t.Fatalf("changed=%v warnings=%v, want profile switch without warnings", changed, warnings)
+	}
+	cache := readMainCoreCache(t, appinit.CoreVersionCachePath(filepath.Join(dir, ".runtime")))
+	if cache.CorePath != smart || cache.Version != "Mihomo smart" || !cache.SmartSupported {
+		t.Fatalf("cache = %+v, want smart core refresh", cache)
+	}
+}
+
+func TestRunProductRuntimeStartRefreshesCoreVersionCache(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	core := filepath.Join(dir, runtimeprofile.MetaCorePath)
+	writeMainExecutableCore(t, core, "Mihomo runtime start")
+	writeMainCoreCache(t, appinit.CoreVersionCachePath(filepath.Join(dir, ".runtime")), core, "Mihomo stale")
+	config := filepath.Join(dir, "generated", "mihomo.yaml")
+	writeMainTestFile(t, config, "mixed-port: 7890\n")
+
+	output := captureStdout(t, func() error {
+		return run([]string{"runtime", "start", "--json"})
+	})
+	var result struct {
+		OK     bool `json:"ok"`
+		Status struct {
+			PID int `json:"pid"`
+		} `json:"status"`
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("runtime start JSON = %q, error = %v", output, err)
+	}
+	if result.Status.PID > 0 {
+		t.Cleanup(func() {
+			if process, err := os.FindProcess(result.Status.PID); err == nil {
+				_ = process.Kill()
+				_, _ = process.Wait()
+			}
+		})
+	}
+	if !result.OK || result.Status.PID == 0 {
+		t.Fatalf("runtime start result = %+v, want started runtime", result)
+	}
+	cache := readMainCoreCache(t, appinit.CoreVersionCachePath(filepath.Join(dir, ".runtime")))
+	if cache.CorePath != core || cache.Version != "Mihomo runtime start" {
+		t.Fatalf("cache = %+v, want runtime start refresh", cache)
+	}
+}
+
+func TestRunDoctorUsesLiveCoreProbeWhenBootstrapUsesCachedVersion(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	core := filepath.Join(dir, runtimeprofile.MetaCorePath)
+	countPath := filepath.Join(dir, "version-count")
+	writeMainCountingCore(t, core, countPath, "Mihomo doctor live")
+	writeMainCoreCache(t, appinit.CoreVersionCachePath(filepath.Join(dir, ".runtime")), core, "Mihomo cached")
+
+	_ = captureStdout(t, func() error {
+		return run([]string{"doctor", "--json"})
+	})
+	if got := readMainCount(t, countPath); got != 1 {
+		t.Fatalf("doctor core -v count = %d, want 1 live probe", got)
+	}
+}
+
 func startFakeRuntime(t *testing.T, core, workDir, config string) *exec.Cmd {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(core), 0o755); err != nil {
@@ -306,6 +426,90 @@ func startFakeRuntime(t *testing.T, core, workDir, config string) *exec.Cmd {
 		_, _ = cmd.Process.Wait()
 	})
 	return cmd
+}
+
+type mainCoreCache struct {
+	CorePath       string `json:"core_path"`
+	Version        string `json:"version"`
+	SmartSupported bool   `json:"smart_supported"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
+func writeMainExecutableCore(t *testing.T, path, version string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"-v\" ]; then echo " + strconv.Quote(version) + "; exit 0; fi\n" +
+		"for arg in \"$@\"; do if [ \"$arg\" = \"-t\" ]; then echo ok; exit 0; fi; done\n" +
+		"sleep 300\n"
+	writeMainTestFile(t, path, script)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMainCountingCore(t *testing.T, path, countPath, version string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"-v\" ]; then\n" +
+		"  count=0\n" +
+		"  [ -f " + strconv.Quote(countPath) + " ] && count=$(cat " + strconv.Quote(countPath) + ")\n" +
+		"  count=$((count + 1))\n" +
+		"  echo \"$count\" > " + strconv.Quote(countPath) + "\n" +
+		"  echo " + strconv.Quote(version) + "\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"for arg in \"$@\"; do if [ \"$arg\" = \"-t\" ]; then echo ok; exit 0; fi; done\n" +
+		"sleep 300\n"
+	writeMainTestFile(t, path, script)
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMainCoreCache(t *testing.T, path, corePath, version string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cache := mainCoreCache{
+		CorePath:       corePath,
+		Version:        version,
+		SmartSupported: strings.Contains(strings.ToLower(version), "smart"),
+		UpdatedAt:      "2026-05-28T09:00:00Z",
+	}
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readMainCoreCache(t *testing.T, path string) mainCoreCache {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cache mainCoreCache
+	if err := json.Unmarshal(data, &cache); err != nil {
+		t.Fatal(err)
+	}
+	return cache
+}
+
+func readMainCount(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 func TestRunStopRemovesStalePIDFile(t *testing.T) {

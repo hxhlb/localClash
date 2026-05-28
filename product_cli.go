@@ -54,6 +54,8 @@ type codedProductError struct {
 	nextActions []string
 }
 
+var downloadCore = coredownload.Download
+
 func (err codedProductError) Error() string {
 	return err.message
 }
@@ -254,7 +256,7 @@ func runProductComponentUpdate(args []string, state appinit.RuntimeState) error 
 		}
 		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Base assets updated.", Status: result, Changes: []string{"base_assets_updated"}, Warnings: []string{}})
 	case "mihomo":
-		result, err := coredownload.Download(ctx, coredownload.Options{
+		result, err := downloadCore(ctx, coredownload.Options{
 			Version:    "latest",
 			Flavor:     coredownload.FlavorAll,
 			Target:     coredownload.TargetRouter,
@@ -267,7 +269,8 @@ func runProductComponentUpdate(args []string, state appinit.RuntimeState) error 
 		if err != nil {
 			return err
 		}
-		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Mihomo components updated.", Status: result, Changes: []string{"mihomo_updated"}, Warnings: []string{}})
+		warnings := refreshCoreVersionCacheWarnings(ctx, state, "")
+		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Mihomo components updated.", Status: result, Changes: []string{"mihomo_updated"}, Warnings: warnings})
 	case "dashboard":
 		result, err := dashboard.Download(ctx, dashboard.Options{
 			Version:   "latest",
@@ -301,11 +304,11 @@ func runProductConfig(args []string, state appinit.RuntimeState) error {
 		if err != nil {
 			return err
 		}
-		result, err := applyTemplateInput(input, state)
+		result, warnings, err := applyTemplateInput(context.Background(), input, state)
 		if err != nil {
 			return err
 		}
-		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Config template applied.", Status: result, Changes: []string{"config_template_applied"}, Warnings: []string{}})
+		return printProductOK(productEnvelope{OK: true, Changed: true, Summary: "Config template applied.", Status: result, Changes: []string{"config_template_applied"}, Warnings: warnings})
 	case "render":
 		if err := parseJSONOnly("config render", args[1:]); err != nil {
 			return err
@@ -338,13 +341,17 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 		if err != nil {
 			return err
 		}
-		return printProductOK(productEnvelope{OK: true, Changed: result.Started, Summary: "Runtime start completed.", Status: result, Changes: changedIf(result.Started, "runtime_started"), Warnings: result.Warnings, NextActions: result.NextActions})
+		warnings := append([]string{}, result.Warnings...)
+		warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
+		return printProductOK(productEnvelope{OK: true, Changed: result.Started, Summary: "Runtime start completed.", Status: result, Changes: changedIf(result.Started, "runtime_started"), Warnings: warnings, NextActions: result.NextActions})
 	case "restart":
 		result, err := corerun.Restart(ctx, runtimeRestartOptions(state))
 		if err != nil {
 			return err
 		}
-		return printProductOK(productEnvelope{OK: true, Changed: result.Restarted, Summary: "Runtime restart completed.", Status: result, Changes: changedIf(result.Restarted, "runtime_restarted"), Warnings: result.Warnings, NextActions: result.NextActions})
+		warnings := append([]string{}, result.Warnings...)
+		warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
+		return printProductOK(productEnvelope{OK: true, Changed: result.Restarted, Summary: "Runtime restart completed.", Status: result, Changes: changedIf(result.Restarted, "runtime_restarted"), Warnings: warnings, NextActions: result.NextActions})
 	case "stop":
 		result, err := corerun.Stop(corerun.StopOptions{WorkDir: state.Paths.MihomoRuntimeDir, Timeout: 5 * time.Second})
 		if err != nil {
@@ -553,9 +560,10 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 			warnings = append(warnings, "localClash core update is owned by the LuCI helper/bootstrap layer in V1.")
 		}
 		if input.Components.Mihomo == "installed_or_latest" {
-			if _, err := coredownload.Download(ctx, coredownload.Options{Version: "latest", Flavor: coredownload.FlavorAll, Target: coredownload.TargetRouter, TargetOS: "linux", TargetArch: runtime.GOARCH, OutputDir: productWorkspacePath(state, "bin"), Repo: "MetaCubeX/mihomo", Force: true}); err != nil {
+			if _, err := downloadCore(ctx, coredownload.Options{Version: "latest", Flavor: coredownload.FlavorAll, Target: coredownload.TargetRouter, TargetOS: "linux", TargetArch: runtime.GOARCH, OutputDir: productWorkspacePath(state, "bin"), Repo: "MetaCubeX/mihomo", Force: true}); err != nil {
 				return changes, warnings, err
 			}
+			warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 			changes = append(changes, "mihomo_updated")
 		}
 		if input.Components.Dashboard == "installed_or_latest" {
@@ -565,10 +573,11 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 			changes = append(changes, "dashboard_updated")
 		}
 	}
-	configChanged, err := executeDesiredConfig(input.Config, state)
+	configChanged, configWarnings, err := executeDesiredConfig(ctx, input.Config, state)
 	if err != nil {
 		return changes, warnings, err
 	}
+	warnings = append(warnings, configWarnings...)
 	if configChanged {
 		changes = append(changes, "config_updated")
 	}
@@ -589,20 +598,20 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 	return changes, warnings, nil
 }
 
-func executeDesiredConfig(input *desiredConfig, state appinit.RuntimeState) (bool, error) {
+func executeDesiredConfig(ctx context.Context, input *desiredConfig, state appinit.RuntimeState) (bool, []string, error) {
 	if input == nil {
-		return false, nil
+		return false, nil, nil
 	}
 	template := emptyAsLeave(input.Template)
 	mode := emptyAsLeave(input.RuntimeProfile)
 	core := emptyAsLeave(input.Core)
 	if template == "leave" && mode == "leave" && core == "leave" {
-		return false, nil
+		return false, nil, nil
 	}
 	if mode == "leave" || core == "leave" {
 		profile, err := runtimeprofile.StatusFor(state.Paths.RuntimeProfilePath)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if mode == "leave" {
 			mode = profile.Mode
@@ -616,11 +625,15 @@ func executeDesiredConfig(input *desiredConfig, state appinit.RuntimeState) (boo
 		if input.AllowOverwriteModified != nil {
 			allow = *input.AllowOverwriteModified
 		}
-		_, err := applyTemplateInput(configInput{Version: 1, Template: template, RuntimeProfile: mode, Core: core, AllowOverwriteModified: allow}, state)
-		return true, err
+		_, warnings, err := applyTemplateInput(ctx, configInput{Version: 1, Template: template, RuntimeProfile: mode, Core: core, AllowOverwriteModified: allow}, state)
+		return true, warnings, err
 	}
-	_, err := runtimeprofile.Configure(state.Paths.RuntimeProfilePath, mode, core)
-	return err == nil, err
+	profile, err := runtimeprofile.Configure(state.Paths.RuntimeProfilePath, mode, core)
+	if err != nil {
+		return false, nil, err
+	}
+	warnings := refreshCoreVersionCacheWarnings(ctx, state, profile.CorePath)
+	return true, warnings, nil
 }
 
 func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([]string, []string, error) {
@@ -639,6 +652,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 			return changes, warnings, err
 		}
 		warnings = append(warnings, result.Warnings...)
+		warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 		if result.Started {
 			changes = append(changes, "runtime_started")
 		}
@@ -648,6 +662,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 			return changes, warnings, err
 		}
 		warnings = append(warnings, result.Warnings...)
+		warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 		if result.Restarted {
 			changes = append(changes, "runtime_restarted")
 		}
@@ -659,6 +674,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 				return changes, warnings, err
 			}
 			warnings = append(warnings, result.Warnings...)
+			warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 			if result.Restarted {
 				changes = append(changes, "runtime_restarted")
 			}
@@ -668,6 +684,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 				return changes, warnings, err
 			}
 			warnings = append(warnings, result.Warnings...)
+			warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 			if result.Started {
 				changes = append(changes, "runtime_started")
 			}
@@ -991,12 +1008,12 @@ func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 	}, warnings
 }
 
-func applyTemplateInput(input configInput, state appinit.RuntimeState) (map[string]any, error) {
+func applyTemplateInput(ctx context.Context, input configInput, state appinit.RuntimeState) (map[string]any, []string, error) {
 	configPath := productWorkspacePath(state, "localclash.json")
 	if !input.AllowOverwriteModified {
 		current, err := localconfig.Load(configPath)
 		if err == nil && current.PolicyTemplate != "" && current.PolicyTemplate != input.Template {
-			return nil, codedProductError{
+			return nil, nil, codedProductError{
 				code:        "modified_config_requires_confirmation",
 				message:     "Current localclash.json does not match the requested template; refusing to overwrite without allow_overwrite_modified.",
 				nextActions: []string{"Set allow_overwrite_modified to true after user confirmation."},
@@ -1007,21 +1024,22 @@ func applyTemplateInput(input configInput, state appinit.RuntimeState) (map[stri
 			}
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	config, template, err := policytemplate.Build(policytemplate.DefaultDir, input.Template)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := localconfig.Write(configPath, config); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	profile, err := runtimeprofile.Configure(state.Paths.RuntimeProfilePath, input.RuntimeProfile, input.Core)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return map[string]any{"template": template, "runtime_profile": profile}, nil
+	warnings := refreshCoreVersionCacheWarnings(ctx, state, profile.CorePath)
+	return map[string]any{"template": template, "runtime_profile": profile}, warnings, nil
 }
 
 func subscriptionStatusOptions(state appinit.RuntimeState) subscriptions.StatusOptions {
@@ -1100,6 +1118,32 @@ func runtimeStartOptions(state appinit.RuntimeState) corerun.StartOptions {
 
 func runtimeRestartOptions(state appinit.RuntimeState) corerun.RestartOptions {
 	return corerun.RestartOptions{CorePath: state.Paths.CorePath, ConfigPath: state.Paths.GeneratedConfig, WorkDir: state.Paths.MihomoRuntimeDir, StopTimeout: 5 * time.Second}
+}
+
+func refreshCoreVersionCacheWarnings(ctx context.Context, state appinit.RuntimeState, corePath string) []string {
+	corePath = normalizeCorePathForState(state, corePath)
+	if strings.TrimSpace(corePath) == "" {
+		return nil
+	}
+	if _, err := appinit.RefreshCoreVersionCache(ctx, state.Paths.RuntimeRoot, corePath); err != nil {
+		return []string{"core version cache refresh failed: " + err.Error()}
+	}
+	return nil
+}
+
+func normalizeCorePathForState(state appinit.RuntimeState, corePath string) string {
+	corePath = strings.TrimSpace(corePath)
+	if corePath == "" {
+		return state.Paths.CorePath
+	}
+	if filepath.IsAbs(corePath) {
+		return corePath
+	}
+	root := productWorkspaceRoot(state)
+	if root == "" || root == "." {
+		return corePath
+	}
+	return filepath.Join(root, corePath)
 }
 
 func routerTakeoverOptions(state appinit.RuntimeState) routertakeover.Options {

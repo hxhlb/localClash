@@ -3,10 +3,8 @@ package appinit
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
@@ -251,12 +249,16 @@ func inspectCore(ctx context.Context, state *RuntimeState, opts Options) {
 		return
 	}
 	state.Core.Exists = true
-	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(runCtx, opts.CorePath, "-v").CombinedOutput()
+	if cached, ok := readCoreVersionCache(CoreVersionCachePath(opts.RuntimeRoot), opts.CorePath); ok {
+		state.Core = cached
+		return
+	}
+	core, err := inspectCoreLive(ctx, opts.CorePath)
 	if err == nil {
-		state.Core.Version = strings.TrimSpace(string(output))
-		state.Core.SmartSupported = strings.Contains(strings.ToLower(state.Core.Version), "smart")
+		state.Core = core
+		if err := writeCoreVersionCache(CoreVersionCachePath(opts.RuntimeRoot), core, timeNow()); err != nil {
+			state.addDiagnostic("core_version_cache", "warning", "cannot write core version cache: "+err.Error())
+		}
 	}
 }
 

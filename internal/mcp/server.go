@@ -2647,7 +2647,18 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 			return toolResult{}, err
 		}
 	}
+	cacheWarnings := []string{}
 	if s.state != nil {
+		if strings.TrimSpace(in.RuntimeProfile) != "" || strings.TrimSpace(in.Core) != "" {
+			corePath := normalizeMCPStateCorePath(s.state, status.CorePath)
+			runtimeRoot := mcpStateRuntimeRoot(s.state)
+			if runtimeRoot != "" {
+				_, err := appinit.RefreshCoreVersionCache(context.Background(), runtimeRoot, corePath)
+				if err != nil {
+					cacheWarnings = append(cacheWarnings, "core version cache refresh failed: "+err.Error())
+				}
+			}
+		}
 		s.state.Paths.RuntimeProfilePath = in.RuntimeProfileConfig
 		s.state.Paths.CorePath = status.CorePath
 		s.state.Core.Path = status.CorePath
@@ -2675,7 +2686,49 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 	} else {
 		result.AvailablePolicyTemplates = templates
 	}
+	result.Warnings = append(result.Warnings, cacheWarnings...)
 	return jsonToolResult(result)
+}
+
+func normalizeMCPStateCorePath(state *appinit.RuntimeState, corePath string) string {
+	corePath = strings.TrimSpace(corePath)
+	if corePath == "" || filepath.IsAbs(corePath) || state == nil {
+		return corePath
+	}
+	root := strings.TrimSpace(state.Paths.WorkspaceRoot)
+	if root == "" {
+		root = workspaceRootFromRuntimeProfilePath(state.Paths.RuntimeProfilePath)
+	}
+	if root == "" || root == "." {
+		return corePath
+	}
+	return filepath.Join(root, corePath)
+}
+
+func mcpStateRuntimeRoot(state *appinit.RuntimeState) string {
+	if state == nil {
+		return ""
+	}
+	if root := strings.TrimSpace(state.Paths.RuntimeRoot); root != "" {
+		return root
+	}
+	workspaceRoot := workspaceRootFromRuntimeProfilePath(state.Paths.RuntimeProfilePath)
+	if workspaceRoot == "" || workspaceRoot == "." {
+		return ""
+	}
+	return filepath.Join(workspaceRoot, ".runtime")
+}
+
+func workspaceRootFromRuntimeProfilePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	dir := filepath.Dir(path)
+	if dir == "." {
+		return ""
+	}
+	return dir
 }
 
 type configConfigureResult struct {

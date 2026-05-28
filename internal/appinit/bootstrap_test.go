@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"localclash/internal/rules"
 
@@ -148,6 +150,126 @@ func TestBootstrapDefaultsToDetectedRouterWorkDir(t *testing.T) {
 	}
 }
 
+func TestBootstrapUsesCoreVersionCacheWithoutExecutingCore(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "bin", "mihomo")
+	writeAppinitFile(t, core, "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then exit 23; fi\nexit 0\n", 0o755)
+	cachePath := CoreVersionCachePath(filepath.Join(dir, ".runtime"))
+	if err := writeCoreVersionCache(cachePath, CoreState{Path: core, Exists: true, Version: "Mihomo cached smart", SmartSupported: true}, fixedAppinitCacheNow()); err != nil {
+		t.Fatal(err)
+	}
+
+	state := Bootstrap(context.Background(), Options{
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+		SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           core,
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+	})
+
+	if state.Core.Version != "Mihomo cached smart" || !state.Core.SmartSupported {
+		t.Fatalf("core = %+v, want cached version", state.Core)
+	}
+}
+
+func TestBootstrapWritesCoreVersionCacheOnMiss(t *testing.T) {
+	dir := t.TempDir()
+	countPath := filepath.Join(dir, "count")
+	core := filepath.Join(dir, "bin", "mihomo")
+	writeCountingCore(t, core, countPath, "Mihomo live smart")
+
+	state := Bootstrap(context.Background(), Options{
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+		SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           core,
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+	})
+
+	if state.Core.Version != "Mihomo live smart" || !state.Core.SmartSupported {
+		t.Fatalf("core = %+v, want live smart version", state.Core)
+	}
+	if got := readCount(t, countPath); got != 1 {
+		t.Fatalf("core -v count = %d, want 1", got)
+	}
+	cached, ok := readCoreVersionCache(CoreVersionCachePath(filepath.Join(dir, ".runtime")), core)
+	if !ok || cached.Version != "Mihomo live smart" {
+		t.Fatalf("cached = %+v ok=%v, want live version", cached, ok)
+	}
+}
+
+func TestBootstrapReplacesCoreVersionCacheWhenCorePathChanges(t *testing.T) {
+	dir := t.TempDir()
+	oldCore := filepath.Join(dir, "bin", "old-mihomo")
+	core := filepath.Join(dir, "bin", "mihomo")
+	countPath := filepath.Join(dir, "count")
+	writeAppinitFile(t, oldCore, "#!/bin/sh\nexit 0\n", 0o755)
+	writeCountingCore(t, core, countPath, "Mihomo replacement")
+	if err := writeCoreVersionCache(CoreVersionCachePath(filepath.Join(dir, ".runtime")), CoreState{Path: oldCore, Exists: true, Version: "Mihomo old", SmartSupported: false}, fixedAppinitCacheNow()); err != nil {
+		t.Fatal(err)
+	}
+
+	state := Bootstrap(context.Background(), Options{
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+		SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           core,
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+	})
+
+	if state.Core.Version != "Mihomo replacement" {
+		t.Fatalf("core = %+v, want replacement version", state.Core)
+	}
+	if got := readCount(t, countPath); got != 1 {
+		t.Fatalf("core -v count = %d, want 1", got)
+	}
+	cached, ok := readCoreVersionCache(CoreVersionCachePath(filepath.Join(dir, ".runtime")), core)
+	if !ok || cached.Path != core || cached.Version != "Mihomo replacement" {
+		t.Fatalf("cached = %+v ok=%v, want replacement core", cached, ok)
+	}
+}
+
+func TestBootstrapFallsBackWhenCoreVersionCacheIsCorrupt(t *testing.T) {
+	dir := t.TempDir()
+	countPath := filepath.Join(dir, "count")
+	core := filepath.Join(dir, "bin", "mihomo")
+	writeCountingCore(t, core, countPath, "Mihomo after corrupt cache")
+	cachePath := CoreVersionCachePath(filepath.Join(dir, ".runtime"))
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := Bootstrap(context.Background(), Options{
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+		SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           core,
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+	})
+
+	if state.Core.Version != "Mihomo after corrupt cache" {
+		t.Fatalf("core = %+v, want live version after corrupt cache", state.Core)
+	}
+	if got := readCount(t, countPath); got != 1 {
+		t.Fatalf("core -v count = %d, want 1", got)
+	}
+}
+
 func writeAppinitFile(t *testing.T, path, content string, mode os.FileMode) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -195,6 +317,38 @@ func writeAppinitFile(t *testing.T, path, content string, mode os.FileMode) {
 	if err := os.WriteFile(path, data, mode); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeCountingCore(t *testing.T, path, countPath, version string) {
+	t.Helper()
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"-v\" ]; then\n" +
+		"  count=0\n" +
+		"  [ -f " + strconv.Quote(countPath) + " ] && count=$(cat " + strconv.Quote(countPath) + ")\n" +
+		"  count=$((count + 1))\n" +
+		"  echo \"$count\" > " + strconv.Quote(countPath) + "\n" +
+		"  echo " + strconv.Quote(version) + "\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 0\n"
+	writeAppinitFile(t, path, script, 0o755)
+}
+
+func readCount(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func fixedAppinitCacheNow() time.Time {
+	return time.Date(2026, 5, 28, 9, 0, 0, 0, time.UTC)
 }
 
 func writeAppinitPackIndex(t *testing.T, cacheDir string) {
