@@ -36,11 +36,12 @@ type ToolSummary struct {
 }
 
 type ServerRuntimeInfo struct {
-	Binary       string `json:"binary,omitempty"`
-	BinarySHA256 string `json:"binary_sha256,omitempty"`
-	BinaryError  string `json:"binary_error,omitempty"`
-	WorkingDir   string `json:"working_dir,omitempty"`
-	StartedAt    string `json:"started_at,omitempty"`
+	Binary        string `json:"binary,omitempty"`
+	BinarySHA256  string `json:"binary_sha256,omitempty"`
+	BinaryError   string `json:"binary_error,omitempty"`
+	WorkingDir    string `json:"working_dir,omitempty"`
+	WorkspaceRoot string `json:"workspace_root,omitempty"`
+	StartedAt     string `json:"started_at,omitempty"`
 }
 
 type ToolsListResult struct {
