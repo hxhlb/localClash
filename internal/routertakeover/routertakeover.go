@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,8 @@ type Result struct {
 	DNSPort        int      `json:"dns_port"`
 	RedirPort      int      `json:"redir_port"`
 	TunDevice      string   `json:"tun_device"`
+	LocalDNS       []string `json:"local_dns,omitempty"`
+	LocalDomains   []string `json:"local_domains,omitempty"`
 	Checks         []Check  `json:"checks"`
 	Warnings       []string `json:"warnings,omitempty"`
 	NextActions    []string `json:"next_actions,omitempty"`
@@ -109,6 +112,7 @@ func Status(ctx context.Context, opts Options) (Result, error) {
 		{"tcp_redirect", "nft list chain inet fw4 dstnat 2>/dev/null | grep -q 'localClash TCP redirect'", "localClash TCP redir-host redirect is installed", "localClash TCP redir-host redirect is missing"},
 		{"udp_tun_mark", "nft list chain inet fw4 mangle_prerouting 2>/dev/null | grep -q 'localClash TUN mark'", "localClash UDP/ICMP TUN mark is installed", "localClash UDP/ICMP TUN mark is missing"},
 		{"dns_hijack", "nft list ruleset 2>/dev/null | grep -q 'localClash DNS hijack'", "localClash DNS hijack rule is installed", "localClash DNS hijack rule is missing"},
+		{"local_dns_bypass", "nft list ruleset 2>/dev/null | grep -q 'localClash local DNS bypass'", "localClash local DNS bypass is installed", "localClash local DNS bypass is missing"},
 	}
 	for _, item := range checks {
 		finish = stage("check_"+item.id, nil)
@@ -116,6 +120,10 @@ func Status(ctx context.Context, opts Options) (Result, error) {
 		result.Checks = append(result.Checks, checkResult)
 		finish(nil, map[string]any{"ok": checkResult.OK})
 	}
+	finish = stage("check_local_dns_discovered", nil)
+	localDNSOK := len(result.LocalDNS) > 0
+	result.Checks = append(result.Checks, check("local_dns_discovered", localDNSOK, "local DNS bypass addresses were discovered", "local DNS bypass address discovery state is missing"))
+	finish(nil, map[string]any{"ok": localDNSOK, "local_dns_count": len(result.LocalDNS)})
 	result.Effective = allChecksOK(result.Checks)
 	result.NextActions = nextActions(result)
 	return result, nil
@@ -326,18 +334,40 @@ func portFromListen(listen string) int {
 
 func baseResult(opts Options, status runtimeprofile.Status) Result {
 	return Result{
-		ProfileMode: status.Mode,
-		StateDir:    opts.StateDir,
-		DNSPort:     opts.DNSPort,
-		RedirPort:   opts.RedirPort,
-		TunDevice:   opts.TunDevice,
+		ProfileMode:  status.Mode,
+		StateDir:     opts.StateDir,
+		DNSPort:      opts.DNSPort,
+		RedirPort:    opts.RedirPort,
+		TunDevice:    opts.TunDevice,
+		LocalDNS:     stateLines(filepath.Join(opts.StateDir, "local_dns4"), filepath.Join(opts.StateDir, "local_dns6")),
+		LocalDomains: stateLines(filepath.Join(opts.StateDir, "local_domains")),
 		Warnings: []string{
 			"router_takeover_* applies runtime-only OpenWrt firewall, DNS, and policy-routing state and may interrupt network connectivity.",
-			"router_takeover_* follows localClash router redir-host-mix behavior: TCP redir-host, DNS hijack, and UDP/ICMP TUN marking.",
+			"router_takeover_* follows localClash router redir-host-mix behavior: TCP redir-host, DNS hijack with local resolver bypass, and UDP/ICMP TUN marking.",
 			"router_takeover_* must not write persistent firewall configuration; reboot clears the runtime takeover state.",
 			"router_takeover_* manages only localClash-owned rules and state.",
 		},
 	}
+}
+
+func stateLines(paths ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || seen[line] {
+				continue
+			}
+			seen[line] = true
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func check(id string, ok bool, summary, errText string) Check {
@@ -443,7 +473,7 @@ cleanup_localclash_nft() {
     nft flush chain inet fw4 "$chain" >/dev/null 2>&1 || true
     nft delete chain inet fw4 "$chain" >/dev/null 2>&1 || true
   done
-  for set_name in localclash_localnetwork localclash_localnetwork6; do
+  for set_name in localclash_localnetwork localclash_localnetwork6 localclash_localdns4 localclash_localdns6; do
     nft flush set inet fw4 "$set_name" >/dev/null 2>&1 || true
     nft delete set inet fw4 "$set_name" >/dev/null 2>&1 || true
   done
@@ -455,7 +485,7 @@ cleanup_localclash_state() {
   ip route del default table "$ROUTE_TABLE" >/dev/null 2>&1 || true
   while ip -6 rule del fwmark "$FWMARK" table "$ROUTE_TABLE" >/dev/null 2>&1; do :; done
   ip -6 route del default table "$ROUTE_TABLE" >/dev/null 2>&1 || true
-  rm -f "$STATE_DIR/status" >/dev/null 2>&1 || true
+  rm -f "$STATE_DIR/status" "$STATE_DIR/local_dns4" "$STATE_DIR/local_dns6" "$STATE_DIR/local_domains" "$STATE_DIR/local_dns4.tmp" "$STATE_DIR/local_dns6.tmp" "$STATE_DIR/local_domains.tmp" >/dev/null 2>&1 || true
 }
 
 check_fw4_ready() {
@@ -497,10 +527,134 @@ add_dynamic_localnetwork6() {
   done
 }
 
+discover_lan_networks() {
+  echo lan
+  if command -v uci >/dev/null 2>&1; then
+    i=0
+    while zone_name=$(uci -q get "firewall.@zone[$i].name" 2>/dev/null); do
+      if [ "$zone_name" = "lan" ]; then
+        uci -q get "firewall.@zone[$i].network" 2>/dev/null || true
+      fi
+      i=$((i + 1))
+    done
+  fi
+}
+
+add_lan_domain() {
+  domain=$(echo "$1" | sed 's#^/##; s#/$##; s#^\.*##')
+  [ -n "$domain" ] && echo "$domain" >> "$STATE_DIR/local_domains"
+}
+
+discover_lan_domains() {
+  : > "$STATE_DIR/local_domains"
+  if command -v uci >/dev/null 2>&1; then
+    add_lan_domain "$(uci -q get "dhcp.@dnsmasq[0].domain" 2>/dev/null || true)"
+    add_lan_domain "$(uci -q get "dhcp.@dnsmasq[0].local" 2>/dev/null || true)"
+  fi
+  for file in /etc/resolv.conf /tmp/resolv.conf /tmp/resolv.conf.d/resolv.conf.auto; do
+    [ -f "$file" ] || continue
+    awk '/^search[[:space:]]/ { for (i = 2; i <= NF; i++) print $i }' "$file" 2>/dev/null | while read -r domain; do
+      add_lan_domain "$domain"
+    done
+  done
+  sort -u "$STATE_DIR/local_domains" > "$STATE_DIR/local_domains.tmp" 2>/dev/null && mv "$STATE_DIR/local_domains.tmp" "$STATE_DIR/local_domains" || true
+}
+
+add_localdns4_addr() {
+  addr=${1%%/*}
+  case "$addr" in
+    ""|0.0.0.0|127.*|169.254.*) return 0 ;;
+  esac
+  nft add element inet fw4 localclash_localdns4 { "$addr" } >/dev/null 2>&1 || true
+  echo "$addr" >> "$STATE_DIR/local_dns4"
+}
+
+add_localdns6_addr() {
+  addr=${1%%/*}
+  case "$addr" in
+    ""|"::"|::1) return 0 ;;
+  esac
+  nft add element inet fw4 localclash_localdns6 { "$addr" } >/dev/null 2>&1 || true
+  echo "$addr" >> "$STATE_DIR/local_dns6"
+}
+
+is_private_or_router_scope4() {
+  case "$1" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[0-1].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*|198.18.*|198.19.*) return 0 ;;
+  esac
+  return 1
+}
+
+is_router_scope6() {
+  case "$1" in
+    fc*|fd*|fe80:*) return 0 ;;
+  esac
+  return 1
+}
+
+add_network_interface_dns4_addresses() {
+  net="$1"
+  if command -v uci >/dev/null 2>&1; then
+    for addr in $(uci -q get "network.$net.ipaddr" 2>/dev/null || true); do
+      add_localdns4_addr "$addr"
+    done
+    for dev in $(uci -q get "network.$net.device" 2>/dev/null || true) $(uci -q get "network.$net.ifname" 2>/dev/null || true); do
+      [ -n "$dev" ] || continue
+      ip -o -4 addr show dev "$dev" scope global 2>/dev/null | awk '{print $4}' | while read -r addr; do
+        add_localdns4_addr "$addr"
+      done
+    done
+  fi
+}
+
+add_network_interface_dns6_addresses() {
+  net="$1"
+  if command -v uci >/dev/null 2>&1; then
+    for addr in $(uci -q get "network.$net.ip6addr" 2>/dev/null || true); do
+      add_localdns6_addr "$addr"
+    done
+    for dev in $(uci -q get "network.$net.device" 2>/dev/null || true) $(uci -q get "network.$net.ifname" 2>/dev/null || true); do
+      [ -n "$dev" ] || continue
+      ip -o -6 addr show dev "$dev" 2>/dev/null | awk '{print $4}' | while read -r addr; do
+        add_localdns6_addr "$addr"
+      done
+    done
+  fi
+}
+
+add_dynamic_localdns4() {
+  : > "$STATE_DIR/local_dns4"
+  for net in $(discover_lan_networks | sort -u); do
+    add_network_interface_dns4_addresses "$net"
+  done
+  ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | while read -r addr; do
+    host=${addr%%/*}
+    if is_private_or_router_scope4 "$host"; then
+      add_localdns4_addr "$host"
+    fi
+  done
+  sort -u "$STATE_DIR/local_dns4" > "$STATE_DIR/local_dns4.tmp" 2>/dev/null && mv "$STATE_DIR/local_dns4.tmp" "$STATE_DIR/local_dns4" || true
+}
+
+add_dynamic_localdns6() {
+  : > "$STATE_DIR/local_dns6"
+  for net in $(discover_lan_networks | sort -u); do
+    add_network_interface_dns6_addresses "$net"
+  done
+  ip -o -6 addr show 2>/dev/null | awk '{print $4}' | while read -r addr; do
+    host=${addr%%/*}
+    if is_router_scope6 "$host"; then
+      add_localdns6_addr "$host"
+    fi
+  done
+  sort -u "$STATE_DIR/local_dns6" > "$STATE_DIR/local_dns6.tmp" 2>/dev/null && mv "$STATE_DIR/local_dns6.tmp" "$STATE_DIR/local_dns6" || true
+}
+
 check_fw4_ready
 trap 'cleanup_localclash_state' ERR
 cleanup_localclash_state
 wait_tun_ready
+discover_lan_domains
 
 while ip rule del fwmark "$FWMARK" table "$ROUTE_TABLE" >/dev/null 2>&1; do :; done
 ip rule add fwmark "$FWMARK" table "$ROUTE_TABLE" pref "$RULE_PREF"
@@ -512,6 +666,14 @@ ip -6 route replace default dev "$TUN_DEVICE" table "$ROUTE_TABLE" >/dev/null 2>
 nft -f - <<EOF_NFT
 add set inet fw4 localclash_localnetwork { type ipv4_addr; flags interval; auto-merge; }
 add element inet fw4 localclash_localnetwork { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 }
+add set inet fw4 localclash_localdns4 { type ipv4_addr; flags interval; auto-merge; }
+add set inet fw4 localclash_localdns6 { type ipv6_addr; flags interval; auto-merge; }
+EOF_NFT
+
+add_dynamic_localdns4
+add_dynamic_localdns6
+
+nft -f - <<EOF_NFT
 add chain inet fw4 localclash
 add rule inet fw4 localclash ip daddr @localclash_localnetwork counter return
 add rule inet fw4 localclash ct direction reply counter return
@@ -524,7 +686,11 @@ add rule inet fw4 localclash_mangle ct direction reply counter return
 add rule inet fw4 localclash_mangle ip protocol udp mark set $FWMARK counter accept
 add rule inet fw4 localclash_mangle ip protocol icmp icmp type echo-request mark set $FWMARK counter accept comment "localClash ICMP mark"
 insert rule inet fw4 mangle_prerouting position 0 meta nfproto ipv4 counter jump localclash_mangle comment "localClash TUN mark"
-insert rule inet fw4 dstnat position 0 meta l4proto { tcp, udp } th dport 53 counter redirect to $DNS_PORT comment "localClash DNS hijack"
+add chain inet fw4 localclash_dns_redirect
+add rule inet fw4 localclash_dns_redirect ip daddr @localclash_localdns4 counter return comment "localClash local DNS bypass"
+add rule inet fw4 localclash_dns_redirect ip6 daddr @localclash_localdns6 counter return comment "localClash local DNS bypass"
+add rule inet fw4 localclash_dns_redirect counter redirect to $DNS_PORT comment "localClash DNS hijack"
+insert rule inet fw4 dstnat position 0 meta l4proto { tcp, udp } th dport 53 counter jump localclash_dns_redirect comment "localClash DNS hijack"
 insert rule inet fw4 forward position 0 meta nfproto ipv4 oifname "$TUN_DEVICE" counter accept comment "localClash TUN forward"
 insert rule inet fw4 forward position 0 meta nfproto ipv4 iifname "$TUN_DEVICE" counter accept comment "localClash TUN forward"
 insert rule inet fw4 input position 0 meta nfproto ipv4 iifname "$TUN_DEVICE" counter accept comment "localClash TUN input"
@@ -576,7 +742,7 @@ for chain in localclash localclash_output localclash_mangle localclash_mangle_ou
   nft flush chain inet fw4 "$chain" >/dev/null 2>&1 || true
   nft delete chain inet fw4 "$chain" >/dev/null 2>&1 || true
 done
-for set_name in localclash_localnetwork localclash_localnetwork6; do
+for set_name in localclash_localnetwork localclash_localnetwork6 localclash_localdns4 localclash_localdns6; do
   nft flush set inet fw4 "$set_name" >/dev/null 2>&1 || true
   nft delete set inet fw4 "$set_name" >/dev/null 2>&1 || true
 done
@@ -584,8 +750,8 @@ while ip rule del fwmark "$FWMARK" table "$ROUTE_TABLE" >/dev/null 2>&1; do :; d
 ip route del default table "$ROUTE_TABLE" >/dev/null 2>&1 || true
 while ip -6 rule del fwmark "$FWMARK" table "$ROUTE_TABLE" >/dev/null 2>&1; do :; done
 ip -6 route del default table "$ROUTE_TABLE" >/dev/null 2>&1 || true
-rm -f "$STATE_DIR/status" >/dev/null 2>&1 || true
-`, shellQuote(opts.StateDir), shellQuote(defaultFWMark), shellQuote(defaultRouteTable))
+rm -f "$STATE_DIR/status" "$STATE_DIR/local_dns4" "$STATE_DIR/local_dns6" "$STATE_DIR/local_domains" "$STATE_DIR/local_dns4.tmp" "$STATE_DIR/local_dns6.tmp" "$STATE_DIR/local_domains.tmp" >/dev/null 2>&1 || true
+	`, shellQuote(opts.StateDir), shellQuote(defaultFWMark), shellQuote(defaultRouteTable))
 }
 
 func shellQuote(value string) string {
