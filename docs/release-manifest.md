@@ -78,3 +78,20 @@ scripts/build-release-assets.sh v0.1.0
 
 The workflow runs on tag pushes matching `v*` and can also be triggered
 manually with a tag input.
+
+To trigger it from the command line, use:
+
+```bash
+scripts/trigger-github-release.sh v0.1.17
+```
+
+That path uses `workflow_dispatch` and expects the tag to already exist on
+GitHub. To create a new annotated tag at `HEAD`, push it, and let the tag push
+start the Release workflow:
+
+```bash
+scripts/trigger-github-release.sh v0.1.18 --create-tag --watch
+```
+
+Use `--dry-run` to check what the script would do without pushing a tag or
+dispatching a workflow.
