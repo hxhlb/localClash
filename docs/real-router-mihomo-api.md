@@ -62,6 +62,14 @@ curl -sS -H "Authorization: Bearer ${MIHOMO_SECRET}" \
   "${MIHOMO_API}/rules"
 ```
 
+Mihomo also exposes a streaming log endpoint. Use it for long-running warning
+collection:
+
+```bash
+curl -N -H "Authorization: Bearer ${MIHOMO_SECRET}" \
+  "${MIHOMO_API}/logs?level=warning"
+```
+
 With `jq`, quick live checks are:
 
 ```bash
@@ -259,3 +267,43 @@ The `extra.hitCount`, `extra.hitAt`, `extra.missCount`, and `extra.missAt`
 fields are runtime counters. In the captured sample their timestamps were
 already from `2026-05-25`, so they are especially unsafe to reuse as latest
 router state without a fresh API call.
+
+## Long-Running Warning Collection
+
+Use the repository collector when the goal is to collect enough evidence to
+improve router templates instead of inspecting a single warning burst:
+
+```bash
+scripts/collect-mihomo-warnings.py \
+  --api http://192.168.6.1:9090 \
+  --secret 123456 \
+  --duration 21600 \
+  --snapshot-interval 300 \
+  --print-warnings
+```
+
+For an overnight or open-ended run, omit `--duration` and stop it with
+`Ctrl+C`. The script is read-only against Mihomo. It writes a timestamped
+directory under `.runtime/diagnostics/` containing:
+
+```text
+warnings.jsonl   raw warning stream with classifier tags
+snapshots.jsonl  periodic /configs, /proxies, and /rules summaries
+summary.jsonl    periodic warning count summaries
+summary.json     latest summary for quick inspection
+events.jsonl     stream connect, disconnect, and reconnect events
+errors.jsonl     controller or snapshot errors
+```
+
+If router-side process samples are needed in the same time window, add an
+optional read-only SSH target:
+
+```bash
+scripts/collect-mihomo-warnings.py \
+  --ssh-host root@192.168.6.1 \
+  --duration 21600
+```
+
+The SSH sample is optional because the Mihomo controller is enough for warning,
+config, proxy, and rule evidence. Use it when CPU or process-state correlation
+is part of the investigation.
