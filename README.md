@@ -3,6 +3,12 @@
 Local Mihomo runtime wrapper with an MCP management interface for AI-assisted
 Clash, Mihomo, and router workflows.
 
+![localClash MCP environment inspection on an OpenWrt router](docs/assets/localclash-mcp-environment-inspect.png)
+
+The screenshot shows an AI agent using localClash MCP to inspect an OpenWrt
+router, summarize runtime readiness, and separate safe reads, safe writes, and
+confirmation-required operations before making changes.
+
 ## Direction
 
 localClash is intended to run near the proxy runtime, such as on a local
@@ -32,8 +38,10 @@ path from a fresh checkout to a running local Mihomo runtime.
 
 ## Release And LuCI Boundary
 
-localClash core releases publish Linux binaries, base assets, checksums, and a
-`localclash-release-manifest.json` file. OpenWrt LuCI consumes that manifest
+The related OpenWrt LuCI project lives at
+[qoli/localclash-luci](https://github.com/qoli/localclash-luci). localClash core
+releases publish Linux binaries, base assets, checksums, and a
+`localclash-release-manifest.json` file. The LuCI package consumes that manifest
 from the latest core release when the user installs or updates the core from the
 router UI.
 
