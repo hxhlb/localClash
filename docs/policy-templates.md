@@ -8,7 +8,7 @@ current disk-backed localClash policy templates.
 
 Policy templates are localClash-owned durable intent, not generated Mihomo YAML.
 Template manifests live under `policy-templates/`, and `config_configure` writes
-their resolved intent into `localclash.json`. The renderer then combines that
+their resolved intent into `localclash-intent.json`. The renderer then combines that
 intent with the effective subscription and runtime profile.
 
 Do not model a removed upstream preset as hidden renderer behavior. Broad default

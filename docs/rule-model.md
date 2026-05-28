@@ -160,7 +160,7 @@ Template patches may define:
 - external rule-provider declarations
 
 The web UI should present policy templates separately from optional rule packs.
-Changing the selected template changes the durable `localclash.json` intent; it
+Changing the selected template changes the durable `localclash-intent.json` intent; it
 does not mutate `generated/mihomo.yaml` directly.
 
 ### 5. Fallback
@@ -223,7 +223,7 @@ Current code has:
 - disk-backed `minimal` and `localclash-default` policy templates under
   `policy-templates/`; `localclash-default` is a patch-set manifest whose
   ordered files under `policy-templates/localclash-default.d/` are merged during
-  initialization into the same durable `localclash.json` intent model that MCP
+  initialization into the same durable `localclash-intent.json` intent model that MCP
   patches use
 - default patch files for region exits, direct baselines,
   communication/social/Telegram routing (including Telegram IP CIDR ranges),
@@ -267,7 +267,7 @@ Agents should not infer active default rules from
 truncated and often dominated by the local safety baseline.
 
 Use the read-only MCP `routing_explain` tool for compact routing discovery.
-It reads durable `localclash.json` intent and returns matching packs, policy
+It reads durable `localclash-intent.json` intent and returns matching packs, policy
 groups, reusable exit groups, optional cached provider-rule evidence, and the
 safe reviewed patch path. Example queries:
 

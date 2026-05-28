@@ -333,7 +333,7 @@ func TestToolsCallConfigConfigureDoesNotRenderGeneratedConfig(t *testing.T) {
 
 func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.json")
+	configPath := filepath.Join(dir, "localclash-intent.json")
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
 	templatesDir := filepath.Join(dir, "policy-templates")
 	writeMCPV2FlyTemplateCache(t, cacheDir)
@@ -366,14 +366,14 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	config := readMCPFile(t, configPath)
 	for _, want := range []string{`"policy_template": "localclash-default"`, `"source": "v2fly-dlc"`, `"pack": "openai"`, `"pack": "category-media"`, "template_all_subscription_nodes"} {
 		if !strings.Contains(config, want) {
-			t.Fatalf("localclash.json missing %q:\n%s", want, config)
+			t.Fatalf("localclash-intent.json missing %q:\n%s", want, config)
 		}
 	}
 }
 
 func TestToolsCallRoutingExplainExplainsLayeredDefaultRoute(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.json")
+	configPath := filepath.Join(dir, "localclash-intent.json")
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
 	writeMCPFile(t, configPath, `version: 2
 policy_template: localclash-default
@@ -796,7 +796,7 @@ func TestToolsCallSubscriptionsRefreshAutoAppliesValidLocalClashSelector(t *test
 	t.Cleanup(server.Close)
 	subConfig := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
-	localClashConfig := filepath.Join(dir, "localclash.json")
+	localClashConfig := filepath.Join(dir, "localclash-intent.json")
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
 sources:
@@ -858,7 +858,7 @@ packs:
 func TestToolsCallConfigStatusReturnsDurableProxyGroups(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
-	localClashConfig := filepath.Join(dir, "localclash.json")
+	localClashConfig := filepath.Join(dir, "localclash-intent.json")
 	writeMCPFile(t, localClashConfig, `version: 1
 proxy_groups:
   AI:
@@ -920,10 +920,39 @@ packs:
 	}
 }
 
+func TestToolsCallConfigStatusRejectsInvalidUserProfile(t *testing.T) {
+	dir := t.TempDir()
+	runtimePath := filepath.Join(dir, "localclash-runtime.json")
+	writeMCPFile(t, filepath.Join(dir, "localclash-user.json"), `rules:
+  - MATCH,DIRECT
+`)
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_status",
+			"arguments": map[string]any{
+				"config":          filepath.Join(dir, "localclash-intent.json"),
+				"runtime_profile": runtimePath,
+				"subscription":    filepath.Join(dir, "subscription.gob"),
+				"rules_cache":     filepath.Join(dir, "rules"),
+			},
+		},
+	})
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "rules") || !strings.Contains(resp.Error.Message, "localclash-user.json") {
+		t.Fatalf("config_status error = %+v, want banned user profile key", resp.Error)
+	}
+	if _, err := os.Stat(runtimePath); !os.IsNotExist(err) {
+		t.Fatalf("config_status validation should not create missing runtime selector, err=%v", err)
+	}
+}
+
 func TestToolsCallConfigRenderUsesDurableSourceOfTruth(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
-	localClashConfig := filepath.Join(dir, "localclash.json")
+	localClashConfig := filepath.Join(dir, "localclash-intent.json")
 	selection := filepath.Join(dir, "localclash-packs.gob")
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 	writeMCPFile(t, localClashConfig, `version: 1
@@ -984,7 +1013,7 @@ func TestToolsCallSubscriptionsRefreshReportsStaleExactNodes(t *testing.T) {
 	t.Cleanup(server.Close)
 	subConfig := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
-	localClashConfig := filepath.Join(dir, "localclash.json")
+	localClashConfig := filepath.Join(dir, "localclash-intent.json")
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
 sources:
@@ -1483,7 +1512,7 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 	if _, err := os.Stat("generated/mihomo.yaml"); err != nil {
 		t.Fatalf("generated config missing after apply: %v", err)
 	}
-	if _, err := os.Stat("localclash.json"); err != nil {
+	if _, err := os.Stat("localclash-intent.json"); err != nil {
 		t.Fatalf("localclash config missing after apply: %v", err)
 	}
 	if _, err := json.Marshal(result.StructuredContent); err != nil {

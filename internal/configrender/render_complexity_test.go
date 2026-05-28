@@ -16,14 +16,9 @@ func TestRenderEmitsSelectionComplexityCounters(t *testing.T) {
 		},
 	}
 	runtimePath := filepath.Join(dir, "runtime.json")
-	writeFile(t, runtimePath, `version: 1
+	writeFile(t, runtimePath, `version: 2
 mode: router
 core: meta
-cores:
-  meta:
-    path: bin/mihomo
-meta:
-  config_path: generated/mihomo.yaml
 `)
 	rulesCache := filepath.Join(dir, "rules")
 	writeRenderPackIndex(t, rulesCache)

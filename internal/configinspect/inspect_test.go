@@ -113,7 +113,7 @@ func TestInspectOverlayWithEmptyMetadataReturnsNoOverlay(t *testing.T) {
 }
 
 func TestInspectIntentMissingConfigReturnsEmptyIntent(t *testing.T) {
-	result, err := InspectIntent(IntentOptions{ConfigPath: filepath.Join(t.TempDir(), "localclash.json")})
+	result, err := InspectIntent(IntentOptions{ConfigPath: filepath.Join(t.TempDir(), "localclash-intent.json")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestInspectIntentMissingConfigReturnsEmptyIntent(t *testing.T) {
 
 func TestInspectIntentReturnsResolvedDurableIntent(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.json")
+	configPath := filepath.Join(dir, "localclash-intent.json")
 	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	rulesCache := filepath.Join(dir, ".runtime", "rules", "packs")
 	writeInspectFile(t, configPath, `version: 1
@@ -200,7 +200,7 @@ packs:
 
 func TestInspectIntentReportsResolveErrorWithoutLosingRawGroups(t *testing.T) {
 	dir := t.TempDir()
-	configPath := filepath.Join(dir, "localclash.json")
+	configPath := filepath.Join(dir, "localclash-intent.json")
 	subscriptionPath := filepath.Join(dir, "subscription.gob")
 	writeInspectFile(t, configPath, `version: 1
 proxy_groups:

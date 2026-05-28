@@ -297,6 +297,9 @@ func runProductConfig(args []string, state appinit.RuntimeState) error {
 		if err := parseJSONOnly("config status", args[1:]); err != nil {
 			return err
 		}
+		if _, err := runtimeprofile.StatusFor(state.Paths.RuntimeProfilePath); err != nil {
+			return err
+		}
 		status, warnings := configStatus(state)
 		return printProductOK(productEnvelope{OK: true, Summary: "Config status read.", Status: status, Changes: []string{}, Warnings: warnings})
 	case "apply-template":
@@ -983,7 +986,7 @@ func componentStatus(state appinit.RuntimeState) map[string]any {
 func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 	warnings := []string{}
 	intent, err := configinspect.InspectIntent(configinspect.IntentOptions{
-		ConfigPath:          productWorkspacePath(state, "localclash.json"),
+		ConfigPath:          productWorkspacePath(state, "localclash-intent.json"),
 		Subscription:        state.Paths.SubscriptionPath,
 		SubscriptionConfig:  state.Paths.SubscriptionConfig,
 		SubscriptionRuntime: state.Paths.SubscriptionRuntime,
@@ -1009,13 +1012,13 @@ func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 }
 
 func applyTemplateInput(ctx context.Context, input configInput, state appinit.RuntimeState) (map[string]any, []string, error) {
-	configPath := productWorkspacePath(state, "localclash.json")
+	configPath := productWorkspacePath(state, "localclash-intent.json")
 	if !input.AllowOverwriteModified {
 		current, err := localconfig.Load(configPath)
 		if err == nil && current.PolicyTemplate != "" && current.PolicyTemplate != input.Template {
 			return nil, nil, codedProductError{
 				code:        "modified_config_requires_confirmation",
-				message:     "Current localclash.json does not match the requested template; refusing to overwrite without allow_overwrite_modified.",
+				message:     "Current localclash-intent.json does not match the requested template; refusing to overwrite without allow_overwrite_modified.",
 				nextActions: []string{"Set allow_overwrite_modified to true after user confirmation."},
 				details: map[string]string{
 					"current_policy_template": current.PolicyTemplate,
@@ -1027,7 +1030,7 @@ func applyTemplateInput(ctx context.Context, input configInput, state appinit.Ru
 			return nil, nil, err
 		}
 	}
-	config, template, err := policytemplate.Build(policytemplate.DefaultDir, input.Template)
+	config, template, err := policytemplate.Build(productWorkspacePath(state, policytemplate.DefaultDir), input.Template)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1063,7 +1066,7 @@ func configRenderOptions(state appinit.RuntimeState) configrender.Options {
 
 func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, error) {
 	opts := configRenderOptions(state)
-	configPath := productWorkspacePath(state, "localclash.json")
+	configPath := productWorkspacePath(state, "localclash-intent.json")
 	selectionPath := ""
 	source := "base"
 	warnings := []string{}

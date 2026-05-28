@@ -252,7 +252,7 @@ migrated=0
 for file in \
   localclash-subscriptions.json \
   subscription.gob \
-  localclash.json \
+  localclash-intent.json \
   localclash-packs.gob \
   localclash-runtime.json
 do

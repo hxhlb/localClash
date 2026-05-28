@@ -225,7 +225,7 @@ CPU 觀察：
 解讀：
 
 - 渲染本身相對便宜。
-- 將 `localclash.json` 解析成已選 pack、proxy group、policy group 和 custom rule 是主要成本。
+- 將 `localclash-intent.json` 解析成已選 pack、proxy group、policy group 和 custom rule 是主要成本。
 
 ### `config_patch_create`
 
