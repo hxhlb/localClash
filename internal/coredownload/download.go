@@ -60,8 +60,8 @@ const (
 )
 
 const (
-	defaultGitHubReleaseMirrors = "https://gh.llkk.cc/https://github.com https://gh-proxy.com/https://github.com https://v1.ax/https://github.com https://ghp.xptvhelper.link/https://github.com"
-	defaultGitHubRawMirrors     = "https://v1.ax/https://raw.githubusercontent.com https://ghp.xptvhelper.link/https://raw.githubusercontent.com https://fastly.jsdelivr.net/gh"
+	defaultGitHubReleaseMirrors = "https://gh-proxy.com/https://github.com https://ghproxy.imciel.com/https://github.com https://gitproxy.mrhjx.cn/https://github.com https://gh.jasonzeng.dev/https://github.com https://gh.monlor.com/https://github.com https://gh.noki.icu/https://github.com https://ghfast.top/https://github.com"
+	defaultGitHubRawMirrors     = "https://gh-proxy.com/https://raw.githubusercontent.com https://ghproxy.imciel.com/https://raw.githubusercontent.com https://gitproxy.mrhjx.cn/https://raw.githubusercontent.com https://gh.jasonzeng.dev/https://raw.githubusercontent.com https://gh.monlor.com/https://raw.githubusercontent.com https://gh.noki.icu/https://raw.githubusercontent.com https://ghfast.top/https://raw.githubusercontent.com https://fastly.jsdelivr.net/gh"
 )
 
 func Download(ctx context.Context, opts Options) ([]Result, error) {

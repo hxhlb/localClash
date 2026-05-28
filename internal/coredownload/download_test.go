@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -142,6 +143,48 @@ func TestDefaultHostOutputPathIncludesCurrentPlatform(t *testing.T) {
 	}
 }
 
+func TestDownloadCandidatesUsesDefaultGitHubReleaseMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz")
+	want := []string{
+		"https://gh-proxy.com/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://ghproxy.imciel.com/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://gitproxy.mrhjx.cn/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://gh.jasonzeng.dev/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://gh.monlor.com/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://gh.noki.icu/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://ghfast.top/https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+		"https://github.com/MetaCubeX/mihomo/releases/download/v1/mihomo.gz",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+	assertNoOldDefaultMirrors(t, got)
+}
+
+func TestDownloadCandidatesUsesDefaultGitHubAPIMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_API_MIRRORS", "")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://api.github.com/repos/MetaCubeX/mihomo/releases/latest")
+	want := []string{
+		"https://gh-proxy.com/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://ghproxy.imciel.com/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://gitproxy.mrhjx.cn/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://gh.jasonzeng.dev/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://gh.monlor.com/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://gh.noki.icu/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://ghfast.top/https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+		"https://api.github.com/repos/MetaCubeX/mihomo/releases/latest",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+	assertNoOldDefaultMirrors(t, got)
+}
+
 func TestDownloadCandidatesMirrorsGitHubReleaseBeforeDirect(t *testing.T) {
 	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
 	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
@@ -167,6 +210,28 @@ func TestDownloadCandidatesCanDisableMirrors(t *testing.T) {
 	}
 }
 
+func TestRawMirrorCandidatesUseDefaultMirrorsAndJsdelivr(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RAW_MIRRORS", "")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version")
+	want := []string{
+		"https://gh-proxy.com/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://ghproxy.imciel.com/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://gitproxy.mrhjx.cn/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://gh.jasonzeng.dev/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://gh.monlor.com/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://gh.noki.icu/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://ghfast.top/https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+		"https://fastly.jsdelivr.net/gh/vernesong/OpenClash@core/master/core_version",
+		"https://raw.githubusercontent.com/vernesong/OpenClash/core/master/core_version",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+	assertNoOldDefaultMirrors(t, got)
+}
+
 func TestRawMirrorCandidatesIncludeJsdelivrShape(t *testing.T) {
 	t.Setenv("LOCALCLASH_GITHUB_RAW_MIRRORS", "https://fastly.jsdelivr.net/gh")
 	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
@@ -178,5 +243,16 @@ func TestRawMirrorCandidatesIncludeJsdelivrShape(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+}
+
+func assertNoOldDefaultMirrors(t *testing.T, candidates []string) {
+	t.Helper()
+	for _, candidate := range candidates {
+		for _, oldMirror := range []string{"gh.llkk.cc", "v1.ax", "ghp.xptvhelper.link"} {
+			if strings.Contains(candidate, oldMirror) {
+				t.Fatalf("candidate %q contains old mirror %q", candidate, oldMirror)
+			}
+		}
 	}
 }

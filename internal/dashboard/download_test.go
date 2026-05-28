@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,27 @@ func TestExtractZipStripsSingleTopLevelDirectory(t *testing.T) {
 	}
 }
 
+func TestDownloadCandidatesUsesDefaultGitHubReleaseMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip")
+	want := []string{
+		"https://gh-proxy.com/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://ghproxy.imciel.com/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://gitproxy.mrhjx.cn/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://gh.jasonzeng.dev/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://gh.monlor.com/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://gh.noki.icu/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://ghfast.top/https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+		"https://github.com/Zephyruso/zashboard/releases/download/v1/dist.zip",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+	assertNoOldDefaultMirrors(t, got)
+}
+
 func TestDownloadCandidatesMirrorsGitHubBeforeDirect(t *testing.T) {
 	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
 	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
@@ -123,4 +145,15 @@ func writeZip(path string, files map[string]string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func assertNoOldDefaultMirrors(t *testing.T, candidates []string) {
+	t.Helper()
+	for _, candidate := range candidates {
+		for _, oldMirror := range []string{"gh.llkk.cc", "v1.ax", "ghp.xptvhelper.link"} {
+			if strings.Contains(candidate, oldMirror) {
+				t.Fatalf("candidate %q contains old mirror %q", candidate, oldMirror)
+			}
+		}
+	}
 }
