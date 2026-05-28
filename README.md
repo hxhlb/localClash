@@ -653,14 +653,13 @@ Machine-readable output for MCP tools and agent workflows:
 go run . doctor --json
 ```
 
-## Support
+## 支持 localClash
 
-localClash is free to use.
+localClash 是免費項目。
 
-If it saves you time on configuration, debugging, or troubleshooting, you can
-voluntarily support its maintenance here:
+如果它幫你節省了配置、調試或排錯時間，可以自願支持後續維護：
 
-[Support localClash](./SUPPORT.md)
+[支持 localClash / Support localClash](./SUPPORT.md)
 
 ## License
 
