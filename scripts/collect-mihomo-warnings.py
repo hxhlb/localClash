@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect long-running Mihomo warning evidence from the external controller."""
+"""Collect long-running Mihomo log evidence from the external controller."""
 
 from __future__ import annotations
 
@@ -118,12 +118,20 @@ def request_headers(secret: str) -> dict[str, str]:
     return {
         "Accept": "application/json, text/plain, */*",
         "Authorization": f"Bearer {secret}",
-        "User-Agent": "localClash-warning-collector/1",
+        "User-Agent": "localClash-log-collector/1",
     }
 
 
 def json_default(value: Any) -> str:
     return str(value)
+
+
+def env_value(primary: str, fallback: str, default: str) -> str:
+    return os.environ.get(primary, os.environ.get(fallback, default))
+
+
+def env_int(primary: str, fallback: str, default: str) -> int:
+    return int(env_value(primary, fallback, default))
 
 
 class JsonlWriter:
@@ -144,13 +152,34 @@ class JsonlWriter:
             self._file.close()
 
 
+def normalize_log_level(level: Any) -> str:
+    if level is None:
+        return "unknown"
+    return str(level).strip().lower() or "unknown"
+
+
+def is_warning_level(level: Any) -> bool:
+    return normalize_log_level(level) in {
+        "warning",
+        "warn",
+        "error",
+        "fatal",
+        "panic",
+    }
+
+
 class CollectorState:
     def __init__(self, sample_limit: int) -> None:
         self.started_at = now_iso()
+        self.first_log_at: str | None = None
+        self.last_log_at: str | None = None
+        self.log_count = 0
         self.first_warning_at: str | None = None
         self.last_warning_at: str | None = None
         self.warning_count = 0
+        self.level_counts: collections.Counter[str] = collections.Counter()
         self.class_counts: collections.Counter[str] = collections.Counter()
+        self.warning_class_counts: collections.Counter[str] = collections.Counter()
         self.tag_counts: collections.Counter[str] = collections.Counter()
         self.samples_by_class: dict[str, list[str]] = collections.defaultdict(list)
         self.sample_limit = sample_limit
@@ -160,13 +189,28 @@ class CollectorState:
         self.stream_errors = 0
         self._lock = threading.Lock()
 
-    def record_warning(self, timestamp: str, primary: str, tags: list[str], message: str) -> None:
+    def record_log(
+        self,
+        timestamp: str,
+        level: Any,
+        primary: str,
+        tags: list[str],
+        message: str,
+    ) -> None:
         with self._lock:
-            self.warning_count += 1
-            if self.first_warning_at is None:
-                self.first_warning_at = timestamp
-            self.last_warning_at = timestamp
+            normalized_level = normalize_log_level(level)
+            self.log_count += 1
+            if self.first_log_at is None:
+                self.first_log_at = timestamp
+            self.last_log_at = timestamp
+            self.level_counts[normalized_level] += 1
             self.class_counts[primary] += 1
+            if is_warning_level(normalized_level):
+                self.warning_count += 1
+                if self.first_warning_at is None:
+                    self.first_warning_at = timestamp
+                self.last_warning_at = timestamp
+                self.warning_class_counts[primary] += 1
             for tag in tags:
                 self.tag_counts[tag] += 1
             samples = self.samples_by_class[primary]
@@ -197,10 +241,15 @@ class CollectorState:
                 "api": api,
                 "level": level,
                 "out_dir": str(out_dir),
+                "log_count": self.log_count,
+                "first_log_at": self.first_log_at,
+                "last_log_at": self.last_log_at,
+                "level_counts": dict(self.level_counts.most_common()),
                 "warning_count": self.warning_count,
                 "first_warning_at": self.first_warning_at,
                 "last_warning_at": self.last_warning_at,
                 "class_counts": dict(self.class_counts.most_common()),
+                "warning_class_counts": dict(self.warning_class_counts.most_common()),
                 "tag_counts": dict(self.tag_counts.most_common()),
                 "samples_by_class": dict(self.samples_by_class),
                 "snapshots": self.snapshots,
@@ -213,33 +262,41 @@ class CollectorState:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Stream Mihomo warnings and collect periodic controller snapshots "
+            "Stream Mihomo logs and collect periodic controller snapshots "
             "for router-template diagnosis."
         )
     )
     parser.add_argument("--api", default=os.environ.get("MIHOMO_API", DEFAULT_API))
     parser.add_argument("--secret", default=os.environ.get("MIHOMO_SECRET", DEFAULT_SECRET))
-    parser.add_argument("--level", default=os.environ.get("MIHOMO_LOG_LEVEL", "warning"))
+    parser.add_argument("--level", default=os.environ.get("MIHOMO_LOG_LEVEL", "info"))
     parser.add_argument(
         "--duration",
         type=int,
-        default=int(os.environ.get("MIHOMO_WARNING_DURATION", "0")),
+        default=env_int("MIHOMO_LOG_DURATION", "MIHOMO_WARNING_DURATION", "0"),
         help="Run duration in seconds. 0 means until interrupted.",
     )
     parser.add_argument(
         "--out-dir",
-        default=os.environ.get("MIHOMO_WARNING_OUT_DIR", ""),
-        help="Output directory. Defaults to .runtime/diagnostics/mihomo-warnings-<utc>.",
+        default=env_value("MIHOMO_LOG_OUT_DIR", "MIHOMO_WARNING_OUT_DIR", ""),
+        help="Output directory. Defaults to .runtime/diagnostics/mihomo-logs-<utc>.",
     )
     parser.add_argument(
         "--snapshot-interval",
         type=int,
-        default=int(os.environ.get("MIHOMO_WARNING_SNAPSHOT_INTERVAL", "300")),
+        default=env_int(
+            "MIHOMO_LOG_SNAPSHOT_INTERVAL",
+            "MIHOMO_WARNING_SNAPSHOT_INTERVAL",
+            "300",
+        ),
     )
     parser.add_argument(
         "--summary-interval",
         type=int,
-        default=int(os.environ.get("MIHOMO_WARNING_SUMMARY_INTERVAL", "60")),
+        default=env_int(
+            "MIHOMO_LOG_SUMMARY_INTERVAL",
+            "MIHOMO_WARNING_SUMMARY_INTERVAL",
+            "60",
+        ),
     )
     parser.add_argument("--reconnect-delay", type=float, default=5.0)
     parser.add_argument("--http-timeout", type=float, default=20.0)
@@ -255,10 +312,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--ssh-host",
-        default=os.environ.get("MIHOMO_WARNING_SSH_HOST", ""),
+        default=env_value("MIHOMO_LOG_SSH_HOST", "MIHOMO_WARNING_SSH_HOST", ""),
         help="Optional read-only process snapshot target, for example root@192.168.6.1.",
     )
     parser.add_argument("--ssh-timeout", type=float, default=10.0)
+    parser.add_argument("--print-logs", action="store_true")
     parser.add_argument("--print-warnings", action="store_true")
     return parser.parse_args()
 
@@ -540,6 +598,7 @@ def stream_once(
     args: argparse.Namespace,
     state: CollectorState,
     stop: threading.Event,
+    logs: JsonlWriter,
     warnings: JsonlWriter,
     events: JsonlWriter,
     stream_timeout: float,
@@ -567,18 +626,23 @@ def stream_once(
             timestamp = now_iso()
             message, truncated = trim_message(str(parsed["message"]), args.max_message_bytes)
             primary, tags = classify_message(message)
+            level = parsed.get("level") or args.level
             entry = {
                 "ts": timestamp,
-                "level": parsed.get("level") or args.level,
+                "level": level,
                 "class": primary,
                 "tags": tags,
                 "message": message,
                 "truncated": truncated,
                 "raw": parsed.get("raw"),
             }
-            warnings.write(entry)
-            state.record_warning(timestamp, primary, tags, message)
-            if args.print_warnings:
+            logs.write(entry)
+            if is_warning_level(level):
+                warnings.write(entry)
+            state.record_log(timestamp, level, primary, tags, message)
+            if args.print_logs:
+                print(f"[{timestamp}] {normalize_log_level(level)} {primary}: {message}", flush=True)
+            elif args.print_warnings and is_warning_level(level):
                 print(f"[{timestamp}] {primary}: {message}", flush=True)
     events.write(
         {
@@ -594,6 +658,7 @@ def stream_loop(
     args: argparse.Namespace,
     state: CollectorState,
     stop: threading.Event,
+    logs: JsonlWriter,
     warnings: JsonlWriter,
     events: JsonlWriter,
     errors: JsonlWriter,
@@ -611,7 +676,7 @@ def stream_loop(
                     stop.set()
                     return
                 stream_timeout = min(args.stream_timeout, max(0.25, remaining))
-            stream_once(args, state, stop, warnings, events, stream_timeout)
+            stream_once(args, state, stop, logs, warnings, events, stream_timeout)
         except (TimeoutError, socket.timeout) as exc:
             events.write({"ts": now_iso(), "kind": "stream_idle_timeout", "detail": repr(exc)})
         except (urllib.error.URLError, http.client.IncompleteRead, OSError) as exc:
@@ -639,6 +704,7 @@ def write_metadata(args: argparse.Namespace, out_dir: Path) -> None:
         "snapshot_interval": args.snapshot_interval,
         "summary_interval": args.summary_interval,
         "files": {
+            "logs": "logs.jsonl",
             "warnings": "warnings.jsonl",
             "snapshots": "snapshots.jsonl",
             "summaries": "summary.jsonl",
@@ -649,6 +715,10 @@ def write_metadata(args: argparse.Namespace, out_dir: Path) -> None:
         "notes": [
             "This collector is read-only against the Mihomo controller.",
             "The bearer token is intentionally not written to metadata.",
+            (
+                "logs.jsonl contains the full streamed log level; warnings.jsonl "
+                "contains warning/error-level entries only."
+            ),
             "Snapshot data summarizes configs, proxies, and rules for template diagnosis.",
         ],
     }
@@ -661,7 +731,11 @@ def write_metadata(args: argparse.Namespace, out_dir: Path) -> None:
 def main() -> int:
     args = parse_args()
     args.api = normalize_api(args.api)
-    out_dir = Path(args.out_dir) if args.out_dir else Path(DEFAULT_OUT_ROOT) / f"mihomo-warnings-{utc_stamp()}"
+    out_dir = (
+        Path(args.out_dir)
+        if args.out_dir
+        else Path(DEFAULT_OUT_ROOT) / f"mihomo-logs-{utc_stamp()}"
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
     write_metadata(args, out_dir)
 
@@ -675,14 +749,15 @@ def main() -> int:
     signal.signal(signal.SIGTERM, handle_signal)
 
     state = CollectorState(sample_limit=args.sample_limit)
+    logs = JsonlWriter(out_dir / "logs.jsonl")
     warnings = JsonlWriter(out_dir / "warnings.jsonl")
     snapshots = JsonlWriter(out_dir / "snapshots.jsonl")
     summaries = JsonlWriter(out_dir / "summary.jsonl")
     events = JsonlWriter(out_dir / "events.jsonl")
     errors = JsonlWriter(out_dir / "errors.jsonl")
 
-    writers = (warnings, snapshots, summaries, events, errors)
-    print(f"mihomo warning collector output: {out_dir}")
+    writers = (logs, warnings, snapshots, summaries, events, errors)
+    print(f"mihomo log collector output: {out_dir}")
     print(f"streaming {endpoint(args.api, '/logs', {'level': args.level})}")
 
     snapshot_thread = threading.Thread(
@@ -701,7 +776,7 @@ def main() -> int:
     summary_thread.start()
 
     try:
-        stream_loop(args, state, stop, warnings, events, errors)
+        stream_loop(args, state, stop, logs, warnings, events, errors)
     finally:
         stop.set()
         snapshot_thread.join(timeout=5)

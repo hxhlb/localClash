@@ -62,12 +62,12 @@ curl -sS -H "Authorization: Bearer ${MIHOMO_SECRET}" \
   "${MIHOMO_API}/rules"
 ```
 
-Mihomo also exposes a streaming log endpoint. Use it for long-running warning
-collection:
+Mihomo also exposes a streaming log endpoint. Use `level=info` when collection
+needs the info-level context around warning bursts:
 
 ```bash
 curl -N -H "Authorization: Bearer ${MIHOMO_SECRET}" \
-  "${MIHOMO_API}/logs?level=warning"
+  "${MIHOMO_API}/logs?level=info"
 ```
 
 With `jq`, quick live checks are:
@@ -268,7 +268,7 @@ fields are runtime counters. In the captured sample their timestamps were
 already from `2026-05-25`, so they are especially unsafe to reuse as latest
 router state without a fresh API call.
 
-## Long-Running Warning Collection
+## Long-Running Log Collection
 
 Use the repository collector when the goal is to collect enough evidence to
 improve router templates instead of inspecting a single warning burst:
@@ -277,9 +277,10 @@ improve router templates instead of inspecting a single warning burst:
 scripts/collect-mihomo-warnings.py \
   --api http://192.168.6.1:9090 \
   --secret 123456 \
+  --level info \
   --duration 21600 \
   --snapshot-interval 300 \
-  --print-warnings
+  --print-logs
 ```
 
 For an overnight or open-ended run, omit `--duration` and stop it with
@@ -287,13 +288,18 @@ For an overnight or open-ended run, omit `--duration` and stop it with
 directory under `.runtime/diagnostics/` containing:
 
 ```text
-warnings.jsonl   raw warning stream with classifier tags
+logs.jsonl       raw streamed logs at the requested level with classifier tags
+warnings.jsonl   warning/error subset extracted from logs.jsonl
 snapshots.jsonl  periodic /configs, /proxies, and /rules summaries
-summary.jsonl    periodic warning count summaries
+summary.jsonl    periodic log count, warning count, and class summaries
 summary.json     latest summary for quick inspection
 events.jsonl     stream connect, disconnect, and reconnect events
 errors.jsonl     controller or snapshot errors
 ```
+
+Use `--level warning` when only warning volume is needed. The default collector
+level is `info` so the output includes more context for DNS, rule-match, and
+runtime-transition diagnosis.
 
 If router-side process samples are needed in the same time window, add an
 optional read-only SSH target:
@@ -304,6 +310,6 @@ scripts/collect-mihomo-warnings.py \
   --duration 21600
 ```
 
-The SSH sample is optional because the Mihomo controller is enough for warning,
+The SSH sample is optional because the Mihomo controller is enough for log,
 config, proxy, and rule evidence. Use it when CPU or process-state correlation
 is part of the investigation.
