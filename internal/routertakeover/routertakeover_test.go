@@ -66,6 +66,13 @@ func TestApplyDryRunBuildsLocalClashOwnedScript(t *testing.T) {
 	if dnsBypass < 0 || dnsRedirect < 0 || dnsBypass > dnsRedirect {
 		t.Fatalf("local DNS bypass must be installed before DNS hijack redirect:\n%s", result.Script)
 	}
+	for _, line := range strings.Split(result.Script, "\n") {
+		if strings.Contains(line, "localclash_dns_redirect") && strings.Contains(line, "redirect to $DNS_PORT") {
+			if !strings.Contains(line, "meta l4proto") || !strings.Contains(line, "th dport 53") {
+				t.Fatalf("DNS redirect chain rule must carry its own transport match for nft type checking:\n%s", line)
+			}
+		}
+	}
 	if strings.Contains(result.Script, "OpenClash") {
 		t.Fatalf("router takeover script should not special-case OpenClash:\n%s", result.Script)
 	}

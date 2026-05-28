@@ -2714,6 +2714,53 @@ func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
 	}
 }
 
+func TestRouterTakeoverApplyFailureMarksToolResultError(t *testing.T) {
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "localclash-runtime.json")
+	if _, err := runtimeprofile.Configure(profile, runtimeprofile.ModeRouter, runtimeprofile.CoreMeta); err != nil {
+		t.Fatal(err)
+	}
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: profile,
+			GeneratedConfig:    filepath.Join(dir, "generated", "mihomo.yaml"),
+			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		},
+	}
+
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "router_takeover_apply",
+			"arguments": map[string]any{
+				"background": false,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("router_takeover_apply returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	if !result.IsError {
+		t.Fatalf("router_takeover_apply IsError = false, content = %+v", result.StructuredContent)
+	}
+	content := result.StructuredContent.(map[string]any)
+	if !strings.Contains(content["error"].(string), "run_runtime") {
+		t.Fatalf("content = %+v, want run_runtime error", content)
+	}
+	if statusFile, ok := content["task_status_file"].(string); ok && statusFile != "" {
+		statusText, err := os.ReadFile(statusFile)
+		if err != nil {
+			t.Fatalf("read task status: %v", err)
+		}
+		if !strings.Contains(string(statusText), `"status": "error"`) {
+			t.Fatalf("task status = %s, want error", statusText)
+		}
+	}
+}
+
 func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 	state := appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{

@@ -388,11 +388,25 @@ func runProductTakeover(args []string, state appinit.RuntimeState) error {
 		if err != nil {
 			return err
 		}
+		if result.Error != "" || !result.Applied {
+			message := strings.TrimSpace(result.Error)
+			if message == "" {
+				message = "router takeover apply did not complete"
+			}
+			return codedProductError{code: "router_takeover_apply_failed", message: message, details: result, nextActions: result.NextActions}
+		}
 		return printProductOK(productEnvelope{OK: true, Changed: result.Applied, Summary: "Router takeover apply completed.", Status: result, Changes: changedIf(result.Applied, "takeover_applied"), Warnings: result.Warnings, NextActions: result.NextActions})
 	case "stop":
 		result, err := routertakeover.Stop(ctx, opts)
 		if err != nil {
 			return err
+		}
+		if result.Error != "" || !result.Stopped {
+			message := strings.TrimSpace(result.Error)
+			if message == "" {
+				message = "router takeover stop did not complete"
+			}
+			return codedProductError{code: "router_takeover_stop_failed", message: message, details: result, nextActions: result.NextActions}
 		}
 		return printProductOK(productEnvelope{OK: true, Changed: result.Stopped, Summary: "Router takeover stop completed.", Status: result, Changes: changedIf(result.Stopped, "takeover_stopped"), Warnings: result.Warnings, NextActions: result.NextActions})
 	default:
