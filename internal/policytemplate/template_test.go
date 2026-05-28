@@ -252,11 +252,12 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 			t.Fatalf("default template should not include collapsed pack %q", pack)
 		}
 	}
-	if got := customRuleTarget(config.CustomRules, "telegram-ip-ranges"); got != "💬 通信服务" {
-		t.Fatalf("telegram IP custom rule target = %q, want 💬 通信服务", got)
+	telegramRule := customRuleByID(config.CustomRules, "telegram-geoip")
+	if telegramRule == nil || telegramRule.Target != "💬 通信服务" {
+		t.Fatalf("telegram GEOIP custom rule = %+v, want 💬 通信服务", telegramRule)
 	}
-	if len(config.CustomRules[0].Rules) != 12 {
-		t.Fatalf("telegram IP custom rule count = %d, want 12", len(config.CustomRules[0].Rules))
+	if len(telegramRule.Rules) != 1 || telegramRule.Rules[0].Type != "geoip" || telegramRule.Rules[0].Value != "telegram" || !telegramRule.Rules[0].NoResolve {
+		t.Fatalf("telegram GEOIP custom rule lines = %+v, want geoip telegram no-resolve", telegramRule.Rules)
 	}
 	if got := config.Packs[len(config.Packs)-2].Target; got != "🧭 漏网之鱼" {
 		t.Fatalf("geolocation fallback target = %q, want 🧭 漏网之鱼", got)
@@ -365,11 +366,11 @@ func hasPack(packs []localconfig.Pack, source, name string) bool {
 	return false
 }
 
-func customRuleTarget(customRules []localconfig.CustomRule, id string) string {
-	for _, rule := range customRules {
-		if rule.ID == id {
-			return rule.Target
+func customRuleByID(customRules []localconfig.CustomRule, id string) *localconfig.CustomRule {
+	for i := range customRules {
+		if customRules[i].ID == id {
+			return &customRules[i]
 		}
 	}
-	return ""
+	return nil
 }

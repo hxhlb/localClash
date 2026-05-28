@@ -27,6 +27,18 @@ func TestRenderRuleSpecsSupportsDomainSuffix(t *testing.T) {
 	}
 }
 
+func TestRenderRuleSpecsSupportsGeoIPNoResolve(t *testing.T) {
+	rules, err := renderRuleSpecs([]ruleSpec{
+		{GeoIP: "telegram", Target: "DIRECT", NoResolve: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rules[0]; got != "GEOIP,telegram,DIRECT,no-resolve" {
+		t.Fatalf("rule = %q, want GEOIP,telegram,DIRECT,no-resolve", got)
+	}
+}
+
 func TestParseOverlayRuleLineSupportsGeoSite(t *testing.T) {
 	rule, ok := parseOverlayRuleLine("GEOSITE,google,Global")
 	if !ok {
@@ -34,6 +46,16 @@ func TestParseOverlayRuleLineSupportsGeoSite(t *testing.T) {
 	}
 	if rule.Type != "GEOSITE" || rule.Value != "google" || rule.Target != "Global" || rule.Provider != "" {
 		t.Fatalf("rule = %+v, want GEOSITE google Global", rule)
+	}
+}
+
+func TestParseOverlayRuleLineSupportsGeoIP(t *testing.T) {
+	rule, ok := parseOverlayRuleLine("GEOIP,telegram,Global,no-resolve")
+	if !ok {
+		t.Fatal("expected GEOIP overlay rule to parse")
+	}
+	if rule.Type != "GEOIP" || rule.Value != "telegram" || rule.Target != "Global" || rule.Provider != "" {
+		t.Fatalf("rule = %+v, want GEOIP telegram Global", rule)
 	}
 }
 

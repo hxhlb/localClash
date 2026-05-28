@@ -531,7 +531,7 @@ func parseOverlayRuleLine(line string) (configmeta.OverlayRule, bool) {
 	switch parts[0] {
 	case "RULE-SET":
 		return configmeta.OverlayRule{Type: parts[0], Provider: parts[1], Target: parts[2]}, true
-	case "DOMAIN", "DOMAIN-SUFFIX", "GEOSITE", "IP-CIDR", "IP-CIDR6":
+	case "DOMAIN", "DOMAIN-SUFFIX", "GEOSITE", "GEOIP", "IP-CIDR", "IP-CIDR6":
 		return configmeta.OverlayRule{Type: parts[0], Value: parts[1], Target: parts[2]}, true
 	default:
 		return configmeta.OverlayRule{}, false
@@ -822,7 +822,11 @@ func renderRuleSpecs(specs []ruleSpec) ([]string, error) {
 			}
 			rules = append(rules, line)
 		case rule.GeoIP != "":
-			rules = append(rules, fmt.Sprintf("GEOIP,%s,%s", rule.GeoIP, target))
+			line := fmt.Sprintf("GEOIP,%s,%s", rule.GeoIP, target)
+			if rule.NoResolve {
+				line += ",no-resolve"
+			}
+			rules = append(rules, line)
 		case rule.Match:
 			rules = append(rules, fmt.Sprintf("MATCH,%s", target))
 		default:

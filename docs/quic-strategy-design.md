@@ -54,7 +54,7 @@ This is an additional high-priority transport rule. It does not replace `GEOSITE
 
 ## Durable Model
 
-Phase 1 adds `transport_rules` to the localClash intent and selection model. This keeps `AND/NETWORK/DST-PORT` rules separate from domain/CIDR custom rules.
+Phase 1 adds `transport_rules` to the localClash intent and selection model. This keeps `AND/NETWORK/DST-PORT` rules separate from domain/CIDR/GEOIP custom rules.
 
 The default template now carries:
 

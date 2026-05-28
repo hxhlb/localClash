@@ -164,7 +164,8 @@ func TestResolveEnabledLocalRulePacks(t *testing.T) {
   "target_options": ["DIRECT", "AI"],
   "rules": [
     {"domain_suffix": "openai.com"},
-    {"ip_cidr": "1.1.1.0/24", "no_resolve": true}
+    {"ip_cidr": "1.1.1.0/24", "no_resolve": true},
+    {"geoip": "telegram", "no_resolve": true}
   ]
 }`)
 
@@ -178,7 +179,7 @@ func TestResolveEnabledLocalRulePacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if len(resolved.RulePacks) != 1 || resolved.RulePacks[0].Target != "DIRECT" || resolved.RulePacks[0].RuleCount != 2 {
+	if len(resolved.RulePacks) != 1 || resolved.RulePacks[0].Target != "DIRECT" || resolved.RulePacks[0].RuleCount != 3 {
 		t.Fatalf("rule packs = %+v, want resolved local rule pack", resolved.RulePacks)
 	}
 	if len(resolved.Selection.LocalRulePacks) != 1 || resolved.Selection.LocalRulePacks[0].ID != "ai" {
@@ -191,7 +192,7 @@ func TestResolveEnabledLocalRulePacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderFragment returned error: %v", err)
 	}
-	want := []string{"DOMAIN-SUFFIX,openai.com,DIRECT", "IP-CIDR,1.1.1.0/24,DIRECT,no-resolve"}
+	want := []string{"DOMAIN-SUFFIX,openai.com,DIRECT", "IP-CIDR,1.1.1.0/24,DIRECT,no-resolve", "GEOIP,telegram,DIRECT,no-resolve"}
 	if !reflect.DeepEqual(fragment.Rules, want) {
 		t.Fatalf("fragment rules = %#v, want %#v", fragment.Rules, want)
 	}
