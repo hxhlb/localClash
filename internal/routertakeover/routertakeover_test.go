@@ -11,6 +11,9 @@ import (
 	"localclash/internal/runtimeprofile"
 )
 
+// NOTE: These Go tests are not a functional acceptance gate for router takeover.
+// Any behavior change in this package must also be exercised in the Docker
+// OpenWrt environment; do not treat go test alone as enough validation.
 func TestApplyDryRunBuildsLocalClashOwnedScript(t *testing.T) {
 	dir := t.TempDir()
 	profilePath := filepath.Join(dir, runtimeprofile.DefaultPath)
