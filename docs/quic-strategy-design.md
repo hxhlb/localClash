@@ -47,10 +47,13 @@ rules:
   - GEOSITE,youtube,📺 YouTube
   - GEOSITE,google,🔎 Google
   ...
-  - MATCH,🧭 漏网之鱼
+  - MATCH,DIRECT
 ```
 
 This is an additional high-priority transport rule. It does not replace `GEOSITE,youtube` or other existing rules.
+The final fallback stays `DIRECT` so router deployments remain blacklist-based
+and unclassified game accelerator traffic is not captured by a catch-all proxy
+group.
 
 ## Durable Model
 

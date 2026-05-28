@@ -50,11 +50,18 @@ Current examples include:
 - `.local`
 - `.lan`
 - `.home.arpa`
+- DHCP hostnames learned by the router, such as `Ronnie-PC`
 - loopback ranges
 - private IPv4 ranges
 - link-local ranges
 - local IPv6 ranges
 - system DNS policy for local names
+
+In router transparent-proxy mode, DNS hijack is part of the local safety surface.
+It must preserve OpenWrt dnsmasq behavior for router-local names and DHCP lease
+hostnames. A DNS hijack rule that captures `192.168.6.1:53` client queries and
+sends them to Mihomo without a local dnsmasq forwarding policy breaks this
+contract, because Mihomo does not know the DHCP lease table by itself.
 
 This layer is not a place for product categories such as AI, media, games,
 developer tools, ads, or company domains.
@@ -174,6 +181,21 @@ Examples:
   before the final `DIRECT` fallback
 
 Optional packs and overrides must be rendered before fallback.
+
+Router transparent-proxy mode must stay blacklist-oriented for game accelerator
+compatibility. Known domains, CIDRs, GEOIP, GEOSITE, transport rules, and user
+overrides may route selected traffic to policy groups, but unknown traffic must
+fall through to the physical network. The final rule for router/game-accelerator
+scenarios is therefore always:
+
+```yaml
+- MATCH,DIRECT
+```
+
+Do not use a "catch-all proxy" fallback such as `MATCH,🧭 漏网之鱼` for router
+mode. That turns the profile into whitelist mode, captures traffic that the
+rules do not understand, and can break UDP-heavy game accelerator clients that
+expect unclassified traffic to remain direct.
 
 Targets are graph references, not Go-side aliases. The only terminal runtime
 actions are `DIRECT` and `REJECT`. Names such as `⚡ 自动选择`, `🎯 手动选择`,

@@ -23,7 +23,7 @@ behavior must appear as explicit patch files in the selected template manifest.
   `policy-templates/localclash-default.json`. Each ordered file under
   `policy-templates/localclash-default.d/` contributes one stable default patch,
   such as region exits, communication/social routing, Steam, media groups, games,
-  and fallback behavior.
+  and tail routing.
 
 Both templates are patch-layered product configuration. Neither depends on a
 separate preset file outside `policy-templates/`.
@@ -49,3 +49,18 @@ bytes.
 MCP `config_status` exposes the active template through `intent.packs`,
 `intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. For compact
 Agent-facing routing discovery, use the read-only `routing_explain` tool.
+
+## Router And Game Accelerators
+
+Router transparent-proxy mode must use blacklist semantics. The default template
+may send known non-China `GEOSITE` categories to a Dashboard-visible policy group,
+but the final `MATCH` fallback must remain direct:
+
+```yaml
+- MATCH,DIRECT
+```
+
+This is required for game accelerator compatibility. A template that renders
+`MATCH,🧭 漏网之鱼` turns unknown traffic into proxy-selected traffic, which is
+whitelist behavior and can intercept game accelerator UDP/IP flows that are not
+covered by localClash's domain or geodata rules.
