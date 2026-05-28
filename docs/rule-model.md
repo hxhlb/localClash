@@ -48,7 +48,8 @@ Current examples include:
 
 - `localhost`
 - `.local`
-- `.lan`
+- the router's configured LAN domain, for example `.lan` when OpenWrt dnsmasq
+  uses `local=/lan/` and `domain=lan`
 - `.home.arpa`
 - DHCP hostnames learned by the router, such as `Ronnie-PC`
 - loopback ranges
@@ -59,9 +60,12 @@ Current examples include:
 
 In router transparent-proxy mode, DNS hijack is part of the local safety surface.
 It must preserve OpenWrt dnsmasq behavior for router-local names and DHCP lease
-hostnames. A DNS hijack rule that captures `192.168.6.1:53` client queries and
-sends them to Mihomo without a local dnsmasq forwarding policy breaks this
-contract, because Mihomo does not know the DHCP lease table by itself.
+hostnames. The LAN DNS address and LAN domain are environment facts: discover
+them from the active router configuration instead of hard-coding a private IP or
+domain suffix. A DNS hijack rule that captures client queries to the router's LAN
+DNS service and sends them to Mihomo without a local dnsmasq forwarding policy
+breaks this contract, because Mihomo does not know the DHCP lease table by
+itself.
 
 This layer is not a place for product categories such as AI, media, games,
 developer tools, ads, or company domains.

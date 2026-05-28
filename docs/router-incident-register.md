@@ -21,6 +21,8 @@ Evidence:
 - `nslookup Ronnie-PC 192.168.6.1` from the router returned the DHCP address,
   proving dnsmasq could answer when queried through the router LAN address.
 - `dig @192.168.6.1 Ronnie-PC A` from a LAN client returned `NXDOMAIN`.
+- In this incident, `192.168.6.1` was the user's current router LAN address. It
+  is evidence from this network, not a product default or a portable assumption.
 - The nft `localClash DNS hijack` counter increased during that LAN-client DNS
   query, proving the query was redirected to Mihomo DNS before dnsmasq could
   answer it.
@@ -42,6 +44,11 @@ Product requirement:
 - Router takeover must preserve OpenWrt local resolver behavior for DHCP
   hostnames, `.lan`, `.local`, `.home.arpa`, reverse private zones, and other
   LAN-local names.
+- Router takeover must discover the active LAN DNS address and LAN domain from
+  current OpenWrt state instead of hard-coding `192.168.6.1` or assuming `.lan`
+  globally. Relevant evidence includes `network.lan`, interface addresses,
+  dnsmasq `local`, dnsmasq `domain`, resolver search domains, DHCP lease files,
+  and any configured local host records.
 - DNS hijack must not turn local hostname lookups into public-DNS lookups.
 - A future fix should either bypass router-destined DNS traffic before the
   hijack rule or configure Mihomo DNS to forward local zones to the router's
@@ -50,8 +57,11 @@ Product requirement:
 
 Required verification for the fix:
 
-- From a LAN client, `dig @192.168.6.1 Ronnie-PC A` returns the DHCP address.
+- From a LAN client, `dig @<discovered-lan-dns> Ronnie-PC A` returns the DHCP
+  address.
 - From a LAN client, `ping Ronnie-PC` resolves and reaches the same private IP.
+- The discovered LAN DNS address and local domain/search suffix are reported in
+  the verification output.
 - The verification records whether the query bypassed Mihomo DNS or was
   forwarded through Mihomo to dnsmasq.
 - Public DNS hijack for ordinary client traffic still works after the local
