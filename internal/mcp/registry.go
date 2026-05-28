@@ -368,6 +368,18 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"type", "value"},
 		}
+		transportRuleIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":       map[string]any{"type": "string", "description": "Stable transport rule id, for example quic-udp-443-main."},
+				"target":   map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id, or a policy group id."},
+				"reason":   map[string]any{"type": "string", "description": "Short durable reason for this transport rule."},
+				"network":  map[string]any{"type": "string", "enum": []string{"UDP"}, "description": "Transport network. First supported value is UDP."},
+				"dst_port": map[string]any{"type": "integer", "minimum": 1, "maximum": 65535, "description": "Destination port matched by the transport rule."},
+			},
+			"required": []string{"id", "target", "network", "dst_port"},
+		}
 		customRuleIntent := map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -427,6 +439,7 @@ func inputSchemaForTool(name string) map[string]any {
 					"additionalProperties": false,
 					"properties": map[string]any{
 						"packs":              map[string]any{"type": "array", "items": packIntent},
+						"transport_rules":    map[string]any{"type": "array", "items": transportRuleIntent, "description": "High-priority transport rules rendered after the local safety baseline and before domain/CIDR custom rules and catalog packs. Use for AND/NETWORK/DST-PORT rules such as QUIC UDP/443."},
 						"custom_rules":       map[string]any{"type": "array", "items": customRuleIntent},
 						"enabled_rule_packs": map[string]any{"type": "array", "items": localRulePackIntent, "description": "Standalone local rule packs backed by rule-packs/*.json and rendered after custom rules but before catalog/template packs."},
 						"rule_providers":     map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},

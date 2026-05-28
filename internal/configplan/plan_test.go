@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"localclash/internal/configrender"
 	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
@@ -255,6 +256,55 @@ func TestRenderPolicyGroupPlan(t *testing.T) {
 	}
 	if candidate.Version != localconfig.ConfigSchemaVersion {
 		t.Fatalf("candidate localclash version = %d, want current schema", candidate.Version)
+	}
+}
+
+func TestRenderTransportRulePlan(t *testing.T) {
+	paths := writePlanFixture(t)
+
+	result, err := Render(context.Background(), Options{
+		PlanName:     "quic-main",
+		Subscription: paths.subscription,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "HK", Nodes: []string{"SG 01"}, Mode: "manual"},
+			},
+			PolicyGroups: []OverlayPolicyGroupIntent{
+				{ID: "🚦 QUIC", Mode: "manual", Exits: []string{"REJECT", "HK", "DIRECT"}},
+			},
+			TransportRules: []OverlayTransportRuleIntent{
+				{ID: "quic-udp-443-main", Network: "UDP", DstPort: 443, Target: "🚦 QUIC"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Overlay.TransportRules) != 1 || result.Overlay.TransportRules[0].Target != "🚦 QUIC" {
+		t.Fatalf("transport rules = %+v, want QUIC target", result.Overlay.TransportRules)
+	}
+	if result.Changes.TransportRulesAdded != 1 || result.Changes.RulesAdded != 1 {
+		t.Fatalf("changes = %+v, want one transport rule", result.Changes)
+	}
+	config := readYAMLMap(t, result.Output)
+	renderedRules := config["rules"].([]any)
+	quicIndex := indexAny(renderedRules, "AND,((NETWORK,UDP),(DST-PORT,443)),🚦 QUIC")
+	if quicIndex < 0 {
+		t.Fatalf("rendered rules missing QUIC transport rule: %+v", renderedRules)
+	}
+	if quicIndex <= len(configrender.LocalBaselineRuleLines())-1 {
+		t.Fatalf("QUIC rule index = %d, want after local baseline", quicIndex)
+	}
+	candidate, err := localconfig.Load(result.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidate.TransportRules) != 1 || candidate.TransportRules[0].Target != "🚦 QUIC" {
+		t.Fatalf("candidate transport rules = %+v, want durable QUIC rule", candidate.TransportRules)
 	}
 }
 
@@ -1156,6 +1206,15 @@ func containsRule(rules []any, want string) bool {
 		}
 	}
 	return false
+}
+
+func indexAny(values []any, want string) int {
+	for i, raw := range values {
+		if raw == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func assertMetadataHasNoSensitiveFields(t *testing.T, value any) {

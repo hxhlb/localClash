@@ -180,8 +180,8 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if summary.ID != TemplateLocalClashDefault || config.Version != localconfig.ConfigSchemaVersion {
 		t.Fatalf("template = %+v config version = %d, want current localclash default", summary, config.Version)
 	}
-	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 26 || len(config.Packs) != 32 || len(config.CustomRules) != 1 {
-		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d custom_rules=%d, want 9/26/32/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.CustomRules))
+	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 27 || len(config.Packs) != 32 || len(config.TransportRules) != 1 || len(config.CustomRules) != 1 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d transport_rules=%d custom_rules=%d, want 9/27/32/1/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.TransportRules), len(config.CustomRules))
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
@@ -201,6 +201,14 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	}
 	if _, exists := config.PolicyGroups["🎮 游戏"]; exists {
 		t.Fatalf("default template still has old game policy group name")
+	}
+	quic := config.PolicyGroups["🚦 QUIC"]
+	wantQUICExits := []string{"REJECT", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇯🇵 日本节点", "🇺🇸 美国节点", "DIRECT"}
+	if quic.Mode != "manual" || !reflect.DeepEqual(quic.Exits, wantQUICExits) {
+		t.Fatalf("QUIC policy group = %+v, want exact default-reject candidates %#v", quic, wantQUICExits)
+	}
+	if got := config.TransportRules[0]; got.ID != "quic-udp-443-main" || got.Network != "UDP" || got.DstPort != 443 || got.Target != "🚦 QUIC" {
+		t.Fatalf("transport rule = %+v, want QUIC UDP/443 target", got)
 	}
 	wantExitsByGroup := map[string][]string{
 		"🎮 Steam":   {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},

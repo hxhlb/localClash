@@ -37,6 +37,16 @@ func TestParseOverlayRuleLineSupportsGeoSite(t *testing.T) {
 	}
 }
 
+func TestParseOverlayRuleLineSupportsANDTransportRule(t *testing.T) {
+	rule, ok := parseOverlayRuleLine("AND,((NETWORK,UDP),(DST-PORT,443)),🚦 QUIC")
+	if !ok {
+		t.Fatal("expected AND overlay rule to parse")
+	}
+	if rule.Type != "AND" || rule.Value != "((NETWORK,UDP),(DST-PORT,443))" || rule.Target != "🚦 QUIC" {
+		t.Fatalf("rule = %+v, want AND UDP/443 QUIC", rule)
+	}
+}
+
 func TestProxyNamesDeduplicates(t *testing.T) {
 	names, err := proxyNames([]any{
 		map[string]any{"name": "HK"},

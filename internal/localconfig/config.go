@@ -15,7 +15,7 @@ import (
 	"localclash/internal/rules"
 )
 
-const ConfigSchemaVersion = 3
+const ConfigSchemaVersion = 4
 
 type Config struct {
 	Version          int                    `json:"version" yaml:"version"`
@@ -23,6 +23,7 @@ type Config struct {
 	FallbackTarget   string                 `json:"fallback_target,omitempty" yaml:"fallback_target,omitempty"`
 	ProxyGroups      map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
 	PolicyGroups     map[string]PolicyGroup `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
+	TransportRules   []TransportRule        `json:"transport_rules,omitempty" yaml:"transport_rules,omitempty"`
 	CustomRules      []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
 	EnabledRulePacks []RulePackSelection    `json:"enabled_rule_packs,omitempty" yaml:"enabled_rule_packs,omitempty"`
 	RuleProviders    []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
@@ -44,6 +45,14 @@ type PolicyGroup struct {
 	Exits    []string `json:"exits" yaml:"exits"`
 	Reason   string   `json:"reason,omitempty" yaml:"reason,omitempty"`
 	Boundary string   `json:"boundary,omitempty" yaml:"boundary,omitempty"`
+}
+
+type TransportRule struct {
+	ID      string `json:"id" yaml:"id"`
+	Target  string `json:"target" yaml:"target"`
+	Reason  string `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Network string `json:"network" yaml:"network"`
+	DstPort int    `json:"dst_port" yaml:"dst_port"`
 }
 
 type Match struct {
@@ -176,15 +185,16 @@ type proxyGroupResolveStats struct {
 }
 
 type Resolved struct {
-	Config        Config               `json:"config"`
-	Selection     rules.Selection      `json:"selection"`
-	ProxyGroups   []ProxyGroupResult   `json:"proxy_groups"`
-	PolicyGroups  []PolicyGroupResult  `json:"policy_groups"`
-	CustomRules   []CustomRuleResult   `json:"custom_rules"`
-	RulePacks     []RulePackResult     `json:"enabled_rule_packs"`
-	RuleProviders []RuleProviderResult `json:"rule_providers"`
-	Packs         []PackResult         `json:"packs"`
-	Warnings      []string             `json:"warnings"`
+	Config         Config                `json:"config"`
+	Selection      rules.Selection       `json:"selection"`
+	ProxyGroups    []ProxyGroupResult    `json:"proxy_groups"`
+	PolicyGroups   []PolicyGroupResult   `json:"policy_groups"`
+	TransportRules []TransportRuleResult `json:"transport_rules"`
+	CustomRules    []CustomRuleResult    `json:"custom_rules"`
+	RulePacks      []RulePackResult      `json:"enabled_rule_packs"`
+	RuleProviders  []RuleProviderResult  `json:"rule_providers"`
+	Packs          []PackResult          `json:"packs"`
+	Warnings       []string              `json:"warnings"`
 }
 
 type ProxyGroupResult struct {
@@ -205,6 +215,14 @@ type PolicyGroupResult struct {
 	ExitCount int      `json:"exit_count"`
 	Reason    string   `json:"reason,omitempty"`
 	Boundary  string   `json:"boundary,omitempty"`
+}
+
+type TransportRuleResult struct {
+	ID      string `json:"id"`
+	Target  string `json:"target"`
+	Network string `json:"network"`
+	DstPort int    `json:"dst_port"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type PackResult struct {
@@ -478,6 +496,15 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	}
 	resolvedConfig.FallbackTarget = fallbackTarget
 	selection.FallbackTarget = fallbackTarget
+	finish = stage("resolve_transport_rules", map[string]any{"transport_rule_count": len(resolvedConfig.TransportRules)})
+	resolvedTransportRules, transportRuleResults, err := resolveTransportRules(resolvedConfig.TransportRules, selection.ProxyGroups, selection.PolicyGroups)
+	if err != nil {
+		finish(err, nil)
+		return Resolved{}, err
+	}
+	finish(nil, map[string]any{"resolved_transport_rules": len(transportRuleResults)})
+	resolvedConfig.TransportRules = resolvedTransportRules
+	selection.TransportRules = transportRulesForSelection(resolvedTransportRules)
 	resolvedPacks := make([]Pack, 0, len(resolvedConfig.Packs))
 	packResults := make([]PackResult, 0, len(resolvedConfig.Packs))
 	finish = stage("resolve_packs", map[string]any{"pack_count": len(resolvedConfig.Packs), "rules_cache": opts.RulesCache})
@@ -556,7 +583,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	finish(nil, map[string]any{"resolved_rule_providers": len(ruleProviderResults)})
 	resolvedConfig.RuleProviders = resolvedRuleProviders
 	selection.RuleProviders = ruleProvidersForSelection(resolvedRuleProviders)
-	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, PolicyGroups: policyResults, CustomRules: customRuleResults, RulePacks: rulePackResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
+	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, PolicyGroups: policyResults, TransportRules: transportRuleResults, CustomRules: customRuleResults, RulePacks: rulePackResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
 }
 
 func assertPackType(id, declared, actual string) error {
@@ -1029,6 +1056,65 @@ func validatePolicyGroupExits(id string, exits []string, proxyGroups map[string]
 		}
 	}
 	return nil
+}
+
+func resolveTransportRules(transportRules []TransportRule, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) ([]TransportRule, []TransportRuleResult, error) {
+	resolved := make([]TransportRule, 0, len(transportRules))
+	results := make([]TransportRuleResult, 0, len(transportRules))
+	ids := map[string]bool{}
+	for _, rule := range transportRules {
+		id := strings.TrimSpace(rule.ID)
+		if id == "" {
+			return nil, nil, fmt.Errorf("transport rule id is required")
+		}
+		if ids[id] {
+			return nil, nil, fmt.Errorf("transport rule %q is defined more than once", id)
+		}
+		ids[id] = true
+		target := strings.TrimSpace(rule.Target)
+		if target == "" {
+			return nil, nil, fmt.Errorf("transport rule %q target is required", id)
+		}
+		if !isKnownTarget(target, proxyGroups, policyGroups) {
+			return nil, nil, fmt.Errorf("transport rule target %q requires a matching proxy group or policy group", target)
+		}
+		network := strings.ToUpper(strings.TrimSpace(rule.Network))
+		if network == "" {
+			return nil, nil, fmt.Errorf("transport rule %q network is required", id)
+		}
+		if network != "UDP" {
+			return nil, nil, fmt.Errorf("transport rule %q network %q is unsupported", id, rule.Network)
+		}
+		if rule.DstPort <= 0 || rule.DstPort > 65535 {
+			return nil, nil, fmt.Errorf("transport rule %q dst_port must be between 1 and 65535", id)
+		}
+		rule.ID = id
+		rule.Target = target
+		rule.Network = network
+		resolved = append(resolved, rule)
+		results = append(results, TransportRuleResult{
+			ID:      id,
+			Target:  target,
+			Network: network,
+			DstPort: rule.DstPort,
+			Reason:  rule.Reason,
+		})
+	}
+	return resolved, results, nil
+}
+
+func transportRulesForSelection(transportRules []TransportRule) []rules.TransportRule {
+	out := make([]rules.TransportRule, 0, len(transportRules))
+	for _, rule := range transportRules {
+		out = append(out, rules.TransportRule{
+			ID:      rule.ID,
+			Target:  rule.Target,
+			Reason:  rule.Reason,
+			Network: rule.Network,
+			DstPort: rule.DstPort,
+		})
+	}
+	return out
 }
 
 func resolveCustomRules(customRules []CustomRule, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) ([]CustomRule, []CustomRuleResult, error) {

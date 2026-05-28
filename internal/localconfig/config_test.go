@@ -404,6 +404,36 @@ func TestResolvePolicyGroupTargetsProxyGroupExits(t *testing.T) {
 	}
 }
 
+func TestResolveTransportRuleUsesPolicyGroupTarget(t *testing.T) {
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"HK": {Mode: "manual", Nodes: []string{"HK 01"}},
+			},
+			PolicyGroups: map[string]PolicyGroup{
+				"🚦 QUIC": {Mode: "manual", Exits: []string{"REJECT", "HK", "DIRECT"}},
+			},
+			TransportRules: []TransportRule{
+				{ID: "quic-udp-443-main", Network: "udp", DstPort: 443, Target: "🚦 QUIC"},
+			},
+		},
+		SubscriptionNodes: []SubscriptionNode{{Name: "HK 01", Type: "ss"}},
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(resolved.TransportRules) != 1 || resolved.TransportRules[0].Network != "UDP" || resolved.TransportRules[0].DstPort != 443 {
+		t.Fatalf("transport rules = %+v, want normalized UDP/443 rule", resolved.TransportRules)
+	}
+	fragment, err := rules.RenderFragment(resolved.Selection, nil, []string{"HK 01"})
+	if err != nil {
+		t.Fatalf("RenderFragment returned error: %v", err)
+	}
+	if got := fragment.Rules[0]; got != "AND,((NETWORK,UDP),(DST-PORT,443)),🚦 QUIC" {
+		t.Fatalf("transport rule = %q, want QUIC UDP/443 rule", got)
+	}
+}
+
 func TestResolveRejectsLowercaseTerminalPolicyExit(t *testing.T) {
 	dir := t.TempDir()
 	subscriptionPath := filepath.Join(dir, "subscription.gob")
