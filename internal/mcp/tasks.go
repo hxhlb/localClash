@@ -197,7 +197,7 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 	logFile := filepath.Join(dir, taskID+".log")
 	statusFile := filepath.Join(dir, taskID+".json")
 	diagnosticsDir := s.taskDiagnosticsDir(taskID)
-	status := asyncTaskStatus{
+	queuedStatus := asyncTaskStatus{
 		TaskID:         taskID,
 		Tool:           tool,
 		Status:         "queued",
@@ -205,12 +205,14 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 		LogFile:        logFile,
 		DiagnosticsDir: diagnosticsDir,
 	}
-	if err := writeTaskStatus(statusFile, status); err != nil {
+	if err := writeTaskStatus(statusFile, queuedStatus); err != nil {
 		return asyncTaskResult{}, err
 	}
 	appendTaskLog(logFile, "queued", tool, nil)
 
-	go func() {
+	s.taskWG.Add(1)
+	go func(status asyncTaskStatus) {
+		defer s.taskWG.Done()
 		monitor := newTaskMonitor(taskMonitorOptions{
 			TaskID:         taskID,
 			Tool:           tool,
@@ -222,7 +224,7 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 		status.Status = "running"
 		_ = writeTaskStatus(statusFile, status)
 		appendTaskLog(logFile, "started", tool, nil)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(s.taskBaseContext(), 30*time.Minute)
 		defer cancel()
 		ctx = context.WithValue(ctx, taskLogContextKey{}, taskLogger{tool: tool, path: logFile, monitor: monitor})
 		result, err := run(ctx, args)
@@ -252,7 +254,7 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 			"structured_summary": summarizeStructuredContent(result.StructuredContent),
 			"is_error":           result.IsError,
 		})
-	}()
+	}(queuedStatus)
 
 	return asyncTaskResult{
 		Queued:         true,
@@ -262,7 +264,7 @@ func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncTool
 		LogFile:        logFile,
 		StatusFile:     statusFile,
 		DiagnosticsDir: diagnosticsDir,
-		StartedAt:      status.StartedAt,
+		StartedAt:      queuedStatus.StartedAt,
 		NextActions: []string{
 			fmt.Sprintf("call nl_file with path %q to watch readable task progress", logFile),
 			fmt.Sprintf("call nl_file with path %q to read machine-readable task status", statusFile),

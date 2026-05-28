@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"localclash/internal/appinit"
@@ -35,18 +36,58 @@ import (
 )
 
 type Server struct {
-	state     *appinit.RuntimeState
-	startedAt time.Time
+	state      *appinit.RuntimeState
+	startedAt  time.Time
+	taskCtx    context.Context
+	taskCancel context.CancelFunc
+	taskWG     sync.WaitGroup
 }
 
 var routerTakeoverStatus = routertakeover.Status
 
 func NewServer() *Server {
-	return &Server{startedAt: time.Now().UTC()}
+	return newServer(nil)
 }
 
 func NewServerWithState(state appinit.RuntimeState) *Server {
-	return &Server{state: &state, startedAt: time.Now().UTC()}
+	return newServer(&state)
+}
+
+func newServer(state *appinit.RuntimeState) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{
+		state:      state,
+		startedAt:  time.Now().UTC(),
+		taskCtx:    ctx,
+		taskCancel: cancel,
+	}
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if s.taskCancel != nil {
+		s.taskCancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.taskWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Server) taskBaseContext() context.Context {
+	if s != nil && s.taskCtx != nil {
+		return s.taskCtx
+	}
+	return context.Background()
 }
 
 func (s *Server) runtimeInfo() ServerRuntimeInfo {
@@ -151,9 +192,10 @@ func HTTPURL(opts HTTPOptions) string {
 
 func ListenAndServeHTTPWithState(ctx context.Context, state appinit.RuntimeState, opts HTTPOptions) error {
 	opts = NormalizeHTTPOptions(opts)
+	mcpServer := NewServerWithState(state)
 	srv := &http.Server{
 		Addr:              opts.Addr,
-		Handler:           NewServerWithState(state).HTTPHandler(opts.Path),
+		Handler:           mcpServer.HTTPHandler(opts.Path),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	errCh := make(chan error, 1)
@@ -171,8 +213,16 @@ func ListenAndServeHTTPWithState(ctx context.Context, state appinit.RuntimeState
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+		if err := mcpServer.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
 		return ctx.Err()
 	case err := <-errCh:
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if shutdownErr := mcpServer.Shutdown(shutdownCtx); shutdownErr != nil && err == nil {
+			return shutdownErr
+		}
 		return err
 	}
 }
@@ -2173,11 +2223,12 @@ func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessag
 
 func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		Config     string `json:"config"`
-		RuntimeDir string `json:"runtime_dir"`
-		Core       string `json:"core"`
-		Foreground bool   `json:"foreground"`
-		LogFile    string `json:"log_file"`
+		Config          string `json:"config"`
+		RuntimeDir      string `json:"runtime_dir"`
+		Core            string `json:"core"`
+		Foreground      bool   `json:"foreground"`
+		LogFile         string `json:"log_file"`
+		ForceConfigTest bool   `json:"force_config_test"`
 	}
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
@@ -2211,6 +2262,7 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 		Foreground:          in.Foreground,
 		SkipConfigTest:      false,
 		ValidationCachePath: validationCachePath("", in.RuntimeDir),
+		ForceConfigTest:     in.ForceConfigTest,
 		OnStage:             startRuntimeStageLogger(ctx),
 	})
 	if err != nil {
@@ -2227,13 +2279,14 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 
 func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		Config     string `json:"config"`
-		RuntimeDir string `json:"runtime_dir"`
-		Core       string `json:"core"`
-		Foreground bool   `json:"foreground"`
-		LogFile    string `json:"log_file"`
-		TimeoutMS  int    `json:"timeout_ms"`
-		Force      bool   `json:"force"`
+		Config          string `json:"config"`
+		RuntimeDir      string `json:"runtime_dir"`
+		Core            string `json:"core"`
+		Foreground      bool   `json:"foreground"`
+		LogFile         string `json:"log_file"`
+		TimeoutMS       int    `json:"timeout_ms"`
+		Force           bool   `json:"force"`
+		ForceConfigTest bool   `json:"force_config_test"`
 	}
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
@@ -2265,6 +2318,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 		WorkDir:             in.RuntimeDir,
 		LogPath:             in.LogFile,
 		ValidationCachePath: validationCachePath("", in.RuntimeDir),
+		ForceConfigTest:     in.ForceConfigTest,
 		StopTimeout:         time.Duration(in.TimeoutMS) * time.Millisecond,
 		ForceKill:           in.Force,
 		OnStage:             restartRuntimeStageLogger(ctx),

@@ -111,7 +111,7 @@ id=1
 for tool in ${TOOLS}; do
   case "${tool}" in
     routing_explain)
-      args='{"query":"Steam","evidence":false}'
+      args='{"query":"Steam","include_rule_matches":false}'
       ;;
     config_render)
       args='{"wait":true,"force":true}'

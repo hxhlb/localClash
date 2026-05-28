@@ -456,19 +456,31 @@ func checkMihomoTest(ctx context.Context, opts Options, coreStatus, configStatus
 		Timeout:    opts.Timeout,
 	})
 	check.Metadata = map[string]any{
-		"cache_path":    result.CachePath,
-		"cached":        result.Cached,
-		"config_sha256": result.ConfigSHA256,
-		"core_type":     result.CoreType,
-		"core_version":  result.CoreVersion,
-		"core_sha256":   result.CoreSHA256,
-		"duration_ms":   result.DurationMS,
-		"isolated":      result.Isolated,
+		"cache_path":      result.CachePath,
+		"cached":          result.Cached,
+		"cache_hit_mode":  result.CacheHitMode,
+		"config_sha256":   result.ConfigSHA256,
+		"config_size":     result.ConfigSize,
+		"config_mod_time": result.ConfigModTime,
+		"core_type":       result.CoreType,
+		"core_version":    result.CoreVersion,
+		"core_sha256":     result.CoreSHA256,
+		"core_size":       result.CoreSize,
+		"core_mod_time":   result.CoreModTime,
+		"duration_ms":     result.DurationMS,
+		"isolated":        result.Isolated,
 	}
-	if err != nil {
+	if result.CacheWriteError != "" {
+		check.Metadata["cache_write_error"] = result.CacheWriteError
+	}
+	if !result.Passed {
 		check.Status = statusFail
 		check.Summary = "mihomo config test failed"
-		check.Details = []string{result.Output}
+		if result.Output != "" {
+			check.Details = []string{result.Output}
+		} else if err != nil {
+			check.Details = []string{err.Error()}
+		}
 		return check
 	}
 	check.Status = statusOK

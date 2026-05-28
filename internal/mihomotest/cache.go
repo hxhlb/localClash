@@ -31,42 +31,53 @@ type ValidationOptions struct {
 }
 
 type ValidationResult struct {
-	Enabled       bool   `json:"enabled"`
-	Passed        bool   `json:"passed"`
-	Cached        bool   `json:"cached"`
-	CachePath     string `json:"cache_path,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	Passed          bool   `json:"passed"`
+	Cached          bool   `json:"cached"`
+	CachePath       string `json:"cache_path,omitempty"`
+	CacheHitMode    string `json:"cache_hit_mode,omitempty"`
+	ValidatedAt     string `json:"validated_at,omitempty"`
+	ConfigPath      string `json:"config_path"`
+	ConfigSHA256    string `json:"config_sha256,omitempty"`
+	ConfigSize      int64  `json:"config_size,omitempty"`
+	ConfigModTime   string `json:"config_mod_time,omitempty"`
+	CorePath        string `json:"core_path"`
+	CoreType        string `json:"core_type,omitempty"`
+	CoreVersion     string `json:"core_version,omitempty"`
+	CoreSHA256      string `json:"core_sha256,omitempty"`
+	CoreSize        int64  `json:"core_size,omitempty"`
+	CoreModTime     string `json:"core_mod_time,omitempty"`
+	Output          string `json:"output,omitempty"`
+	Error           string `json:"error,omitempty"`
+	CacheWriteError string `json:"cache_write_error,omitempty"`
+	TimedOut        bool   `json:"timed_out,omitempty"`
+	DurationMS      int64  `json:"duration_ms,omitempty"`
+	ExitCode        int    `json:"exit_code,omitempty"`
+	Isolated        bool   `json:"isolated,omitempty"`
+	WorkDir         string `json:"work_dir,omitempty"`
+	SourceWorkDir   string `json:"source_work_dir,omitempty"`
+}
+
+type CacheStatusResult struct {
+	CachePath     string `json:"cache_path"`
+	Present       bool   `json:"present"`
+	Matched       bool   `json:"matched"`
+	MatchMode     string `json:"match_mode,omitempty"`
+	Passed        bool   `json:"passed,omitempty"`
 	ValidatedAt   string `json:"validated_at,omitempty"`
 	ConfigPath    string `json:"config_path"`
 	ConfigSHA256  string `json:"config_sha256,omitempty"`
+	ConfigSize    int64  `json:"config_size,omitempty"`
+	ConfigModTime string `json:"config_mod_time,omitempty"`
 	CorePath      string `json:"core_path"`
 	CoreType      string `json:"core_type,omitempty"`
 	CoreVersion   string `json:"core_version,omitempty"`
 	CoreSHA256    string `json:"core_sha256,omitempty"`
-	Output        string `json:"output,omitempty"`
-	Error         string `json:"error,omitempty"`
-	TimedOut      bool   `json:"timed_out,omitempty"`
+	CoreSize      int64  `json:"core_size,omitempty"`
+	CoreModTime   string `json:"core_mod_time,omitempty"`
 	DurationMS    int64  `json:"duration_ms,omitempty"`
-	ExitCode      int    `json:"exit_code,omitempty"`
-	Isolated      bool   `json:"isolated,omitempty"`
-	WorkDir       string `json:"work_dir,omitempty"`
-	SourceWorkDir string `json:"source_work_dir,omitempty"`
-}
-
-type CacheStatusResult struct {
-	CachePath    string `json:"cache_path"`
-	Present      bool   `json:"present"`
-	Matched      bool   `json:"matched"`
-	Passed       bool   `json:"passed,omitempty"`
-	ValidatedAt  string `json:"validated_at,omitempty"`
-	ConfigPath   string `json:"config_path"`
-	ConfigSHA256 string `json:"config_sha256,omitempty"`
-	CorePath     string `json:"core_path"`
-	CoreType     string `json:"core_type,omitempty"`
-	CoreVersion  string `json:"core_version,omitempty"`
-	CoreSHA256   string `json:"core_sha256,omitempty"`
-	DurationMS   int64  `json:"duration_ms,omitempty"`
-	Error        string `json:"error,omitempty"`
-	Status       string `json:"status"`
+	Error         string `json:"error,omitempty"`
+	Status        string `json:"status"`
 }
 
 type validationCacheFile struct {
@@ -89,7 +100,20 @@ func DefaultCachePath(workDir string) string {
 func ValidateCached(ctx context.Context, opts ValidationOptions) (ValidationResult, error) {
 	opts = normalizeValidationOptions(opts)
 	started := opts.Now()
-	fingerprint, err := buildFingerprint(ctx, opts)
+	metadata, err := buildInputMetadata(ctx, opts)
+	if err != nil {
+		return ValidationResult{Enabled: true, CachePath: opts.CachePath, ConfigPath: opts.ConfigPath, CorePath: opts.CorePath, Error: err.Error()}, err
+	}
+	if !opts.Force {
+		if cached, ok := findCachedValidationByMetadata(opts.CachePath, metadata); ok && cached.Passed {
+			cached.Enabled = true
+			cached.Cached = true
+			cached.CachePath = opts.CachePath
+			cached.CacheHitMode = "metadata"
+			return cached, nil
+		}
+	}
+	fingerprint, err := buildFingerprintWithMetadata(opts, metadata)
 	if err != nil {
 		return ValidationResult{Enabled: true, CachePath: opts.CachePath, ConfigPath: opts.ConfigPath, CorePath: opts.CorePath, Error: err.Error()}, err
 	}
@@ -98,6 +122,7 @@ func ValidateCached(ctx context.Context, opts ValidationOptions) (ValidationResu
 			cached.Enabled = true
 			cached.Cached = true
 			cached.CachePath = opts.CachePath
+			cached.CacheHitMode = "sha256"
 			return cached, nil
 		}
 	}
@@ -108,10 +133,14 @@ func ValidateCached(ctx context.Context, opts ValidationOptions) (ValidationResu
 		ValidatedAt:   started.UTC().Format(time.RFC3339),
 		ConfigPath:    opts.ConfigPath,
 		ConfigSHA256:  fingerprint.ConfigSHA256,
+		ConfigSize:    metadata.ConfigSize,
+		ConfigModTime: metadata.ConfigModTime,
 		CorePath:      opts.CorePath,
 		CoreType:      fingerprint.CoreType,
 		CoreVersion:   fingerprint.CoreVersion,
 		CoreSHA256:    fingerprint.CoreSHA256,
+		CoreSize:      metadata.CoreSize,
+		CoreModTime:   metadata.CoreModTime,
 		Isolated:      true,
 		SourceWorkDir: opts.WorkDir,
 	}
@@ -144,9 +173,8 @@ func ValidateCached(ctx context.Context, opts ValidationOptions) (ValidationResu
 			result.ExitCode = exitErr.ExitCode()
 		}
 	}
-	if cacheErr := writeValidationCache(opts.CachePath, result); cacheErr != nil && err == nil {
-		err = cacheErr
-		result.Error = cacheErr.Error()
+	if cacheErr := writeValidationCache(opts.CachePath, result); cacheErr != nil {
+		result.CacheWriteError = cacheErr.Error()
 	}
 	return result, err
 }
@@ -165,7 +193,37 @@ func CacheStatus(ctx context.Context, opts ValidationOptions) CacheStatusResult 
 		out.Error = err.Error()
 		return out
 	}
-	fingerprint, err := buildFingerprint(ctx, opts)
+	metadata, err := buildInputMetadata(ctx, opts)
+	if err != nil {
+		out.Error = err.Error()
+		return out
+	}
+	out.ConfigSize = metadata.ConfigSize
+	out.ConfigModTime = metadata.ConfigModTime
+	out.CoreType = metadata.CoreType
+	out.CoreVersion = metadata.CoreVersion
+	out.CoreSize = metadata.CoreSize
+	out.CoreModTime = metadata.CoreModTime
+	if !out.Present {
+		out.Status = "missing"
+		return out
+	}
+	if cached, ok := findCachedValidationByMetadata(opts.CachePath, metadata); ok {
+		out.Matched = true
+		out.MatchMode = "metadata"
+		out.Passed = cached.Passed
+		out.ValidatedAt = cached.ValidatedAt
+		out.ConfigSHA256 = cached.ConfigSHA256
+		out.CoreSHA256 = cached.CoreSHA256
+		out.DurationMS = cached.DurationMS
+		out.Status = "matched"
+		if !cached.Passed {
+			out.Status = "matched_failed"
+			out.Error = cached.Error
+		}
+		return out
+	}
+	fingerprint, err := buildFingerprintWithMetadata(opts, metadata)
 	if err != nil {
 		out.Error = err.Error()
 		return out
@@ -176,6 +234,7 @@ func CacheStatus(ctx context.Context, opts ValidationOptions) CacheStatusResult 
 	out.CoreSHA256 = fingerprint.CoreSHA256
 	if cached, ok := findCachedValidation(opts.CachePath, fingerprint); ok {
 		out.Matched = true
+		out.MatchMode = "sha256"
 		out.Passed = cached.Passed
 		out.ValidatedAt = cached.ValidatedAt
 		out.DurationMS = cached.DurationMS
@@ -195,10 +254,25 @@ func CacheStatus(ctx context.Context, opts ValidationOptions) CacheStatusResult 
 }
 
 type validationFingerprint struct {
-	ConfigSHA256 string
-	CoreSHA256   string
-	CoreVersion  string
-	CoreType     string
+	ConfigSHA256  string
+	CoreSHA256    string
+	CoreVersion   string
+	CoreType      string
+	ConfigSize    int64
+	ConfigModTime string
+	CoreSize      int64
+	CoreModTime   string
+}
+
+type validationInputMetadata struct {
+	ConfigPath    string
+	ConfigSize    int64
+	ConfigModTime string
+	CorePath      string
+	CoreSize      int64
+	CoreModTime   string
+	CoreVersion   string
+	CoreType      string
 }
 
 func normalizeValidationOptions(opts ValidationOptions) ValidationOptions {
@@ -222,6 +296,14 @@ func normalizeValidationOptions(opts ValidationOptions) ValidationOptions {
 }
 
 func buildFingerprint(ctx context.Context, opts ValidationOptions) (validationFingerprint, error) {
+	metadata, err := buildInputMetadata(ctx, opts)
+	if err != nil {
+		return validationFingerprint{}, err
+	}
+	return buildFingerprintWithMetadata(opts, metadata)
+}
+
+func buildFingerprintWithMetadata(opts ValidationOptions, metadata validationInputMetadata) (validationFingerprint, error) {
 	configSHA, err := sha256File(opts.ConfigPath)
 	if err != nil {
 		return validationFingerprint{}, fmt.Errorf("hash generated config: %w", err)
@@ -231,11 +313,56 @@ func buildFingerprint(ctx context.Context, opts ValidationOptions) (validationFi
 		return validationFingerprint{}, fmt.Errorf("hash core: %w", err)
 	}
 	return validationFingerprint{
-		ConfigSHA256: configSHA,
-		CoreSHA256:   coreSHA,
-		CoreVersion:  coreVersion(ctx, opts.CorePath),
-		CoreType:     coreType(opts.CorePath),
+		ConfigSHA256:  configSHA,
+		CoreSHA256:    coreSHA,
+		CoreVersion:   metadata.CoreVersion,
+		CoreType:      metadata.CoreType,
+		ConfigSize:    metadata.ConfigSize,
+		ConfigModTime: metadata.ConfigModTime,
+		CoreSize:      metadata.CoreSize,
+		CoreModTime:   metadata.CoreModTime,
 	}, nil
+}
+
+func buildInputMetadata(ctx context.Context, opts ValidationOptions) (validationInputMetadata, error) {
+	configInfo, err := os.Stat(opts.ConfigPath)
+	if err != nil {
+		return validationInputMetadata{}, fmt.Errorf("stat generated config: %w", err)
+	}
+	coreInfo, err := os.Stat(opts.CorePath)
+	if err != nil {
+		return validationInputMetadata{}, fmt.Errorf("stat core: %w", err)
+	}
+	return validationInputMetadata{
+		ConfigPath:    opts.ConfigPath,
+		ConfigSize:    configInfo.Size(),
+		ConfigModTime: configInfo.ModTime().UTC().Format(time.RFC3339Nano),
+		CorePath:      opts.CorePath,
+		CoreSize:      coreInfo.Size(),
+		CoreModTime:   coreInfo.ModTime().UTC().Format(time.RFC3339Nano),
+		CoreVersion:   coreVersion(ctx, opts.CorePath),
+		CoreType:      coreType(opts.CorePath),
+	}, nil
+}
+
+func findCachedValidationByMetadata(path string, metadata validationInputMetadata) (ValidationResult, bool) {
+	cache, err := readValidationCache(path)
+	if err != nil {
+		return ValidationResult{}, false
+	}
+	for _, entry := range cache.Entries {
+		if entry.ConfigPath == metadata.ConfigPath &&
+			entry.ConfigSize == metadata.ConfigSize &&
+			entry.ConfigModTime == metadata.ConfigModTime &&
+			entry.CorePath == metadata.CorePath &&
+			entry.CoreSize == metadata.CoreSize &&
+			entry.CoreModTime == metadata.CoreModTime &&
+			entry.CoreVersion == metadata.CoreVersion &&
+			entry.CoreType == metadata.CoreType {
+			return entry, true
+		}
+	}
+	return ValidationResult{}, false
 }
 
 func findCachedValidation(path string, fingerprint validationFingerprint) (ValidationResult, bool) {
@@ -246,7 +373,8 @@ func findCachedValidation(path string, fingerprint validationFingerprint) (Valid
 	for _, entry := range cache.Entries {
 		if entry.ConfigSHA256 == fingerprint.ConfigSHA256 &&
 			entry.CoreSHA256 == fingerprint.CoreSHA256 &&
-			entry.CoreVersion == fingerprint.CoreVersion {
+			entry.CoreVersion == fingerprint.CoreVersion &&
+			entry.CoreType == fingerprint.CoreType {
 			return entry, true
 		}
 	}
@@ -279,7 +407,8 @@ func writeValidationCache(path string, result ValidationResult) error {
 	for _, entry := range cache.Entries {
 		if entry.ConfigSHA256 == result.ConfigSHA256 &&
 			entry.CoreSHA256 == result.CoreSHA256 &&
-			entry.CoreVersion == result.CoreVersion {
+			entry.CoreVersion == result.CoreVersion &&
+			entry.CoreType == result.CoreType {
 			continue
 		}
 		entries = append(entries, entry)

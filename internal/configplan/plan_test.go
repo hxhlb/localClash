@@ -719,6 +719,56 @@ enabled_packs: []
 	}
 }
 
+func TestApplyPlanReturnsStructuredResultWhenBackupFails(t *testing.T) {
+	paths := writePlanFixture(t)
+	generated := filepath.Join(paths.dir, "generated", "mihomo.yaml")
+	selectionPath := filepath.Join(paths.dir, "localclash-packs.gob")
+	writeFile(t, generated, "sentinel: old generated\n")
+	plan, err := Render(context.Background(), Options{
+		PlanName:     "ai-sg",
+		Subscription: paths.subscription,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"SG 01"}, Mode: "manual"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(paths.dir, "backup-blocker")
+	writeFile(t, blocker, "not a directory\n")
+
+	result, err := Apply(context.Background(), ApplyOptions{
+		PlanID:        plan.PlanID,
+		PlansDir:      paths.planDir,
+		Subscription:  paths.subscription,
+		RulesCache:    paths.cacheDir,
+		SelectionPath: selectionPath,
+		OutputPath:    generated,
+		BackupDir:     blocker,
+		Test:          false,
+		Now:           fixedPlanTime(),
+	})
+	if err == nil {
+		t.Fatal("Apply error = nil, want backup failure")
+	}
+	if result.PlanID != plan.PlanID || result.Error == "" || len(result.NextActions) == 0 {
+		t.Fatalf("result = %+v, want structured backup failure", result)
+	}
+	if result.Applied || result.Transaction.Prepared {
+		t.Fatalf("result = %+v, backup failure should not prepare or apply transaction", result)
+	}
+	if got := readFile(t, generated); got != "sentinel: old generated\n" {
+		t.Fatalf("generated = %q, want unchanged generated config", got)
+	}
+}
+
 func TestApplyPlanRunsMihomoTestEvenWhenCreateSkippedIt(t *testing.T) {
 	paths := writePlanFixture(t)
 	corePath := filepath.Join(paths.dir, "mihomo")

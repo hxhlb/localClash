@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"localclash/internal/appinit"
+	"localclash/internal/mihomotest"
 	"localclash/internal/routertakeover"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
@@ -2014,6 +2015,71 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 	}
 }
 
+func TestRestartRuntimeToolHonorsForceConfigTest(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	counter := filepath.Join(dir, "test-count")
+	writeTestExecutable(t, core, fmt.Sprintf(`#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    count=0
+    [ -f %[1]q ] && count=$(cat %[1]q)
+    count=$((count + 1))
+    echo "$count" > %[1]q
+    echo forced validation failed
+    exit 7
+  fi
+done
+echo runtime started
+sleep 30
+`, counter))
+	config := filepath.Join(dir, "mihomo.yaml")
+	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workDir := filepath.Join(dir, "runtime")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMCPValidationCache(t, mihomotest.DefaultCachePath(workDir), core, config)
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "restart_runtime",
+			"arguments": map[string]any{
+				"core":              core,
+				"config":            config,
+				"runtime_dir":       workDir,
+				"log_file":          filepath.Join(workDir, "mihomo.log"),
+				"force_config_test": true,
+				"background":        false,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("restart_runtime returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["restarted"] == true || content["error"] == "" {
+		t.Fatalf("content = %+v, want validation failure before restart", content)
+	}
+	validation := content["config_validation"].(map[string]any)
+	if validation["cached"] == true {
+		t.Fatalf("config_validation = %+v, want forced uncached validation", validation)
+	}
+	if got := strings.TrimSpace(readMCPFile(t, counter)); got != "1" {
+		t.Fatalf("forced config test count = %q, want one fresh -t run", got)
+	}
+}
+
 func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -2066,6 +2132,38 @@ func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 		!strings.Contains(string(logText), `"event":"stage_started"`) ||
 		!strings.Contains(string(logText), `"event":"task_monitor_summary"`) {
 		t.Fatalf("log = %s, want queued, stage_started, task_monitor_summary, and error events", logText)
+	}
+}
+
+func TestServerShutdownCancelsQueuedAsyncTasks(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	server := NewServer()
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	_, err := server.queueAsyncTool("slow_tool", []byte(`{}`), func(ctx context.Context, args json.RawMessage) (toolResult, error) {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		return jsonToolResult(map[string]any{"cancelled": true})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("async task did not start")
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown error = %v", err)
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("async task did not observe server shutdown cancellation")
 	}
 }
 
@@ -2440,6 +2538,56 @@ func captureStderr(t *testing.T, fn func()) string {
 func writeTestExecutable(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMCPValidationCache(t *testing.T, cachePath, corePath, configPath string) {
+	t.Helper()
+	configInfo, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coreInfo, err := os.Stat(corePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configSHA, err := sha256File(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coreSHA, err := sha256File(corePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := map[string]any{
+		"version": 1,
+		"entries": []map[string]any{{
+			"enabled":         true,
+			"passed":          true,
+			"cached":          false,
+			"validated_at":    time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC).Format(time.RFC3339),
+			"config_path":     configPath,
+			"config_sha256":   configSHA,
+			"config_size":     configInfo.Size(),
+			"config_mod_time": configInfo.ModTime().UTC().Format(time.RFC3339Nano),
+			"core_path":       corePath,
+			"core_type":       "meta",
+			"core_version":    "Mihomo Meta test",
+			"core_sha256":     coreSHA,
+			"core_size":       coreInfo.Size(),
+			"core_mod_time":   coreInfo.ModTime().UTC().Format(time.RFC3339Nano),
+		}},
+	}
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.MarshalIndent(cache, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(cachePath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -494,8 +494,19 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	finish = stage("backup_apply_targets", map[string]any{"backup_dir": opts.BackupDir})
 	backups, err := backupApplyTargets(opts)
 	if err != nil {
-		finish(err, nil)
-		return ApplyResult{}, err
+		result.Valid = false
+		result.Error = err.Error()
+		result.NextActions = []string{
+			"Fix the filesystem or permission error reported by backup_apply_targets, then retry config_patch_apply with the same patch_id.",
+			"Call config_status to verify the active durable intent, selection, and generated artifact were left unchanged.",
+			"Review the saved patch summary before retrying config_patch_apply.",
+		}
+		finish(err, map[string]any{
+			"active_state": "unchanged",
+			"candidate":    summaryPath,
+			"backup_dir":   opts.BackupDir,
+		})
+		return result, err
 	}
 	result.Backups = backups
 	finish(nil, map[string]any{"backup_count": len(backups)})
@@ -1572,7 +1583,7 @@ func rollbackCommittedFiles(files []applyCommitFile) error {
 }
 
 func fsyncFile(path string) error {
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}

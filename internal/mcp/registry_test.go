@@ -123,3 +123,17 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeSchemasExposeForceConfigTest(t *testing.T) {
+	for _, name := range []string{"run_runtime", "restart_runtime"} {
+		schema := inputSchemaForTool(name)
+		properties := schema["properties"].(map[string]any)
+		field, ok := properties["force_config_test"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s schema missing force_config_test: %+v", name, properties)
+		}
+		if field["type"] != "boolean" {
+			t.Fatalf("%s force_config_test schema = %+v, want boolean", name, field)
+		}
+	}
+}
