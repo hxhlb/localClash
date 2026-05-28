@@ -1,9 +1,9 @@
 {
   "id": "default.tail-fallback.v1",
-  "description": "Add entertainment, ecommerce, fallback, and China direct tail routing.",
+  "description": "Add entertainment, ecommerce, known non-China, and China direct tail routing.",
   "config": {
     "version": 3,
-    "fallback_target": "🧭 漏网之鱼",
+    "fallback_target": "DIRECT",
     "policy_groups": {
       "🎞 媒体": {
         "mode": "manual",
@@ -49,7 +49,7 @@
           "🇹🇼 台湾节点",
           "🇰🇷 韩国节点"
         ],
-        "reason": "非中国兜底流量，保留自动、手动、地区和直连出口。",
+        "reason": "已知非中国 GEOSITE 流量，保留自动、手动、地区和直连出口。",
         "boundary": "business_to_exit_layer"
       }
     },
@@ -73,7 +73,7 @@
         "pack": "geolocation-!cn",
         "type": "geosite",
         "target": "🧭 漏网之鱼",
-        "reason": "Route non-China fallback through default business selector."
+        "reason": "Route known non-China GEOSITE traffic through default business selector."
       },
       {
         "source": "v2fly-dlc",
