@@ -74,8 +74,12 @@ Required evidence for the next reproduction:
 Collection entrypoint:
 
 - `scripts/collect-mihomo-warnings.py` streams
-  `http://192.168.6.1:9090/logs?level=warning` and writes warning, snapshot,
-  summary, event, and error JSONL artifacts under `.runtime/diagnostics/`.
+  `http://192.168.6.1:9090/logs?level=info` by default and writes full log,
+  warning subset, snapshot, summary, event, and error JSONL artifacts under
+  `.runtime/diagnostics/`.
+- Use `--level warning` only when the collection target is warning volume alone.
+  Use the default `info` level when warning context and runtime state-transition
+  lines are needed in the same window.
 - The script is read-only against the Mihomo controller. Add
   `--ssh-host root@192.168.6.1` only when process samples are needed in the
   same time window.
