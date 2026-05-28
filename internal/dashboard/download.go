@@ -39,7 +39,7 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-const defaultGitHubReleaseMirrors = "https://gh.llkk.cc/https://github.com https://gh-proxy.com/https://github.com https://v1.ax/https://github.com https://ghp.xptvhelper.link/https://github.com"
+const defaultGitHubReleaseMirrors = "https://gh-proxy.com/https://github.com https://ghproxy.imciel.com/https://github.com https://gitproxy.mrhjx.cn/https://github.com https://gh.jasonzeng.dev/https://github.com https://gh.monlor.com/https://github.com https://gh.noki.icu/https://github.com https://ghfast.top/https://github.com"
 
 func Download(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)

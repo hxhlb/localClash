@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultManifestURL          = "https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json"
-	defaultGitHubReleaseMirrors = "https://gh.llkk.cc/https://github.com https://gh-proxy.com/https://github.com https://v1.ax/https://github.com https://ghp.xptvhelper.link/https://github.com"
+	defaultGitHubReleaseMirrors = "https://gh-proxy.com/https://github.com https://ghproxy.imciel.com/https://github.com https://gitproxy.mrhjx.cn/https://github.com https://gh.jasonzeng.dev/https://github.com https://gh.monlor.com/https://github.com https://gh.noki.icu/https://github.com https://ghfast.top/https://github.com"
 )
 
 type Options struct {

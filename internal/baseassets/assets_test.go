@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +69,38 @@ func TestStatusReportsMissingJSONAssets(t *testing.T) {
 	}
 }
 
+func TestDownloadCandidatesUsesDefaultGitHubReleaseMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "")
+
+	got := downloadCandidates("https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json")
+	want := []string{
+		"https://gh-proxy.com/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://ghproxy.imciel.com/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://gitproxy.mrhjx.cn/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://gh.jasonzeng.dev/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://gh.monlor.com/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://gh.noki.icu/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://ghfast.top/https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+		"https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+	assertNoOldDefaultMirrors(t, got)
+}
+
+func TestDownloadCandidatesCanDisableMirrors(t *testing.T) {
+	t.Setenv("LOCALCLASH_GITHUB_RELEASE_MIRRORS", "https://mirror.example/https://github.com")
+	t.Setenv("LOCALCLASH_GITHUB_MIRROR", "direct")
+
+	got := downloadCandidates("https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json")
+	want := []string{"https://github.com/qoli/localClash/releases/latest/download/localclash-release-manifest.json"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("candidates = %#v, want %#v", got, want)
+	}
+}
+
 func testArchive(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -96,4 +130,15 @@ func testArchive(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func assertNoOldDefaultMirrors(t *testing.T, candidates []string) {
+	t.Helper()
+	for _, candidate := range candidates {
+		for _, oldMirror := range []string{"gh.llkk.cc", "v1.ax", "ghp.xptvhelper.link"} {
+			if strings.Contains(candidate, oldMirror) {
+				t.Fatalf("candidate %q contains old mirror %q", candidate, oldMirror)
+			}
+		}
+	}
 }
