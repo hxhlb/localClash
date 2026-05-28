@@ -26,6 +26,7 @@ import (
 	"localclash/internal/routertakeover"
 	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
+	"localclash/internal/workspace"
 )
 
 type productEnvelope struct {
@@ -85,7 +86,7 @@ func runProductCommand(args []string, state appinit.RuntimeState) (bool, error) 
 		err = runProductApply(args[1:], state)
 	case "reset":
 		if hasFlag(args[1:], "json") {
-			err = runProductReset(args[1:])
+			err = runProductReset(args[1:], state)
 		}
 	case "mcp":
 		if len(args) >= 2 && args[1] == "serve" {
@@ -220,13 +221,13 @@ func runProductComponent(args []string, state appinit.RuntimeState) error {
 		}
 		return printProductOK(productEnvelope{OK: true, Summary: "Component status read.", Status: componentStatus(state), Changes: []string{}, Warnings: []string{}})
 	case "update":
-		return runProductComponentUpdate(args[1:])
+		return runProductComponentUpdate(args[1:], state)
 	default:
 		return fmt.Errorf("unknown component subcommand %q", args[0])
 	}
 }
 
-func runProductComponentUpdate(args []string) error {
+func runProductComponentUpdate(args []string, state appinit.RuntimeState) error {
 	if len(args) == 0 {
 		return fmt.Errorf("component update requires component name")
 	}
@@ -245,7 +246,7 @@ func runProductComponentUpdate(args []string) error {
 		}
 	case "assets", "base-assets":
 		result, err := baseassets.Install(ctx, baseassets.Options{
-			OutputDir: ".",
+			OutputDir: productWorkspaceRoot(state),
 			Force:     true,
 		})
 		if err != nil {
@@ -259,7 +260,7 @@ func runProductComponentUpdate(args []string) error {
 			Target:     coredownload.TargetRouter,
 			TargetOS:   "linux",
 			TargetArch: runtime.GOARCH,
-			OutputDir:  "bin",
+			OutputDir:  productWorkspacePath(state, "bin"),
 			Repo:       "MetaCubeX/mihomo",
 			Force:      true,
 		})
@@ -271,7 +272,7 @@ func runProductComponentUpdate(args []string) error {
 		result, err := dashboard.Download(ctx, dashboard.Options{
 			Version:   "latest",
 			AssetName: "dist.zip",
-			OutputDir: filepath.Join(".runtime", "mihomo", "ui", "zashboard"),
+			OutputDir: filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard"),
 			Repo:      "Zephyruso/zashboard",
 			Force:     true,
 		})
@@ -552,13 +553,13 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 			warnings = append(warnings, "localClash core update is owned by the LuCI helper/bootstrap layer in V1.")
 		}
 		if input.Components.Mihomo == "installed_or_latest" {
-			if _, err := coredownload.Download(ctx, coredownload.Options{Version: "latest", Flavor: coredownload.FlavorAll, Target: coredownload.TargetRouter, TargetOS: "linux", TargetArch: runtime.GOARCH, OutputDir: "bin", Repo: "MetaCubeX/mihomo", Force: true}); err != nil {
+			if _, err := coredownload.Download(ctx, coredownload.Options{Version: "latest", Flavor: coredownload.FlavorAll, Target: coredownload.TargetRouter, TargetOS: "linux", TargetArch: runtime.GOARCH, OutputDir: productWorkspacePath(state, "bin"), Repo: "MetaCubeX/mihomo", Force: true}); err != nil {
 				return changes, warnings, err
 			}
 			changes = append(changes, "mihomo_updated")
 		}
 		if input.Components.Dashboard == "installed_or_latest" {
-			if _, err := dashboard.Download(ctx, dashboard.Options{Version: "latest", AssetName: "dist.zip", OutputDir: filepath.Join(".runtime", "mihomo", "ui", "zashboard"), Repo: "Zephyruso/zashboard", Force: true}); err != nil {
+			if _, err := dashboard.Download(ctx, dashboard.Options{Version: "latest", AssetName: "dist.zip", OutputDir: filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard"), Repo: "Zephyruso/zashboard", Force: true}); err != nil {
 				return changes, warnings, err
 			}
 			changes = append(changes, "dashboard_updated")
@@ -740,15 +741,42 @@ func desiredChanges(input desiredStateInput) []string {
 	return changes
 }
 
-func runProductReset(args []string) error {
-	if err := parseJSONOnly("reset", args); err != nil {
-		return err
-	}
-	result, err := reset.Run(reset.Options{Yes: true, Out: io.Discard})
+func runProductReset(args []string, state appinit.RuntimeState) error {
+	opts, err := parseResetInput(args)
 	if err != nil {
 		return err
 	}
-	return printProductOK(productEnvelope{OK: true, Changed: len(result.Deleted) > 0, Summary: "Reset completed.", Status: result, Changes: changedIf(len(result.Deleted) > 0, "reset_completed"), Warnings: []string{}})
+	workspacePath, workspaceSource := resetWorkspaceForProduct(opts, state)
+	result, err := reset.Run(reset.Options{
+		Yes:                      true,
+		DryRun:                   opts.DryRun,
+		Full:                     opts.Full,
+		Workspace:                workspacePath,
+		WorkspaceSource:          workspaceSource,
+		RequireExplicitWorkspace: opts.Full,
+		Out:                      io.Discard,
+	})
+	if err != nil {
+		return err
+	}
+	changed := !result.DryRun && len(result.Deleted) > 0
+	summary := "Reset completed."
+	change := "reset_completed"
+	if result.Full {
+		summary = "Full workspace reset completed."
+		change = "full_reset_completed"
+	}
+	if result.DryRun {
+		summary = "Reset dry run completed."
+		change = ""
+	}
+	return printProductOK(productEnvelope{OK: true, Changed: changed, Summary: summary, Status: result, Changes: changedIf(changed, change), Warnings: []string{}})
+}
+
+type resetInput struct {
+	Full      bool
+	DryRun    bool
+	Workspace string
 }
 
 type subscriptionInput struct {
@@ -837,6 +865,60 @@ func parseJSONOnly(name string, args []string) error {
 	return nil
 }
 
+func parseResetInput(args []string) (resetInput, error) {
+	fs := flag.NewFlagSet("reset", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var input resetInput
+	fs.BoolVar(&input.Full, "full", false, "delete the entire localClash workspace directory")
+	fs.BoolVar(&input.DryRun, "dry-run", false, "print the reset plan without deleting files")
+	fs.StringVar(&input.Workspace, "workspace", "", "explicit localClash workspace path")
+	asJSON := fs.Bool("json", false, "print product JSON response")
+	if err := fs.Parse(args); err != nil {
+		return input, err
+	}
+	if !*asJSON || fs.NArg() != 0 {
+		return input, fmt.Errorf("usage: localclash reset [--full] [--dry-run] [--workspace <path>] --json")
+	}
+	return input, nil
+}
+
+func resetWorkspaceForProduct(input resetInput, state appinit.RuntimeState) (string, string) {
+	if path := strings.TrimSpace(input.Workspace); path != "" {
+		return path, "flag:--workspace"
+	}
+	if path := strings.TrimSpace(os.Getenv(workspace.EnvVar)); path != "" {
+		return path, "env:" + workspace.EnvVar
+	}
+	if input.Full {
+		return "", ""
+	}
+	if path := productWorkspaceRoot(state); path != "" {
+		return path, "runtime_state"
+	}
+	return "", ""
+}
+
+func productWorkspaceRoot(state appinit.RuntimeState) string {
+	if root := strings.TrimSpace(state.Paths.WorkspaceRoot); root != "" {
+		return root
+	}
+	if root := workspace.FromRuntimeRoot(state.Paths.RuntimeRoot); root != "" {
+		return root
+	}
+	return "."
+}
+
+func productWorkspacePath(state appinit.RuntimeState, name string) string {
+	if strings.TrimSpace(name) == "" || filepath.IsAbs(name) {
+		return name
+	}
+	root := productWorkspaceRoot(state)
+	if root == "" || root == "." {
+		return name
+	}
+	return filepath.Join(root, name)
+}
+
 func sourcesFromURLs(rawURLs []string) ([]subscriptions.Source, error) {
 	return subscriptions.SourcesFromURLs(rawURLs)
 }
@@ -863,7 +945,7 @@ func componentStatus(state appinit.RuntimeState) map[string]any {
 	exe, _ := os.Executable()
 	dashboardPath := filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard")
 	return map[string]any{
-		"base_assets": baseassets.Status("."),
+		"base_assets": baseassets.Status(productWorkspaceRoot(state)),
 		"localclash": map[string]any{
 			"path":      exe,
 			"installed": exe != "",
@@ -884,7 +966,7 @@ func componentStatus(state appinit.RuntimeState) map[string]any {
 func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 	warnings := []string{}
 	intent, err := configinspect.InspectIntent(configinspect.IntentOptions{
-		ConfigPath:          "localclash.json",
+		ConfigPath:          productWorkspacePath(state, "localclash.json"),
 		Subscription:        state.Paths.SubscriptionPath,
 		SubscriptionConfig:  state.Paths.SubscriptionConfig,
 		SubscriptionRuntime: state.Paths.SubscriptionRuntime,
@@ -910,8 +992,9 @@ func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 }
 
 func applyTemplateInput(input configInput, state appinit.RuntimeState) (map[string]any, error) {
+	configPath := productWorkspacePath(state, "localclash.json")
 	if !input.AllowOverwriteModified {
-		current, err := localconfig.Load("localclash.json")
+		current, err := localconfig.Load(configPath)
 		if err == nil && current.PolicyTemplate != "" && current.PolicyTemplate != input.Template {
 			return nil, codedProductError{
 				code:        "modified_config_requires_confirmation",
@@ -931,7 +1014,7 @@ func applyTemplateInput(input configInput, state appinit.RuntimeState) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	if err := localconfig.Write("localclash.json", config); err != nil {
+	if err := localconfig.Write(configPath, config); err != nil {
 		return nil, err
 	}
 	profile, err := runtimeprofile.Configure(state.Paths.RuntimeProfilePath, input.RuntimeProfile, input.Core)
@@ -962,12 +1045,13 @@ func configRenderOptions(state appinit.RuntimeState) configrender.Options {
 
 func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, error) {
 	opts := configRenderOptions(state)
+	configPath := productWorkspacePath(state, "localclash.json")
 	selectionPath := ""
 	source := "base"
 	warnings := []string{}
 
-	if pathExists("localclash.json") {
-		config, err := localconfig.Load("localclash.json")
+	if pathExists(configPath) {
+		config, err := localconfig.Load(configPath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -983,7 +1067,7 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 		}
 		selectionPath = state.Paths.PacksSelectionPath
 		if strings.TrimSpace(selectionPath) == "" {
-			selectionPath = "localclash-packs.gob"
+			selectionPath = productWorkspacePath(state, "localclash-packs.gob")
 		}
 		if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
 			return nil, nil, err
@@ -1000,7 +1084,7 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 	return map[string]any{
 		"render":          result,
 		"source":          source,
-		"source_of_truth": "localclash.json",
+		"source_of_truth": configPath,
 		"selection":       selectionPath,
 		"output":          state.Paths.GeneratedConfig,
 	}, warnings, nil

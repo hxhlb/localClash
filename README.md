@@ -616,6 +616,21 @@ delete plan and requires typing `reset localclash`; use `--dry-run` to inspect
 the plan only or `--yes` for non-interactive SSH/script usage. If Mihomo is
 running, stop it before resetting.
 
+Use `--full` when the intent is to delete the whole localClash workspace, such
+as `/root/localclash`, including downloaded assets and generated base files:
+
+```bash
+go run . reset --full --workspace /root/localclash
+```
+
+Full reset does not infer the workspace from the current directory. It requires
+an explicit workspace from `--workspace` or `LOCALCLASH_WORKDIR`, refuses
+protected paths and source checkouts, and requires the workspace marker
+`.localclash-workspace`. Product bootstrap writes that marker for absolute
+runtime workspaces such as `/root/localclash`. Before deletion, full reset
+leaves the workspace directory and requires typing `delete localclash workspace`
+unless `--yes` is supplied.
+
 ## Doctor
 
 Run a read-only diagnostic report for the local core, subscription, generated config, policy, dashboard, rule references, and Mihomo config test:

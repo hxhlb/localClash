@@ -11,6 +11,7 @@ import (
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
+	"localclash/internal/workspace"
 )
 
 type Options struct {
@@ -38,6 +39,7 @@ type RuntimeState struct {
 }
 
 type RuntimePaths struct {
+	WorkspaceRoot       string `json:"workspace_root,omitempty"`
 	RuntimeRoot         string `json:"runtime_root"`
 	RuleSourcesDir      string `json:"rule_sources_dir"`
 	RulesCacheDir       string `json:"rules_cache_dir"`
@@ -97,6 +99,7 @@ func Bootstrap(ctx context.Context, opts Options) RuntimeState {
 	opts = normalizeOptions(opts)
 	state := RuntimeState{
 		Paths: RuntimePaths{
+			WorkspaceRoot:       workspaceRootFromOptions(opts),
 			RuntimeRoot:         opts.RuntimeRoot,
 			RuleSourcesDir:      opts.RuleSourcesDir,
 			RulesCacheDir:       opts.RulesCacheDir,
@@ -168,7 +171,7 @@ func defaultBaseDir(opts Options) string {
 	if hasExplicitPath(opts) {
 		return ""
 	}
-	if dir := strings.TrimSpace(os.Getenv("LOCALCLASH_WORKDIR")); dir != "" {
+	if dir := strings.TrimSpace(os.Getenv(workspace.EnvVar)); dir != "" {
 		return dir
 	}
 	if looksLikeWorkDir(".") {
@@ -220,11 +223,22 @@ func defaultPath(baseDir, path string) string {
 	return filepath.Join(baseDir, path)
 }
 
+func workspaceRootFromOptions(opts Options) string {
+	root := workspace.FromRuntimeRoot(opts.RuntimeRoot)
+	if root == "" {
+		return ""
+	}
+	return filepath.Clean(root)
+}
+
 func ensureDirs(state *RuntimeState, opts Options) {
 	for _, dir := range []string{opts.RuntimeRoot, opts.RulesCacheDir, opts.SubscriptionRuntime, opts.MihomoRuntimeDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			state.addDiagnostic("runtime_dirs", "warning", err.Error())
 		}
+	}
+	if err := workspace.EnsureMarker(state.Paths.WorkspaceRoot); err != nil {
+		state.addDiagnostic("workspace_marker", "warning", err.Error())
 	}
 }
 

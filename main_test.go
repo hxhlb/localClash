@@ -138,6 +138,45 @@ func TestRunProductStatusPrintsJSONEnvelope(t *testing.T) {
 	}
 }
 
+func TestRunProductResetFullDryRunPrintsJSONEnvelope(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "localclash")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	writeMainTestFile(t, "localclash.json", "version: 1\n")
+	expected, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() error {
+		return run([]string{"reset", "--full", "--dry-run", "--json"})
+	})
+	var result struct {
+		OK      bool `json:"ok"`
+		Changed bool `json:"changed"`
+		Status  struct {
+			Full    bool `json:"full"`
+			DryRun  bool `json:"dry_run"`
+			Deleted []struct {
+				Path string `json:"path"`
+			} `json:"deleted"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("product reset JSON = %q, error = %v", output, err)
+	}
+	if !result.OK || result.Changed || !result.Status.Full || !result.Status.DryRun || len(result.Status.Deleted) != 1 || result.Status.Deleted[0].Path != expected {
+		t.Fatalf("product reset result = %+v, want full dry-run envelope for %s", result, expected)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "localclash.json")); err != nil {
+		t.Fatalf("dry-run should keep localclash.json: %v", err)
+	}
+}
+
 func TestRunProductConfigRenderUsesDurableLocalClashIntent(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -194,6 +233,59 @@ custom_rules:
 	}
 	if _, err := os.Stat("localclash-packs.gob"); err != nil {
 		t.Fatalf("derived localclash-packs.gob missing: %v", err)
+	}
+}
+
+func TestRunProductConfigRenderUsesEnvWorkspaceFromNeutralCwd(t *testing.T) {
+	installDir := t.TempDir()
+	wrongDir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", installDir)
+	t.Chdir(wrongDir)
+
+	writeMainTestFile(t, filepath.Join(installDir, "subscription.gob"), `proxies:
+  - name: "HK 01"
+    type: ss
+    server: example.com
+    port: 443
+    cipher: none
+    password: test
+`)
+	writeMainTestFile(t, filepath.Join(installDir, "localclash.json"), `version: 1
+policy_template: localclash-default
+proxy_groups:
+  AI:
+    mode: auto
+    match:
+      type: name_regex
+      pattern: ".*"
+      min: 1
+`)
+	writeMainTestPackIndex(t, filepath.Join(installDir, ".runtime", "rules", "packs"))
+
+	output := captureStdout(t, func() error {
+		return run([]string{"config", "render", "--json"})
+	})
+	var result struct {
+		OK     bool `json:"ok"`
+		Status struct {
+			Selection string `json:"selection"`
+			Output    string `json:"output"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("config render JSON = %q, error = %v", output, err)
+	}
+	if !result.OK || result.Status.Selection != filepath.Join(installDir, "localclash-packs.gob") || result.Status.Output != filepath.Join(installDir, "generated", "mihomo.yaml") {
+		t.Fatalf("config render result = %+v, want paths under %s", result, installDir)
+	}
+	if _, err := os.Stat(filepath.Join(installDir, "generated", "mihomo.yaml")); err != nil {
+		t.Fatalf("generated config should be written under workspace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wrongDir, "generated", "mihomo.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("generated config should not be written under cwd, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wrongDir, "localclash-packs.gob")); !os.IsNotExist(err) {
+		t.Fatalf("selection should not be written under cwd, err=%v", err)
 	}
 }
 

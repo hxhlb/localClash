@@ -7,10 +7,15 @@ localclash.yaml
 localclash-packs.yaml
 localclash-subscriptions.yaml
 localclash-runtime.yaml
+localclash.json
+localclash-packs.gob
+localclash-subscriptions.json
+localclash-runtime.json
 /profiles/
 *.secret.yaml
 *.local.yaml
 subscription*.yaml
+subscription*.gob
 sources/
 generated/
 .runtime/

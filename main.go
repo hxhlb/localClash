@@ -46,7 +46,7 @@ Usage:
   localclash takeover apply --json
   localclash takeover stop --json
   localclash apply --input desired-state.json --json
-  localclash reset --json
+  localclash reset [--full] [--dry-run] [--workspace <path>] --json
   localclash mcp serve [flags]
 
 Advanced/internal commands:
@@ -158,6 +158,9 @@ Flags for mcp:
   --path string   MCP HTTP JSON-RPC path (default "/mcp")
 
 Flags for reset:
+  --full      delete the entire localClash workspace directory
+  --workspace string
+              explicit localClash workspace path for destructive reset
   --dry-run   print the factory reset plan without deleting files
   --yes       skip interactive confirmation
 `
@@ -178,10 +181,7 @@ func run(args []string) error {
 		fmt.Print(usage)
 		return nil
 	}
-	if len(args) >= 1 && args[0] == "reset" {
-		if handled, err := runProductCommand(args, appinit.RuntimeState{}); handled {
-			return err
-		}
+	if len(args) >= 1 && args[0] == "reset" && !hasFlag(args[1:], "json") {
 		return runReset(args[1:])
 	}
 	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -237,11 +237,16 @@ func runReset(args []string) error {
 	opts := reset.Options{}
 	fs.BoolVar(&opts.DryRun, "dry-run", false, "print the factory reset plan without deleting files")
 	fs.BoolVar(&opts.Yes, "yes", false, "skip interactive confirmation")
+	fs.BoolVar(&opts.Full, "full", false, "delete the entire localClash workspace directory")
+	fs.StringVar(&opts.Workspace, "workspace", "", "explicit localClash workspace path")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+	if opts.Workspace != "" {
+		opts.WorkspaceSource = "flag:--workspace"
 	}
 	_, err := reset.Run(opts)
 	return err
@@ -463,7 +468,11 @@ func runRulesRender(args []string, state appinit.RuntimeState) error {
 	fs.SetOutput(os.Stderr)
 
 	opts := rules.Options{}
-	fs.StringVar(&opts.SelectionPath, "selection", "localclash-packs.gob", "packs selection gob")
+	defaultSelection := state.Paths.PacksSelectionPath
+	if defaultSelection == "" {
+		defaultSelection = productWorkspacePath(state, "localclash-packs.gob")
+	}
+	fs.StringVar(&opts.SelectionPath, "selection", defaultSelection, "packs selection gob")
 	fs.StringVar(&opts.Subscription, "subscription", state.Paths.SubscriptionPath, "subscription gob for node label classification")
 	fs.StringVar(&opts.CacheDir, "cache", state.Paths.RulesCacheDir, "runtime pack cache directory")
 	fs.StringVar(&opts.OutputPath, "output", "-", "output rules fragment path, or - for stdout")
@@ -506,7 +515,7 @@ func runCore(args []string, state appinit.RuntimeState) error {
 		CorePath:         opts.CorePath,
 		SubscriptionPath: state.Paths.SubscriptionPath,
 		ConfigPath:       opts.ConfigPath,
-		DashboardDir:     ".runtime/mihomo/ui/zashboard",
+		DashboardDir:     filepath.Join(state.Paths.MihomoRuntimeDir, "ui", "zashboard"),
 		WorkDir:          opts.WorkDir,
 	})
 	if err != nil {
