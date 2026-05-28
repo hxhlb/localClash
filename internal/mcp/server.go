@@ -33,6 +33,7 @@ import (
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
+	"localclash/internal/workspace"
 )
 
 type Server struct {
@@ -96,7 +97,8 @@ func (s *Server) runtimeInfo() ServerRuntimeInfo {
 		startedAt = time.Now().UTC()
 	}
 	info := ServerRuntimeInfo{
-		StartedAt: startedAt.Format(time.RFC3339),
+		StartedAt:     startedAt.Format(time.RFC3339),
+		WorkspaceRoot: s.workspaceRoot(),
 	}
 	if wd, err := os.Getwd(); err == nil {
 		info.WorkingDir = wd
@@ -506,7 +508,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "environment_inspect":
 		return s.callEnvironmentInspect(ctx, args)
 	case "nl_file":
-		return callNLFile(args)
+		return s.callNLFile(args)
 	case "packs_list":
 		return s.callPacksList(args)
 	case "packs_get":
@@ -554,7 +556,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "router_takeover_stop":
 		return s.callMaybeAsyncTool(ctx, "router_takeover_stop", args, s.callRouterTakeoverStopSync)
 	case "sed_file":
-		return callSedFile(args)
+		return s.callSedFile(args)
 	case "stop_runtime":
 		return s.callMaybeAsyncTool(ctx, "stop_runtime", args, s.callStopRuntimeSync)
 	default:
@@ -577,7 +579,7 @@ func decodeToolInput(args json.RawMessage, out any) error {
 	return json.Unmarshal(args, out)
 }
 
-func callNLFile(args json.RawMessage) (toolResult, error) {
+func (s *Server) callNLFile(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Path       string `json:"path"`
 		StartLine  int    `json:"start_line"`
@@ -588,6 +590,7 @@ func callNLFile(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	result, err := fileops.NLFile(fileops.NLFileOptions{
+		Root:       s.workspaceRoot(),
 		Path:       in.Path,
 		StartLine:  in.StartLine,
 		LimitLines: in.LimitLines,
@@ -599,7 +602,7 @@ func callNLFile(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
-func callSedFile(args json.RawMessage) (toolResult, error) {
+func (s *Server) callSedFile(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Path           string         `json:"path"`
 		DryRun         *bool          `json:"dry_run"`
@@ -614,6 +617,7 @@ func callSedFile(args json.RawMessage) (toolResult, error) {
 		dryRun = *in.DryRun
 	}
 	result, err := fileops.SedFile(fileops.SedFileOptions{
+		Root:           s.workspaceRoot(),
 		Path:           in.Path,
 		DryRun:         dryRun,
 		ExpectedSHA256: in.ExpectedSHA256,
@@ -1406,6 +1410,7 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 	if in.Test != nil {
 		test = *in.Test
 	}
+	root := s.workspaceRoot()
 	if s.state != nil {
 		if in.Subscription == "" {
 			in.Subscription = s.state.Paths.SubscriptionPath
@@ -1423,11 +1428,22 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
 		}
 		if in.Core == "" {
-			in.Core = s.state.Paths.CorePath
+			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
 		}
 		if in.RuntimeDir == "" {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
+	}
+	setDefault(&in.OutputDir, workspacePath(root, filepath.Join(".runtime", "patches")))
+	setDefault(&in.ConfigPath, workspacePath(root, "localclash-intent.json"))
+	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
+	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
+	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
+	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
+	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
+	if s.state != nil {
+		in.Core = normalizeMCPStateCorePath(s.state, in.Core)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -1477,7 +1493,11 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 	if in.Test != nil {
 		test = *in.Test
 	}
+	root := s.workspaceRoot()
 	if s.state != nil {
+		if in.Subscription == "" {
+			in.Subscription = s.state.Paths.SubscriptionPath
+		}
 		if in.RulesCache == "" {
 			in.RulesCache = s.state.Paths.RulesCacheDir
 		}
@@ -1497,11 +1517,25 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 			in.Output = s.state.Paths.GeneratedConfig
 		}
 		if in.Core == "" {
-			in.Core = s.state.Paths.CorePath
+			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
 		}
 		if in.RuntimeDir == "" {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
+	}
+	setDefault(&in.PatchesDir, workspacePath(root, filepath.Join(".runtime", "patches")))
+	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
+	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
+	setDefault(&in.ConfigPath, workspacePath(root, "localclash-intent.json"))
+	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
+	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
+	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
+	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
+	setDefault(&in.BackupDir, workspacePath(root, filepath.Join(".runtime", "backups", "config-patch-apply")))
+	if s.state != nil {
+		in.Core = normalizeMCPStateCorePath(s.state, in.Core)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -1903,6 +1937,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
+	root := s.workspaceRoot()
 	if s.state != nil {
 		if in.Config == "" {
 			in.Config = s.state.Paths.SubscriptionConfig
@@ -1926,11 +1961,18 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 			in.Output = s.state.Paths.GeneratedConfig
 		}
 	}
+	setDefault(&in.Config, workspacePath(root, "localclash-subscriptions.json"))
+	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
+	setDefault(&in.Merged, workspacePath(root, "subscription.gob"))
+	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
+	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
+	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
 	if in.Selection == "" {
-		in.Selection = "localclash-packs.gob"
+		in.Selection = workspacePath(root, "localclash-packs.gob")
 	}
 	if in.LocalClashConfig == "" {
-		in.LocalClashConfig = "localclash-intent.json"
+		in.LocalClashConfig = workspacePath(root, "localclash-intent.json")
 	}
 	finish := startTaskStage(ctx, "load_subscription_nodes_before", map[string]any{"subscription": in.Merged})
 	beforeNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
@@ -2247,7 +2289,7 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 	}
 	if s.state != nil {
 		if opts.CorePath == "" {
-			opts.CorePath = s.state.Paths.CorePath
+			opts.CorePath = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
 		}
 		if opts.SubscriptionPath == "" {
 			opts.SubscriptionPath = s.state.Paths.SubscriptionPath
@@ -2280,6 +2322,9 @@ func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessag
 	if s.state != nil {
 		opts.Paths = s.state.Paths
 	}
+	if root := s.workspaceRoot(); root != "" {
+		opts.WorkDir = root
+	}
 	result, err := envinspect.Inspect(ctx, opts)
 	if err != nil {
 		return toolResult{}, err
@@ -2304,13 +2349,10 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 			in.Config = s.state.Paths.GeneratedConfig
 		}
 		if in.Core == "" {
-			in.Core = s.state.Paths.CorePath
+			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
 		}
 		if in.RuntimeDir == "" {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
-		}
-		if in.Core == "" {
-			in.Core = s.state.Paths.CorePath
 		}
 		if in.Config == s.state.Paths.GeneratedConfig {
 			if err := s.ensureRunnableConfig(in.Config); err != nil {
@@ -2368,7 +2410,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
 		if in.Core == "" {
-			in.Core = s.state.Paths.CorePath
+			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
 		}
 		if in.Config == s.state.Paths.GeneratedConfig {
 			if err := s.ensureRunnableConfig(in.Config); err != nil {
@@ -2525,6 +2567,7 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 			*value = fallback
 		}
 	}
+	root := s.workspaceRoot()
 	if s.state != nil {
 		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
 		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
@@ -2532,23 +2575,23 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 		setDefault(&in.Output, s.state.Paths.GeneratedConfig)
-		setDefault(&in.Core, s.state.Paths.CorePath)
+		setDefault(&in.Core, normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath))
 		setDefault(&in.RuntimeDir, s.state.Paths.MihomoRuntimeDir)
 		if s.state.Paths.PacksSelectionPath != "" {
 			setDefault(&in.Selection, s.state.Paths.PacksSelectionPath)
 		}
 	}
-	setDefault(&in.Config, "localclash-intent.json")
-	setDefault(&in.Subscription, "subscription.gob")
-	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
-	setDefault(&in.RuntimeProfile, runtimeprofile.DefaultPath)
-	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.json")
-	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
-	setDefault(&in.Selection, "localclash-packs.gob")
-	setDefault(&in.Output, filepath.Join("generated", "mihomo.yaml"))
-	setDefault(&in.RuntimeDir, filepath.Join(".runtime", "mihomo"))
+	setDefault(&in.Config, workspacePath(root, "localclash-intent.json"))
+	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
+	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	setDefault(&in.RuntimeProfile, workspacePath(root, runtimeprofile.DefaultPath))
+	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
+	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
+	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
+	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
 	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
-	setDefault(&in.PatchesDir, filepath.Join(".runtime", "patches"))
+	setDefault(&in.PatchesDir, workspacePath(root, filepath.Join(".runtime", "patches")))
 }
 
 func missingRenderInputs(in configToolInput) []string {
@@ -2655,21 +2698,22 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
+	root := s.workspaceRoot()
 	if s.state != nil {
-		setDefault(&in.Config, "localclash-intent.json")
+		setDefault(&in.Config, workspacePath(root, "localclash-intent.json"))
 		setDefault(&in.RuntimeProfileConfig, s.state.Paths.RuntimeProfilePath)
 		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
 		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 	}
-	setDefault(&in.Config, "localclash-intent.json")
-	setDefault(&in.RuntimeProfileConfig, runtimeprofile.DefaultPath)
-	setDefault(&in.PolicyTemplatesDir, policytemplate.DefaultDir)
-	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
-	setDefault(&in.SubscriptionConfig, "localclash-subscriptions.json")
-	setDefault(&in.Subscription, "subscription.gob")
-	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
+	setDefault(&in.Config, workspacePath(root, "localclash-intent.json"))
+	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
+	setDefault(&in.PolicyTemplatesDir, workspacePath(root, policytemplate.DefaultDir))
+	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
+	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
+	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
 
 	if strings.TrimSpace(in.RuntimeProfile) == "" && strings.TrimSpace(in.Core) == "" && strings.TrimSpace(in.PolicyTemplate) == "" {
 		return toolResult{}, fmt.Errorf("config_configure requires at least one of core, runtime_profile, or policy_template")
@@ -2726,8 +2770,8 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 			}
 		}
 		s.state.Paths.RuntimeProfilePath = in.RuntimeProfileConfig
-		s.state.Paths.CorePath = status.CorePath
-		s.state.Core.Path = status.CorePath
+		s.state.Paths.CorePath = normalizeMCPStateCorePath(s.state, status.CorePath)
+		s.state.Core.Path = s.state.Paths.CorePath
 	}
 	subStatus, _ := subscriptions.Status(subscriptions.StatusOptions{
 		ConfigPath: in.SubscriptionConfig,
@@ -2756,16 +2800,56 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 	return jsonToolResult(result)
 }
 
+func (s *Server) workspaceRoot() string {
+	if s == nil {
+		return ""
+	}
+	return mcpWorkspaceRoot(s.state)
+}
+
+func mcpWorkspaceRoot(state *appinit.RuntimeState) string {
+	if state == nil {
+		return ""
+	}
+	for _, candidate := range []string{
+		state.Paths.WorkspaceRoot,
+		workspace.FromRuntimeRoot(state.Paths.RuntimeRoot),
+		workspaceRootFromRuntimeProfilePath(state.Paths.RuntimeProfilePath),
+	} {
+		if root := cleanWorkspaceRoot(candidate); root != "" {
+			return root
+		}
+	}
+	return ""
+}
+
+func cleanWorkspaceRoot(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "." || !filepath.IsAbs(path) {
+		return ""
+	}
+	return filepath.Clean(path)
+}
+
+func (s *Server) workspacePath(path string) string {
+	return workspacePath(s.workspaceRoot(), path)
+}
+
+func workspacePath(root, path string) string {
+	path = strings.TrimSpace(path)
+	if root == "" || path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(root, path)
+}
+
 func normalizeMCPStateCorePath(state *appinit.RuntimeState, corePath string) string {
 	corePath = strings.TrimSpace(corePath)
 	if corePath == "" || filepath.IsAbs(corePath) || state == nil {
 		return corePath
 	}
-	root := strings.TrimSpace(state.Paths.WorkspaceRoot)
+	root := mcpWorkspaceRoot(state)
 	if root == "" {
-		root = workspaceRootFromRuntimeProfilePath(state.Paths.RuntimeProfilePath)
-	}
-	if root == "" || root == "." {
 		return corePath
 	}
 	return filepath.Join(root, corePath)
@@ -2775,11 +2859,11 @@ func mcpStateRuntimeRoot(state *appinit.RuntimeState) string {
 	if state == nil {
 		return ""
 	}
-	if root := strings.TrimSpace(state.Paths.RuntimeRoot); root != "" {
+	if root := strings.TrimSpace(state.Paths.RuntimeRoot); filepath.IsAbs(root) {
 		return root
 	}
-	workspaceRoot := workspaceRootFromRuntimeProfilePath(state.Paths.RuntimeProfilePath)
-	if workspaceRoot == "" || workspaceRoot == "." {
+	workspaceRoot := mcpWorkspaceRoot(state)
+	if workspaceRoot == "" {
 		return ""
 	}
 	return filepath.Join(workspaceRoot, ".runtime")
@@ -2887,9 +2971,6 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 		}
 		if in.RuntimeDir == "" {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
-		}
-		if in.Core == "" {
-			in.Core = s.state.Paths.CorePath
 		}
 	}
 	return jsonToolResult(corerun.Status(corerun.StatusOptions{

@@ -19,6 +19,7 @@ const (
 )
 
 type NLFileOptions struct {
+	Root       string
 	Path       string
 	StartLine  int
 	LimitLines int
@@ -43,6 +44,7 @@ type NLFileResult struct {
 }
 
 type SedFileOptions struct {
+	Root           string
 	Path           string
 	DryRun         bool
 	ExpectedSHA256 string
@@ -72,7 +74,7 @@ type SedFileResult struct {
 }
 
 func NLFile(opts NLFileOptions) (NLFileResult, error) {
-	path, displayPath, err := resolveExistingPath(opts.Path)
+	path, displayPath, err := resolveExistingPath(opts.Root, opts.Path)
 	if err != nil {
 		return NLFileResult{}, err
 	}
@@ -145,7 +147,7 @@ func NLFile(opts NLFileOptions) (NLFileResult, error) {
 }
 
 func SedFile(opts SedFileOptions) (SedFileResult, error) {
-	path, displayPath, err := resolveExistingPath(opts.Path)
+	path, displayPath, err := resolveExistingPath(opts.Root, opts.Path)
 	if err != nil {
 		return SedFileResult{}, err
 	}
@@ -281,27 +283,27 @@ func deleteRange(content string, startLine, endLine int) (string, []string, erro
 	return joinEditableLines(next, trailingNewline), nil, nil
 }
 
-func resolveExistingPath(path string) (string, string, error) {
+func resolveExistingPath(root, path string) (string, string, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "", "", errors.New("path is required")
 	}
-	if filepath.IsAbs(path) {
+	root, hasExplicitRoot, err := resolveRoot(root)
+	if err != nil {
+		return "", "", err
+	}
+	pathIsAbs := filepath.IsAbs(path)
+	if pathIsAbs && !hasExplicitRoot {
 		return "", "", fmt.Errorf("absolute paths are not allowed: %q", path)
 	}
 	clean := filepath.Clean(path)
-	if clean == "." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || clean == ".." {
+	if !pathIsAbs && (clean == "." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) || clean == "..") {
 		return "", "", fmt.Errorf("path escapes repository root: %q", path)
 	}
-	root, err := os.Getwd()
-	if err != nil {
-		return "", "", err
+	joined := clean
+	if !pathIsAbs {
+		joined = filepath.Join(root, clean)
 	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", "", err
-	}
-	joined := filepath.Join(root, clean)
 	resolved, err := filepath.EvalSymlinks(joined)
 	if err != nil {
 		return "", "", err
@@ -313,7 +315,35 @@ func resolveExistingPath(path string) (string, string, error) {
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
 		return "", "", fmt.Errorf("path escapes repository root: %q", path)
 	}
-	return resolved, filepath.ToSlash(rel), nil
+	displayPath := filepath.ToSlash(rel)
+	if pathIsAbs {
+		displayPath = filepath.ToSlash(clean)
+	}
+	return resolved, displayPath, nil
+}
+
+func resolveRoot(root string) (string, bool, error) {
+	root = strings.TrimSpace(root)
+	hasExplicitRoot := root != ""
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", false, err
+		}
+		root = cwd
+	}
+	if !filepath.IsAbs(root) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", false, err
+		}
+		root = filepath.Join(cwd, root)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		return "", false, err
+	}
+	return resolved, hasExplicitRoot, nil
 }
 
 func splitLines(content string) []string {

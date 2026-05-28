@@ -40,6 +40,34 @@ func TestNLFileRejectsPathEscape(t *testing.T) {
 	}
 }
 
+func TestNLFileAllowsAbsolutePathInsideExplicitRoot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "task.log")
+	if err := os.WriteFile(path, []byte("queued\ndone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NLFile(NLFileOptions{Root: root, Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != path || result.Text != "1: queued\n2: done" {
+		t.Fatalf("result = %+v, want absolute path under root", result)
+	}
+}
+
+func TestNLFileRejectsAbsolutePathOutsideExplicitRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.log")
+	if err := os.WriteFile(outside, []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NLFile(NLFileOptions{Root: root, Path: outside}); err == nil {
+		t.Fatal("expected absolute path outside root to be rejected")
+	}
+}
+
 func TestSedFileDryRunReplaceDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -95,6 +123,34 @@ func TestSedFileAppliesLineEdits(t *testing.T) {
 	}
 	if string(data) != "a\nx\nc\nz\n" {
 		t.Fatalf("file = %q", data)
+	}
+}
+
+func TestSedFileDryRunAllowsAbsolutePathInsideExplicitRoot(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(path, []byte("target: PROXY\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := SedFile(SedFileOptions{
+		Root:   root,
+		Path:   path,
+		DryRun: true,
+		Edits:  []Edit{{Op: "replace", Old: "target: PROXY", New: "target: DIRECT"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Path != path || !result.Changed || !strings.Contains(result.Diff, "+target: DIRECT") {
+		t.Fatalf("result = %+v, want dry-run diff for absolute path under root", result)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "target: PROXY\n" {
+		t.Fatalf("file changed during dry-run: %q", data)
 	}
 }
 

@@ -287,8 +287,237 @@ func TestToolsCallConfigConfigureAndRuntimeProfileStatus(t *testing.T) {
 	if status["mode"] != "router" || status["core"] != "smart" || status["path"] != path {
 		t.Fatalf("status = %+v, want router smart at configured path", status)
 	}
-	if server.state.Paths.CorePath != runtimeprofile.SmartCorePath {
-		t.Fatalf("server core path = %q, want smart core path", server.state.Paths.CorePath)
+	if want := filepath.Join(dir, runtimeprofile.SmartCorePath); server.state.Paths.CorePath != want {
+		t.Fatalf("server core path = %q, want %q", server.state.Paths.CorePath, want)
+	}
+}
+
+func TestMCPDefaultsUseWorkspaceRootWhenProcessCWDIsElsewhere(t *testing.T) {
+	root, wrongDir, state := setupMCPWorkspaceRootFixture(t)
+	t.Chdir(wrongDir)
+	server := NewServerWithState(state)
+
+	statusResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "config_status",
+			"arguments": map[string]any{},
+		},
+	})
+	if statusResp.Error != nil {
+		t.Fatalf("config_status returned JSON-RPC error: %+v", statusResp.Error)
+	}
+	statusResult := marshalToolResult(t, statusResp.Result)
+	status := statusResult.StructuredContent.(map[string]any)
+	source := status["source_of_truth"].(map[string]any)
+	if source["path"] != filepath.Join(root, "localclash-intent.json") || source["present"] != true {
+		t.Fatalf("source_of_truth = %+v, want workspace-root intent", source)
+	}
+	inputs := status["inputs"].(map[string]any)
+	if inputs["selection"] != filepath.Join(root, "localclash-packs.gob") || inputs["patches_dir"] != filepath.Join(root, ".runtime", "patches") {
+		t.Fatalf("inputs = %+v, want workspace-root selection and patches", inputs)
+	}
+
+	routeResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "routing_explain",
+			"arguments": map[string]any{"query": "DNSProxy", "include_rule_matches": false},
+		},
+	})
+	if routeResp.Error != nil {
+		t.Fatalf("routing_explain returned JSON-RPC error: %+v", routeResp.Error)
+	}
+	routeResult := marshalToolResult(t, routeResp.Result)
+	route := routeResult.StructuredContent.(map[string]any)
+	if route["config"] != filepath.Join(root, "localclash-intent.json") || route["config_exists"] != true || route["resolved"] != true {
+		t.Fatalf("routing_explain = %+v, want resolved workspace-root config", route)
+	}
+
+	toolsResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      3,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "tools_list",
+			"arguments": map[string]any{},
+		},
+	})
+	if toolsResp.Error != nil {
+		t.Fatalf("tools_list returned JSON-RPC error: %+v", toolsResp.Error)
+	}
+	toolsResult := marshalToolResult(t, toolsResp.Result)
+	tools := toolsResult.StructuredContent.(map[string]any)
+	serverInfo := tools["server"].(map[string]any)
+	if serverInfo["working_dir"] != wrongDir || serverInfo["workspace_root"] != root {
+		t.Fatalf("server = %+v, want working_dir %q and workspace_root %q", serverInfo, wrongDir, root)
+	}
+
+	envResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      4,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "environment_inspect",
+			"arguments": map[string]any{},
+		},
+	})
+	if envResp.Error != nil {
+		t.Fatalf("environment_inspect returned JSON-RPC error: %+v", envResp.Error)
+	}
+	envResult := marshalToolResult(t, envResp.Result)
+	env := envResult.StructuredContent.(map[string]any)
+	localState := env["localclash_state"].(map[string]any)
+	if localState["work_dir"] != root {
+		t.Fatalf("localclash_state = %+v, want workspace root", localState)
+	}
+}
+
+func TestMCPDoctorNormalizesRelativeStateCorePath(t *testing.T) {
+	root, wrongDir, state := setupMCPWorkspaceRootFixture(t)
+	t.Chdir(wrongDir)
+	corePath := filepath.Join(root, runtimeprofile.SmartCorePath)
+	if err := os.MkdirAll(filepath.Dir(corePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corePath, []byte("#!/bin/sh\necho mihomo smart test\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	state.Paths.CorePath = runtimeprofile.SmartCorePath
+	server := NewServerWithState(state)
+
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "doctor",
+			"arguments": map[string]any{},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("doctor returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	checks := content["checks"].([]any)
+	var core map[string]any
+	for _, raw := range checks {
+		check := raw.(map[string]any)
+		if check["id"] == "core" {
+			core = check
+			break
+		}
+	}
+	if core == nil {
+		t.Fatalf("doctor checks missing core: %+v", checks)
+	}
+	if core["path"] != corePath || core["status"] != "ok" {
+		t.Fatalf("core check = %+v, want absolute core path ok", core)
+	}
+}
+
+func TestMCPFileToolsUseWorkspaceRootForAbsolutePaths(t *testing.T) {
+	root, wrongDir, state := setupMCPWorkspaceRootFixture(t)
+	t.Chdir(wrongDir)
+	server := NewServerWithState(state)
+	logPath := filepath.Join(root, ".runtime", "mcp-tasks", "task.log")
+	writeMCPFile(t, logPath, "queued\ndone\n")
+
+	nlResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "nl_file",
+			"arguments": map[string]any{"path": logPath},
+		},
+	})
+	if nlResp.Error != nil {
+		t.Fatalf("nl_file returned JSON-RPC error: %+v", nlResp.Error)
+	}
+	nlResult := marshalToolResult(t, nlResp.Result)
+	if content := nlResult.StructuredContent.(map[string]any); content["path"] != logPath {
+		t.Fatalf("nl_file content = %+v, want absolute path preserved", content)
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.log")
+	writeMCPFile(t, outside, "outside\n")
+	outsideResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "nl_file",
+			"arguments": map[string]any{"path": outside},
+		},
+	})
+	if outsideResp.Error == nil || !strings.Contains(outsideResp.Error.Message, "escapes repository root") {
+		t.Fatalf("outside nl_file response = %+v, want root escape error", outsideResp)
+	}
+
+	sedResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      3,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "sed_file",
+			"arguments": map[string]any{
+				"path": logPath,
+				"edits": []map[string]any{
+					{"op": "replace", "old": "queued", "new": "started"},
+				},
+			},
+		},
+	})
+	if sedResp.Error != nil {
+		t.Fatalf("sed_file returned JSON-RPC error: %+v", sedResp.Error)
+	}
+	sedResult := marshalToolResult(t, sedResp.Result)
+	if content := sedResult.StructuredContent.(map[string]any); content["dry_run"] != true || content["path"] != logPath {
+		t.Fatalf("sed_file content = %+v, want dry-run under workspace root", content)
+	}
+}
+
+func TestMCPAsyncTaskLogPathCanBeReadByNLFile(t *testing.T) {
+	root, wrongDir, state := setupMCPWorkspaceRootFixture(t)
+	t.Chdir(wrongDir)
+	server := NewServerWithState(state)
+
+	runResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "run_runtime",
+			"arguments": map[string]any{"config": "missing.yaml"},
+		},
+	})
+	if runResp.Error != nil {
+		t.Fatalf("run_runtime returned JSON-RPC error: %+v", runResp.Error)
+	}
+	runResult := marshalToolResult(t, runResp.Result)
+	task := runResult.StructuredContent.(map[string]any)
+	logFile := task["log_file"].(string)
+	if !strings.HasPrefix(logFile, filepath.Join(root, ".runtime", "mcp-tasks")) {
+		t.Fatalf("log_file = %q, want workspace-root task log", logFile)
+	}
+
+	nlResp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "nl_file",
+			"arguments": map[string]any{"path": logFile, "limit_lines": 1},
+		},
+	})
+	if nlResp.Error != nil {
+		t.Fatalf("nl_file could not read task log %q: %+v", logFile, nlResp.Error)
 	}
 }
 
@@ -2975,6 +3204,62 @@ type mcpPlanFixture struct {
 	subscription string
 	cache        string
 	outputDir    string
+}
+
+func setupMCPWorkspaceRootFixture(t *testing.T) (string, string, appinit.RuntimeState) {
+	t.Helper()
+	root := t.TempDir()
+	wrongDir := t.TempDir()
+	writeMCPFile(t, filepath.Join(root, "localclash-intent.json"), `
+version: 4
+policy_template: localclash-default
+proxy_groups:
+  Direct:
+    mode: direct
+    reason: Direct exit.
+policy_groups:
+  DNSProxy:
+    mode: manual
+    exits:
+      - Direct
+    reason: DNS proxy exit.
+`)
+	writeMCPFile(t, filepath.Join(root, "subscription.gob"), `
+proxies:
+  - name: Direct
+    type: direct
+`)
+	writeMCPFile(t, filepath.Join(root, "generated", "mihomo.yaml"), `
+proxies: []
+proxy-groups: []
+rules: []
+`)
+	writeMCPFile(t, filepath.Join(root, "localclash-runtime.json"), `
+version: 2
+mode: router
+core: smart
+`)
+	if err := os.MkdirAll(filepath.Join(root, ".runtime", "rules", "packs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".runtime", "mihomo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root, wrongDir, appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       root,
+			RuntimeRoot:         filepath.Join(root, ".runtime"),
+			RuleSourcesDir:      filepath.Join(root, "rule-sources"),
+			RulesCacheDir:       filepath.Join(root, ".runtime", "rules", "packs"),
+			GeneratedConfig:     filepath.Join(root, "generated", "mihomo.yaml"),
+			SubscriptionConfig:  filepath.Join(root, "localclash-subscriptions.json"),
+			SubscriptionPath:    filepath.Join(root, "subscription.gob"),
+			SubscriptionRuntime: filepath.Join(root, ".runtime", "subscriptions"),
+			MihomoRuntimeDir:    filepath.Join(root, ".runtime", "mihomo"),
+			CorePath:            runtimeprofile.SmartCorePath,
+			RuntimeProfilePath:  filepath.Join(root, "localclash-runtime.json"),
+		},
+	}
 }
 
 func setupMCPPlanFixture(t *testing.T) mcpPlanFixture {

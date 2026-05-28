@@ -216,18 +216,19 @@ func (s *Server) applyRoutingExplainDefaults(in *routingExplainInput) {
 	in.SubscriptionConfig = cfg.SubscriptionConfig
 	in.SubscriptionRuntime = cfg.SubscriptionRuntime
 	in.RulesCache = cfg.RulesCache
+	root := s.workspaceRoot()
 	if strings.TrimSpace(in.RuleSources) == "" {
 		if s.state != nil && s.state.Paths.RuleSourcesDir != "" {
 			in.RuleSources = s.state.Paths.RuleSourcesDir
 		} else {
-			in.RuleSources = "rule-sources"
+			in.RuleSources = workspacePath(root, "rule-sources")
 		}
 	}
 	if strings.TrimSpace(in.ProviderCache) == "" {
 		if s.state != nil && s.state.Paths.RuntimeRoot != "" {
 			in.ProviderCache = filepath.Join(s.state.Paths.RuntimeRoot, "rules", "provider-cache")
 		} else {
-			in.ProviderCache = filepath.Join(".runtime", "rules", "provider-cache")
+			in.ProviderCache = workspacePath(root, filepath.Join(".runtime", "rules", "provider-cache"))
 		}
 	}
 }
