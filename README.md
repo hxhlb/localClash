@@ -546,7 +546,9 @@ http://127.0.0.1:9090/ui
 
 zashboard is useful for viewing Mihomo runtime state and switching groups, but
 localClash configuration management is expected to happen through MCP-backed
-agent conversation.
+agent conversation. For the real-router external-controller access pattern and
+historical response examples, see
+[192.168.6.1 Real Router Mihomo API](docs/real-router-mihomo-api.md).
 
 ## Config Render
 
