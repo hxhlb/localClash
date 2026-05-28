@@ -653,6 +653,15 @@ Machine-readable output for MCP tools and agent workflows:
 go run . doctor --json
 ```
 
+## Support
+
+localClash is free to use.
+
+If it saves you time on configuration, debugging, or troubleshooting, you can
+voluntarily support its maintenance here:
+
+[Support localClash](./SUPPORT.md)
+
 ## License
 
 localClash is released under the MIT License. See [LICENSE](LICENSE).
