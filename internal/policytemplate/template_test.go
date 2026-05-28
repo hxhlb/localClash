@@ -265,8 +265,8 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if got := config.Packs[len(config.Packs)-2].Pack; got != "geolocation-!cn" {
 		t.Fatalf("geolocation fallback pack = %q, want geolocation-!cn", got)
 	}
-	if config.FallbackTarget != "🧭 漏网之鱼" {
-		t.Fatalf("fallback_target = %q, want 🧭 漏网之鱼", config.FallbackTarget)
+	if config.FallbackTarget != "DIRECT" {
+		t.Fatalf("fallback_target = %q, want DIRECT blacklist fallback", config.FallbackTarget)
 	}
 }
 
