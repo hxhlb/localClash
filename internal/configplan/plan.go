@@ -304,7 +304,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	planDir := filepath.Join(opts.OutputDir, planID)
 	outputPath := filepath.Join(planDir, "mihomo.yaml")
 	summaryPath := filepath.Join(planDir, "summary.json")
-	configPath := filepath.Join(planDir, "localclash.json")
+	configPath := filepath.Join(planDir, "localclash-intent.json")
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
 		finish(err, nil)
 		return Result{}, err
@@ -631,7 +631,7 @@ func normalizeOptions(opts Options) Options {
 		opts.OutputDir = filepath.Join(".runtime", "patches")
 	}
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = "localclash.json"
+		opts.ConfigPath = "localclash-intent.json"
 	}
 	if opts.SubscriptionConfig == "" {
 		opts.SubscriptionConfig = "localclash-subscriptions.json"
@@ -665,7 +665,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.RuntimeProfilePath = runtimeprofile.DefaultPath
 	}
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = "localclash.json"
+		opts.ConfigPath = "localclash-intent.json"
 	}
 	if opts.SubscriptionConfig == "" {
 		opts.SubscriptionConfig = "localclash-subscriptions.json"
@@ -1091,7 +1091,7 @@ func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) Ch
 func loadApplyConfig(opts ApplyOptions, plan Result) (localconfig.Config, error) {
 	path := plan.ConfigPath
 	if strings.TrimSpace(path) == "" && strings.TrimSpace(plan.SummaryPath) != "" {
-		path = filepath.Join(filepath.Dir(plan.SummaryPath), "localclash.json")
+		path = filepath.Join(filepath.Dir(plan.SummaryPath), "localclash-intent.json")
 	}
 	if strings.TrimSpace(path) != "" {
 		if config, err := localconfig.Load(path); err == nil {
@@ -1431,7 +1431,7 @@ func backupApplyTargets(opts ApplyOptions) ([]BackupResult, error) {
 		source string
 		name   string
 	}{
-		{source: opts.ConfigPath, name: "localclash.json"},
+		{source: opts.ConfigPath, name: "localclash-intent.json"},
 		{source: opts.SelectionPath, name: "localclash-packs.gob"},
 		{source: opts.OutputPath, name: "mihomo.yaml"},
 	}

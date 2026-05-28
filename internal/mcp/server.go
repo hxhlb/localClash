@@ -718,7 +718,7 @@ type configIntentInspectWorkingInput struct {
 
 func (s *Server) configIntentInspectWorkingResult(in configIntentInspectWorkingInput) (toolResult, error) {
 	if in.Config == "" {
-		in.Config = "localclash.json"
+		in.Config = "localclash-intent.json"
 	}
 	limit := in.Limit
 	if limit <= 0 {
@@ -858,7 +858,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 	case in.Intent.Resolved:
 		result.NextActions = append(result.NextActions, "review effective_summary and overlay before starting or applying runtime changes")
 	default:
-		result.NextActions = append(result.NextActions, "repair localclash.json intent before applying or starting runtime")
+		result.NextActions = append(result.NextActions, "repair localclash-intent.json intent before applying or starting runtime")
 	}
 	return nil
 }
@@ -1174,8 +1174,11 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		trimConfigStatusIntent(&intent)
 	}
 	generated := inspectConfigFile(in.Output)
+	if _, err := runtimeprofile.ValidateUserProfileForRuntime(in.RuntimeProfile); err != nil {
+		return toolResult{}, err
+	}
 	status := map[string]any{
-		"model":           "localclash.json is source_of_truth; generated/mihomo.yaml is build_artifact; .runtime/patches contains review_artifacts",
+		"model":           "localclash-intent.json is source_of_truth; generated/mihomo.yaml is build_artifact; .runtime/patches contains review_artifacts",
 		"source_of_truth": inspectConfigFile(in.Config),
 		"generated":       generated,
 		"subscription":    inspectConfigFile(in.Subscription),
@@ -1279,7 +1282,7 @@ func configStatusNextActions(render configRenderState) []string {
 		return actions
 	}
 	if !render.CanRender {
-		return []string{"inspect intent.resolve_error in config_status and repair localclash.json or subscription node references before rendering"}
+		return []string{"inspect intent.resolve_error in config_status and repair localclash-intent.json or subscription node references before rendering"}
 	}
 	if render.RecommendedTool != "" {
 		return []string{"call " + render.RecommendedTool + " to rebuild generated/mihomo.yaml from durable localClash state"}
@@ -1927,7 +1930,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		in.Selection = "localclash-packs.gob"
 	}
 	if in.LocalClashConfig == "" {
-		in.LocalClashConfig = "localclash.json"
+		in.LocalClashConfig = "localclash-intent.json"
 	}
 	finish := startTaskStage(ctx, "load_subscription_nodes_before", map[string]any{"subscription": in.Merged})
 	beforeNodes, _ := localconfig.LoadSubscriptionNodes(localconfig.SubscriptionNodeOptions{
@@ -2100,7 +2103,7 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 		impact.State = "requires_agent_replan"
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
-		impact.NextActions = []string{"read localclash.json", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
+		impact.NextActions = []string{"read localclash-intent.json", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
 		return impact
 	}
 	finishTaskStage(finish, nil, map[string]any{
@@ -2535,7 +2538,7 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 			setDefault(&in.Selection, s.state.Paths.PacksSelectionPath)
 		}
 	}
-	setDefault(&in.Config, "localclash.json")
+	setDefault(&in.Config, "localclash-intent.json")
 	setDefault(&in.Subscription, "subscription.gob")
 	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))
 	setDefault(&in.RuntimeProfile, runtimeprofile.DefaultPath)
@@ -2653,14 +2656,14 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 		return toolResult{}, err
 	}
 	if s.state != nil {
-		setDefault(&in.Config, "localclash.json")
+		setDefault(&in.Config, "localclash-intent.json")
 		setDefault(&in.RuntimeProfileConfig, s.state.Paths.RuntimeProfilePath)
 		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
 		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 	}
-	setDefault(&in.Config, "localclash.json")
+	setDefault(&in.Config, "localclash-intent.json")
 	setDefault(&in.RuntimeProfileConfig, runtimeprofile.DefaultPath)
 	setDefault(&in.PolicyTemplatesDir, policytemplate.DefaultDir)
 	setDefault(&in.RulesCache, filepath.Join(".runtime", "rules", "packs"))

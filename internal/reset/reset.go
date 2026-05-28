@@ -113,7 +113,7 @@ func buildPlanForWorkspace(opts Options, ws resolvedWorkspace) ([]Target, error)
 	paths := []Target{
 		{Path: filepath.Join(ws.Path, ".runtime"), Kind: "directory"},
 		{Path: filepath.Join(ws.Path, "generated"), Kind: "directory"},
-		{Path: filepath.Join(ws.Path, "localclash.json"), Kind: "file"},
+		{Path: filepath.Join(ws.Path, "localclash-intent.json"), Kind: "file"},
 		{Path: filepath.Join(ws.Path, "localclash-packs.gob"), Kind: "file"},
 		{Path: filepath.Join(ws.Path, "localclash-subscriptions.json"), Kind: "file"},
 		{Path: filepath.Join(ws.Path, "localclash-runtime.json"), Kind: "file"},

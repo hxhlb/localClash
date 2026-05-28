@@ -12,33 +12,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestStatusForMissingFileInitializesEditableProfilesFromDefaults(t *testing.T) {
+func TestStatusForMissingFileInitializesV2RuntimeSelectorWithoutWorkingProfiles(t *testing.T) {
 	dir := t.TempDir()
-	status, err := StatusFor(filepath.Join(dir, DefaultPath))
+	path := filepath.Join(dir, DefaultPath)
+	status, err := StatusFor(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !status.Exists {
-		t.Fatal("missing runtime profile should be initialized")
+		t.Fatal("missing runtime selector should be initialized")
 	}
-	if status.Mode != ModeNormal {
-		t.Fatalf("mode = %q, want %q", status.Mode, ModeNormal)
+	if status.Mode != ModeNormal || status.Core != CoreMeta || status.RuntimeSource != RuntimeSourceBuiltin {
+		t.Fatalf("status = %+v, want normal/meta builtin", status)
 	}
-	if status.Core != CoreMeta || status.CorePath != MetaCorePath {
-		t.Fatalf("core = %q path = %q, want %q %q", status.Core, status.CorePath, CoreMeta, MetaCorePath)
+	if status.CorePath != MetaCorePath {
+		t.Fatalf("core path = %q, want %q", status.CorePath, MetaCorePath)
 	}
 	if status.Summary["mixed-port"] != 7890 {
 		t.Fatalf("summary mixed-port = %v, want 7890", status.Summary["mixed-port"])
 	}
-	for _, path := range []string{
-		filepath.Join(dir, "profiles", "normal.default.json"),
-		filepath.Join(dir, "profiles", "router.default.json"),
-		filepath.Join(dir, "profiles", "normal.json"),
-		filepath.Join(dir, "profiles", "router.json"),
-		filepath.Join(dir, DefaultPath),
-	} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected initialized profile file %s: %v", path, err)
+	if _, err := os.Stat(filepath.Join(dir, "profiles")); !os.IsNotExist(err) {
+		t.Fatalf("V2 must not create profiles directory, stat err=%v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{`"version": 2`, `"mode": "normal"`, `"core": "meta"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("runtime selector missing %q:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{`"profiles"`, `"cores"`, `"mihomo"`} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("runtime selector should not contain %q:\n%s", unwanted, text)
 		}
 	}
 }
@@ -51,31 +59,23 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !status.Exists {
-		t.Fatal("configured profile file should exist")
+		t.Fatal("configured runtime selector should exist")
 	}
 	if status.Mode != ModeRouter || status.Core != CoreSmart || status.CorePath != SmartCorePath {
 		t.Fatalf("status = %+v, want router smart", status)
 	}
+	if status.RuntimeSource != RuntimeSourceBuiltin {
+		t.Fatalf("runtime source = %q, want builtin", status.RuntimeSource)
+	}
 	if !status.RouterTakeoverRequired {
 		t.Fatal("router profile should require router takeover after run_runtime")
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(data)
-	if !contains(text, `"path": "profiles/normal.json"`) || !contains(text, `"path": "profiles/router.json"`) || contains(text, `"mihomo"`) {
-		t.Fatalf("runtime selector file =\n%s\nwant profile paths without embedded mihomo profile bodies", text)
 	}
 
 	file, exists, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !exists || file.Version != 1 || file.Mode != ModeRouter || file.Core != CoreSmart {
+	if !exists || file.Version != 2 || file.Mode != ModeRouter || file.Core != CoreSmart {
 		t.Fatalf("loaded file = %+v exists=%v", file, exists)
 	}
 }
@@ -91,10 +91,6 @@ func TestDefaultNormalProfileCanResolveV2FlyGeoSitePacks(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
 		t.Fatalf("normal geox-url = %+v, want Loyalsoldier geosite.dat", geoxURL)
 	}
-}
-
-func contains(text, needle string) bool {
-	return strings.Contains(text, needle)
 }
 
 func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
@@ -147,6 +143,108 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 	}
 }
 
+func TestUserProfileReplacesBuiltinWithoutBackfill(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultPath)
+	writeRuntimeProfileTestFile(t, path, `version: 2
+mode: router
+core: meta
+`)
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, UserPath), `mixed-port: 9000
+allow-lan: true
+`)
+
+	_, profile, exists, err := ActiveProfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("runtime selector should exist")
+	}
+	if profile.Mihomo["mixed-port"] != 9000 {
+		t.Fatalf("mixed-port = %v, want user value 9000", profile.Mihomo["mixed-port"])
+	}
+	for _, key := range []string{"dns", "tun", "sniffer", "external-controller"} {
+		if _, ok := profile.Mihomo[key]; ok {
+			t.Fatalf("%s should not be backfilled into user profile: %+v", key, profile.Mihomo)
+		}
+	}
+
+	status, err := StatusFor(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.RuntimeSource != RuntimeSourceUser || !status.UserProfileExists {
+		t.Fatalf("status = %+v, want user runtime source", status)
+	}
+}
+
+func TestUserProfileRejectsLocalClashOwnedDynamicKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultPath)
+	writeRuntimeProfileTestFile(t, path, `version: 2
+mode: normal
+core: meta
+`)
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, UserPath), `rules:
+  - MATCH,DIRECT
+`)
+
+	_, _, _, err := ActiveProfile(path)
+	if err == nil || !strings.Contains(err.Error(), `rules`) || !strings.Contains(err.Error(), UserPath) {
+		t.Fatalf("ActiveProfile error = %v, want banned key with user profile path", err)
+	}
+}
+
+func TestUserProfileAllowsMihomoMode(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, DefaultPath)
+	writeRuntimeProfileTestFile(t, path, `version: 2
+mode: router
+core: meta
+`)
+	writeRuntimeProfileTestFile(t, filepath.Join(dir, UserPath), `mode: global
+mixed-port: 9001
+`)
+
+	_, profile, _, err := ActiveProfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Mihomo["mode"] != "global" || profile.Mihomo["mixed-port"] != 9001 {
+		t.Fatalf("profile = %+v, want user Mihomo mode and port", profile.Mihomo)
+	}
+}
+
+func TestBuildConfigInjectsOnlyLocalClashDynamicKeys(t *testing.T) {
+	profile := Profile{Mihomo: map[string]any{
+		"mixed-port": 9000,
+		"mode":       "global",
+	}}
+	dynamic := map[string]any{
+		"proxies":        []any{map[string]any{"name": "HK"}},
+		"proxy-groups":   []any{map[string]any{"name": "AUTO"}},
+		"rule-providers": map[string]any{},
+		"rules":          []string{"MATCH,DIRECT"},
+		"x-localclash":   map[string]any{"version": 1},
+		"dns":            map[string]any{"enable": true},
+	}
+
+	config := BuildConfig(profile, dynamic)
+
+	if config["mixed-port"] != 9000 || config["mode"] != "global" {
+		t.Fatalf("runtime keys = %+v, want user base preserved", config)
+	}
+	if _, ok := config["dns"]; ok {
+		t.Fatalf("non-dynamic DNS must not be injected from dynamic fragment: %+v", config["dns"])
+	}
+	for _, key := range []string{"proxies", "proxy-groups", "rule-providers", "rules", "x-localclash"} {
+		if _, ok := config[key]; !ok {
+			t.Fatalf("missing injected dynamic key %q in %+v", key, config)
+		}
+	}
+}
+
 func assertMainlandReachableDNS(t *testing.T, mihomo map[string]any, listen string, label string) {
 	t.Helper()
 	dns, ok := mihomo["dns"].(map[string]any)
@@ -188,125 +286,6 @@ func assertMainlandReachableDNS(t *testing.T, mihomo map[string]any, listen stri
 	filter, ok := dns["fallback-filter"].(map[string]any)
 	if !ok || filter["geoip"] != true || filter["geoip-code"] != "CN" || filter["geosite"] != nil {
 		t.Fatalf("%s dns fallback-filter = %+v, want geoip CN and no deprecated geosite filter", label, dns["fallback-filter"])
-	}
-}
-
-func TestLoadUsesUserProfileFileWithoutBackfillingDeletedSettings(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, DefaultPath)
-	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "router.json"), `mihomo:
-  mixed-port: 9000
-  dns:
-    listen: 127.0.0.1:5353
-`)
-	writeRuntimeProfileTestFile(t, path, `version: 1
-mode: router
-core: meta
-profiles:
-  router:
-    path: profiles/router.json
-cores:
-  meta:
-    path: custom-meta
-  smart:
-    path: custom-smart
-`)
-
-	file, exists, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !exists {
-		t.Fatal("profile file should exist")
-	}
-	router := file.Profiles[ModeRouter]
-	if router.Mihomo["mixed-port"] != 9000 {
-		t.Fatalf("mixed-port = %v, want preserved user value 9000", router.Mihomo["mixed-port"])
-	}
-	dns := router.Mihomo["dns"].(map[string]any)
-	if dns["listen"] != "127.0.0.1:5353" {
-		t.Fatalf("dns.listen = %v, want preserved user value", dns["listen"])
-	}
-	if _, ok := dns["enhanced-mode"]; ok {
-		t.Fatalf("dns.enhanced-mode should not be backfilled into user profile: %+v", dns)
-	}
-	if _, ok := router.Mihomo["interface-name"]; ok {
-		t.Fatalf("interface-name should not be backfilled into user profile: %+v", router.Mihomo)
-	}
-	if _, ok := router.Mihomo["sniffer"].(map[string]any); ok {
-		t.Fatalf("sniffer should not be backfilled into user profile: %+v", router.Mihomo)
-	}
-	if _, ok := file.Profiles[ModeNormal]; ok {
-		t.Fatalf("normal profile should not be injected into explicit runtime file: %+v", file.Profiles)
-	}
-}
-
-func TestLoadRejectsExistingRuntimeFileWithoutExplicitCorePaths(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, DefaultPath)
-	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.json"), `mihomo:
-  mixed-port: 7890
-`)
-	writeRuntimeProfileTestFile(t, path, `version: 1
-mode: normal
-core: meta
-profiles:
-  normal:
-    path: profiles/normal.json
-`)
-
-	_, _, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), `runtime core "meta" is not defined`) {
-		t.Fatalf("Load error = %v, want missing explicit core definition", err)
-	}
-}
-
-func TestLoadRejectsExistingRuntimeFileWithEmptyActiveCorePath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, DefaultPath)
-	writeRuntimeProfileTestFile(t, filepath.Join(dir, "profiles", "normal.json"), `mihomo:
-  mixed-port: 7890
-`)
-	writeRuntimeProfileTestFile(t, path, `version: 1
-mode: normal
-core: meta
-profiles:
-  normal:
-    path: profiles/normal.json
-cores:
-  meta:
-    path: ""
-`)
-
-	_, _, err := Load(path)
-	if err == nil || !strings.Contains(err.Error(), `runtime core "meta" has no path`) {
-		t.Fatalf("Load error = %v, want empty active core path rejection", err)
-	}
-}
-
-func TestApplyToConfigSkipsDynamicKeys(t *testing.T) {
-	config := map[string]any{
-		"mixed-port": 7890,
-		"proxies":    []any{"keep"},
-		"dns":        map[string]any{"enable": false, "keep": true},
-	}
-	profile := Profile{Mihomo: map[string]any{
-		"mixed-port": 7893,
-		"proxies":    []any{"drop"},
-		"dns":        map[string]any{"enable": true, "listen": "0.0.0.0:7874"},
-	}}
-
-	ApplyToConfig(config, profile)
-
-	if config["mixed-port"] != 7893 {
-		t.Fatalf("mixed-port = %v, want 7893", config["mixed-port"])
-	}
-	if config["proxies"].([]any)[0] != "keep" {
-		t.Fatalf("proxies = %v, want original dynamic value", config["proxies"])
-	}
-	dns := config["dns"].(map[string]any)
-	if dns["enable"] != true || dns["listen"] != "0.0.0.0:7874" || dns["keep"] != true {
-		t.Fatalf("dns = %+v, want merged preset dns", dns)
 	}
 }
 

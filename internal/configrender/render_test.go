@@ -51,31 +51,6 @@ func TestProxyNamesDeduplicates(t *testing.T) {
 	}
 }
 
-func TestWithLocalDNSPolicy(t *testing.T) {
-	dns := map[string]any{
-		"fake-ip-filter": []any{"*.lan"},
-	}
-
-	got := withLocalDNSPolicy(dns).(map[string]any)
-	policy := got["nameserver-policy"].(map[string]any)
-	if policy["+.local"] != "system" {
-		t.Fatalf("nameserver-policy +.local = %v, want system", policy["+.local"])
-	}
-	if policy["+.lan"] != "system" {
-		t.Fatalf("nameserver-policy +.lan = %v, want system", policy["+.lan"])
-	}
-	if policy["+.home.arpa"] != "system" {
-		t.Fatalf("nameserver-policy +.home.arpa = %v, want system", policy["+.home.arpa"])
-	}
-	if got["use-system-hosts"] != true {
-		t.Fatal("use-system-hosts should be enabled")
-	}
-	filters := got["fake-ip-filter"].([]string)
-	if !containsString(filters, "+.home.arpa") {
-		t.Fatalf("fake-ip-filter = %v, want +.home.arpa", filters)
-	}
-}
-
 func TestBuildOrderedRulesUsesLocalBaselineFragmentAndDirectFallback(t *testing.T) {
 	fragment := &rules.Fragment{Rules: []string{"DOMAIN-SUFFIX,example.com,⚡ 自动选择"}}
 	got, err := buildOrderedRules(fragment, "")
@@ -415,6 +390,153 @@ enabled_packs: []
 	}
 }
 
+func TestRenderUserProfileOmittedDNSDoesNotBackfillBuiltinDNS(t *testing.T) {
+	paths := writeRenderFixture(t)
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
+	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(paths.dir, runtimeprofile.UserPath), `mixed-port: 9000
+allow-lan: true
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		OutputPath:         filepath.Join(paths.dir, "user-no-dns.yaml"),
+		RuntimeProfilePath: profilePath,
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	if config["mixed-port"] != 9000 {
+		t.Fatalf("mixed-port = %v, want user runtime base", config["mixed-port"])
+	}
+	if _, ok := config["dns"]; ok {
+		t.Fatalf("dns should not be backfilled from builtin router template: %+v", config["dns"])
+	}
+	if _, ok := config["tun"]; ok {
+		t.Fatalf("tun should not be backfilled from builtin router template: %+v", config["tun"])
+	}
+	if _, ok := config["proxies"].([]any); !ok {
+		t.Fatalf("proxies should still be injected dynamic config, got %T", config["proxies"])
+	}
+}
+
+func TestRenderUserProfileEmptyDNSDoesNotBackfillBuiltinDNS(t *testing.T) {
+	paths := writeRenderFixture(t)
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
+	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(paths.dir, runtimeprofile.UserPath), `mixed-port: 9000
+dns: {}
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		OutputPath:         filepath.Join(paths.dir, "user-empty-dns.yaml"),
+		RuntimeProfilePath: profilePath,
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	dns := config["dns"].(map[string]any)
+	if len(dns) != 0 {
+		t.Fatalf("empty user dns should remain empty without template backfill: %+v", dns)
+	}
+}
+
+func TestRenderUserProfileMosDNSSample(t *testing.T) {
+	paths := writeRenderFixture(t)
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
+	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(paths.dir, runtimeprofile.UserPath), `mixed-port: 7893
+allow-lan: true
+dns:
+  enable: true
+  listen: 0.0.0.0:7874
+  nameserver:
+    - tcp://127.0.0.1:5335
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		OutputPath:         filepath.Join(paths.dir, "user-mosdns.yaml"),
+		RuntimeProfilePath: profilePath,
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	dns := config["dns"].(map[string]any)
+	nameservers := dns["nameserver"].([]any)
+	if len(nameservers) != 1 || nameservers[0] != "tcp://127.0.0.1:5335" {
+		t.Fatalf("dns.nameserver = %+v, want mosDNS tcp upstream", nameservers)
+	}
+}
+
+func TestRenderRejectsUserProfileOwnedDynamicKey(t *testing.T) {
+	paths := writeRenderFixture(t)
+	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
+	if _, err := runtimeprofile.Configure(profilePath, runtimeprofile.ModeRouter, ""); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(paths.dir, runtimeprofile.UserPath), `rules:
+  - MATCH,DIRECT
+`)
+
+	_, err := Render(Options{
+		SourcePath:         paths.subscription,
+		OutputPath:         filepath.Join(paths.dir, "bad-user.yaml"),
+		RuntimeProfilePath: profilePath,
+		Force:              true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "rules") || !strings.Contains(err.Error(), runtimeprofile.UserPath) {
+		t.Fatalf("Render error = %v, want banned user profile key", err)
+	}
+}
+
+func TestRenderIgnoresSubscriptionRuntimeLayerKeys(t *testing.T) {
+	paths := writeRenderFixture(t)
+	writeFile(t, paths.subscription, `hosts:
+  router.local: 192.168.1.1
+dns:
+  enable: true
+  listen: 127.0.0.1:5353
+proxies:
+  - name: "🇯🇵日本01 | JP"
+    type: ss
+    server: example.com
+    port: 443
+    cipher: none
+    password: test
+`)
+
+	result, err := Render(Options{
+		SourcePath:         paths.subscription,
+		OutputPath:         filepath.Join(paths.dir, "subscription-runtime-ignored.yaml"),
+		RuntimeProfilePath: filepath.Join(paths.dir, "localclash-runtime.json"),
+		Force:              true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := readTestYAML(t, result.OutputPath)
+	if _, ok := config["hosts"]; ok {
+		t.Fatalf("subscription hosts should not be copied into runtime config: %+v", config["hosts"])
+	}
+	if _, ok := config["dns"]; ok {
+		t.Fatalf("subscription dns should not be copied into runtime config: %+v", config["dns"])
+	}
+}
+
 func TestRenderSmartCoreMaterializesAutoGroupsAsSmart(t *testing.T) {
 	paths := writeRenderFixture(t)
 	profilePath := filepath.Join(paths.dir, "localclash-runtime.json")
@@ -473,15 +595,6 @@ func TestMergeRuleProvidersRejectsConflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected provider conflict error")
 	}
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
 }
 
 type renderFixturePaths struct {

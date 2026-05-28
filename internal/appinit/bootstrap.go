@@ -200,7 +200,7 @@ func hasExplicitPath(opts Options) bool {
 func looksLikeWorkDir(dir string) bool {
 	for _, marker := range []string{
 		"localclash-runtime.json",
-		"localclash.json",
+		"localclash-intent.json",
 		"subscription.gob",
 		filepath.Join("generated", "mihomo.yaml"),
 		filepath.Join(".runtime", "mihomo", "mihomo.pid"),

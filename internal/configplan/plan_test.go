@@ -136,7 +136,7 @@ func TestRenderEnabledRulePackPlanWritesDurableIntent(t *testing.T) {
 	}
 	candidate := readFile(t, result.ConfigPath)
 	if !strings.Contains(candidate, `"enabled_rule_packs"`) || !strings.Contains(candidate, `"ads"`) {
-		t.Fatalf("candidate localclash.json missing enabled_rule_packs:\n%s", candidate)
+		t.Fatalf("candidate localclash-intent.json missing enabled_rule_packs:\n%s", candidate)
 	}
 	config := readYAMLMap(t, result.Output)
 	rules := config["rules"].([]any)
@@ -260,7 +260,7 @@ func TestRenderPolicyGroupPlan(t *testing.T) {
 
 func TestRenderPatchCanReuseExistingProxyGroups(t *testing.T) {
 	paths := writePlanFixture(t)
-	existingConfig := filepath.Join(paths.dir, "localclash.json")
+	existingConfig := filepath.Join(paths.dir, "localclash-intent.json")
 	writeFile(t, existingConfig, `version: 2
 policy_template: localclash-default
 proxy_groups:
@@ -633,7 +633,7 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 
 func TestApplyPlanRollsBackWhenAtomicCommitFails(t *testing.T) {
 	paths := writePlanFixture(t)
-	activeConfig := filepath.Join(paths.dir, "localclash.json")
+	activeConfig := filepath.Join(paths.dir, "localclash-intent.json")
 	selectionPath := filepath.Join(paths.dir, "localclash-packs.gob")
 	generated := filepath.Join(paths.dir, "generated", "mihomo.yaml")
 	writeFile(t, activeConfig, `version: 1

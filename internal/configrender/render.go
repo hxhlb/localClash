@@ -124,7 +124,7 @@ func Render(opts Options) (Result, error) {
 		return Result{}, err
 	}
 	finish(nil, map[string]any{"proxy_count": len(proxyNames)})
-	requiredTargets := dnsProxyGroupReferences(source["dns"], profile.Mihomo["dns"])
+	requiredTargets := dnsProxyGroupReferences(profile.Mihomo["dns"])
 
 	var fragment *rulespkg.Fragment
 	var selection *rulespkg.Selection
@@ -154,12 +154,12 @@ func Render(opts Options) (Result, error) {
 		}, renderStats.Fields()))
 	}
 
-	finish = stage("build_runtime_config", nil)
+	finish = stage("build_dynamic_config", nil)
 	fallbackTarget := rulespkg.TerminalDirect
 	if selection != nil && strings.TrimSpace(selection.FallbackTarget) != "" {
 		fallbackTarget = strings.TrimSpace(selection.FallbackTarget)
 	}
-	rendered, err := buildRuntimeConfig(source, proxies, fragment, fallbackTarget)
+	dynamic, err := buildDynamicConfig(proxies, fragment, fallbackTarget)
 	if err != nil {
 		finish(err, nil)
 		return Result{}, err
@@ -168,11 +168,11 @@ func Render(opts Options) (Result, error) {
 
 	if runtimeFile.Core == runtimeprofile.CoreSmart {
 		finish = stage("apply_smart_core_groups", nil)
-		applySmartCoreProxyGroups(rendered, runtimeFile.Smart)
+		applySmartCoreProxyGroups(dynamic, runtimeFile.Smart)
 		finish(nil, nil)
 	}
 	finish = stage("apply_runtime_profile", map[string]any{"runtime_mode": runtimeFile.Mode, "core": runtimeFile.Core})
-	runtimeprofile.ApplyToConfig(rendered, profile)
+	rendered := runtimeprofile.BuildConfig(profile, dynamic)
 	finish(nil, nil)
 
 	finish = stage("validate_dns_proxy_groups", map[string]any{"required_targets": len(requiredTargets)})
@@ -621,22 +621,9 @@ func proxyNames(proxies []any) ([]string, error) {
 	return names, nil
 }
 
-func buildRuntimeConfig(source map[string]any, proxies []any, fragment *rulespkg.Fragment, fallbackTarget string) (map[string]any, error) {
+func buildDynamicConfig(proxies []any, fragment *rulespkg.Fragment, fallbackTarget string) (map[string]any, error) {
 	config := map[string]any{
-		"mixed-port":          7890,
-		"allow-lan":           false,
-		"mode":                "rule",
-		"log-level":           "info",
-		"external-controller": "127.0.0.1:9090",
-		"external-ui":         "ui/zashboard",
-		"unified-delay":       true,
-		"proxies":             proxies,
-	}
-	if hosts, ok := source["hosts"]; ok {
-		config["hosts"] = hosts
-	}
-	if dns, ok := source["dns"]; ok {
-		config["dns"] = withLocalDNSPolicy(dns)
+		"proxies": proxies,
 	}
 
 	ruleProviders := map[string]any{}
@@ -785,52 +772,6 @@ func mergeRuleProviders(base map[string]any, extra map[string]map[string]any) er
 		base[name] = provider
 	}
 	return nil
-}
-
-func withLocalDNSPolicy(raw any) any {
-	dns, ok := raw.(map[string]any)
-	if !ok {
-		return raw
-	}
-	dns = cloneMap(dns)
-	dns["use-system-hosts"] = true
-
-	policy, _ := dns["nameserver-policy"].(map[string]any)
-	policy = cloneMap(policy)
-	for _, domain := range []string{"+.local", "+.lan", "+.home.arpa", "localhost", "+.localhost"} {
-		policy[domain] = "system"
-	}
-	dns["nameserver-policy"] = policy
-
-	filter := stringSlice(dns["fake-ip-filter"])
-	for _, domain := range []string{"*.local", "+.local", "*.lan", "+.lan", "*.home.arpa", "+.home.arpa", "localhost", "+.localhost"} {
-		filter = appendUnique(filter, domain)
-	}
-	dns["fake-ip-filter"] = filter
-
-	return dns
-}
-
-func cloneMap(in map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func stringSlice(raw any) []string {
-	values, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if s, ok := value.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
 }
 
 func appendUnique(values []string, value string) []string {

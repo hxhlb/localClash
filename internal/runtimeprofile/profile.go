@@ -18,10 +18,15 @@ var defaultProfileFS embed.FS
 
 const (
 	DefaultPath = "localclash-runtime.json"
-	ModeNormal  = "normal"
-	ModeRouter  = "router"
-	CoreMeta    = "meta"
-	CoreSmart   = "smart"
+	UserPath    = "localclash-user.json"
+
+	ModeNormal = "normal"
+	ModeRouter = "router"
+	CoreMeta   = "meta"
+	CoreSmart  = "smart"
+
+	RuntimeSourceBuiltin = "builtin"
+	RuntimeSourceUser    = "user"
 )
 
 var (
@@ -35,16 +40,15 @@ var dynamicConfigKeys = map[string]bool{
 	"proxy-providers": true,
 	"rule-providers":  true,
 	"rules":           true,
-	"x-localclash":    true,
 }
 
 type File struct {
 	Version  int                `yaml:"version" json:"version"`
 	Mode     string             `yaml:"mode" json:"mode"`
 	Core     string             `yaml:"core" json:"core"`
-	Profiles map[string]Profile `yaml:"profiles" json:"profiles"`
-	Cores    map[string]Core    `yaml:"cores" json:"cores"`
-	Smart    SmartOptions       `yaml:"smart,omitempty" json:"smart,omitempty"`
+	Profiles map[string]Profile `yaml:"-" json:"-"`
+	Cores    map[string]Core    `yaml:"-" json:"-"`
+	Smart    SmartOptions       `yaml:"-" json:"-"`
 }
 
 type Profile struct {
@@ -55,16 +59,9 @@ type Profile struct {
 }
 
 type diskFile struct {
-	Version  int                   `yaml:"version" json:"version"`
-	Mode     string                `yaml:"mode" json:"mode"`
-	Core     string                `yaml:"core" json:"core"`
-	Profiles map[string]profileRef `yaml:"profiles" json:"profiles"`
-	Cores    map[string]Core       `yaml:"cores" json:"cores"`
-	Smart    SmartOptions          `yaml:"smart,omitempty" json:"smart,omitempty"`
-}
-
-type profileRef struct {
-	Path string `yaml:"path" json:"path"`
+	Version int    `yaml:"version" json:"version"`
+	Mode    string `yaml:"mode" json:"mode"`
+	Core    string `yaml:"core" json:"core"`
 }
 
 type Core struct {
@@ -85,6 +82,9 @@ type Status struct {
 	Mode                   string         `json:"mode"`
 	Core                   string         `json:"core"`
 	CorePath               string         `json:"core_path"`
+	RuntimeSource          string         `json:"runtime_source"`
+	UserProfilePath        string         `json:"user_profile_path"`
+	UserProfileExists      bool           `json:"user_profile_exists"`
 	AvailableModes         []string       `json:"available_modes"`
 	AvailableCores         []string       `json:"available_cores"`
 	Summary                map[string]any `json:"summary"`
@@ -95,9 +95,6 @@ type Status struct {
 
 func Load(path string) (File, bool, error) {
 	path = normalizePath(path)
-	if err := ensureProfileFiles(path); err != nil {
-		return File{}, false, err
-	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		file := DefaultFile()
@@ -109,22 +106,19 @@ func Load(path string) (File, bool, error) {
 	if err != nil {
 		return File{}, false, err
 	}
-	file, err := parseFile(path, data)
+	file, err := parseFile(data)
 	if err != nil {
 		return File{}, true, err
 	}
 	return file, true, nil
 }
 
-func parseFile(path string, data []byte) (File, error) {
+func parseFile(data []byte) (File, error) {
 	var disk diskFile
-	if err := json.Unmarshal(data, &disk); err != nil {
+	if err := decodeJSON(data, &disk); err != nil {
 		return File{}, err
 	}
-	file, err := materializeDiskFile(path, normalizeDiskFile(disk))
-	if err != nil {
-		return File{}, err
-	}
+	file := normalizeDiskFile(disk)
 	if err := validate(file); err != nil {
 		return File{}, err
 	}
@@ -137,31 +131,28 @@ func StatusFor(path string) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	profile, ok := file.Profiles[file.Mode]
-	if !ok {
-		return Status{}, fmt.Errorf("runtime mode %q is not defined", file.Mode)
+	profile, source, err := activeProfile(path, file)
+	if err != nil {
+		return Status{}, err
 	}
-	modes := make([]string, 0, len(file.Profiles))
-	for name := range file.Profiles {
-		modes = append(modes, name)
-	}
-	sort.Strings(modes)
-	cores := make([]string, 0, len(file.Cores))
-	for name := range file.Cores {
-		cores = append(cores, name)
-	}
-	sort.Strings(cores)
+	userPath := userProfilePath(path)
+	userExists := fileExists(userPath)
 	status := Status{
 		Path:              path,
 		Exists:            exists,
 		Mode:              file.Mode,
 		Core:              file.Core,
 		CorePath:          ActiveCorePathFromFile(file),
-		AvailableModes:    modes,
-		AvailableCores:    cores,
+		RuntimeSource:     source,
+		UserProfilePath:   userPath,
+		UserProfileExists: userExists,
+		AvailableModes:    []string{ModeNormal, ModeRouter},
+		AvailableCores:    []string{CoreMeta, CoreSmart},
 		Summary:           summarize(profile),
 		SmartGroupDefault: file.Smart,
 	}
+	sort.Strings(status.AvailableModes)
+	sort.Strings(status.AvailableCores)
 	if file.Mode == ModeRouter {
 		status.RouterTakeoverRequired = true
 		status.NextActions = []string{
@@ -187,19 +178,22 @@ func Configure(path, mode, core string) (Status, error) {
 		return Status{}, err
 	}
 	if mode != "" {
-		if _, ok := file.Profiles[mode]; !ok {
-			return Status{}, fmt.Errorf("runtime mode %q is not defined in %s", mode, path)
+		if mode != ModeNormal && mode != ModeRouter {
+			return Status{}, fmt.Errorf("runtime mode %q is not supported; use %q or %q", mode, ModeNormal, ModeRouter)
 		}
 		file.Mode = mode
 	}
 	if core != "" {
-		if _, ok := file.Cores[core]; !ok {
-			return Status{}, fmt.Errorf("runtime core %q is not defined in %s", core, path)
+		if core != CoreMeta && core != CoreSmart {
+			return Status{}, fmt.Errorf("runtime core %q is not supported; use %q or %q", core, CoreMeta, CoreSmart)
 		}
 		file.Core = core
 	}
 	if mode == "" && core == "" {
 		return Status{}, errors.New("runtime profile configure requires mode or core")
+	}
+	if err := validate(file); err != nil {
+		return Status{}, err
 	}
 	if err := write(path, file); err != nil {
 		return Status{}, err
@@ -208,15 +202,42 @@ func Configure(path, mode, core string) (Status, error) {
 }
 
 func ActiveProfile(path string) (File, Profile, bool, error) {
+	path = normalizePath(path)
 	file, exists, err := Load(path)
 	if err != nil {
 		return File{}, Profile{}, exists, err
 	}
-	profile, ok := file.Profiles[file.Mode]
-	if !ok {
-		return File{}, Profile{}, exists, fmt.Errorf("runtime mode %q is not defined", file.Mode)
+	profile, _, err := activeProfile(path, file)
+	if err != nil {
+		return File{}, Profile{}, exists, err
 	}
 	return file, profile, exists, nil
+}
+
+func ValidateUserProfileForRuntime(path string) (bool, error) {
+	userPath := userProfilePath(normalizePath(path))
+	if !fileExists(userPath) {
+		return false, nil
+	}
+	_, err := readUserProfileFile(userPath)
+	return true, err
+}
+
+func activeProfile(runtimePath string, file File) (Profile, string, error) {
+	userPath := userProfilePath(runtimePath)
+	if fileExists(userPath) {
+		profile, err := readUserProfileFile(userPath)
+		if err != nil {
+			return Profile{}, RuntimeSourceUser, err
+		}
+		return profile, RuntimeSourceUser, nil
+	}
+	profile, err := readEmbeddedDefaultProfile(file.Mode)
+	if err != nil {
+		return Profile{}, RuntimeSourceBuiltin, err
+	}
+	profile.Path = "builtin:" + file.Mode
+	return profile, RuntimeSourceBuiltin, nil
 }
 
 func ActiveCorePath(path string) (string, error) {
@@ -228,23 +249,53 @@ func ActiveCorePath(path string) (string, error) {
 }
 
 func ActiveCorePathFromFile(file File) string {
-	return file.Cores[file.Core].Path
+	switch file.Core {
+	case CoreMeta:
+		return MetaCorePath
+	case CoreSmart:
+		return SmartCorePath
+	default:
+		return ""
+	}
+}
+
+func BuildConfig(profile Profile, dynamic map[string]any) map[string]any {
+	config := cloneMap(profile.Mihomo)
+	for key, value := range dynamic {
+		if IsDynamicConfigKey(key) {
+			config[key] = cloneValue(value)
+		}
+	}
+	return config
 }
 
 func ApplyToConfig(config map[string]any, profile Profile) {
-	mergeMihomo(config, profile.Mihomo)
+	dynamic := map[string]any{}
+	for key, value := range config {
+		if IsDynamicConfigKey(key) {
+			dynamic[key] = value
+		}
+	}
+	merged := BuildConfig(profile, dynamic)
+	for key := range config {
+		delete(config, key)
+	}
+	for key, value := range merged {
+		config[key] = value
+	}
+}
+
+func IsDynamicConfigKey(key string) bool {
+	return dynamicConfigKeys[key] || strings.HasPrefix(key, "x-localclash")
 }
 
 func DefaultFile() File {
 	file := File{
-		Version: 1,
-		Mode:    ModeNormal,
-		Core:    CoreMeta,
-		Cores: map[string]Core{
-			CoreMeta:  {Path: MetaCorePath},
-			CoreSmart: {Path: SmartCorePath},
-		},
-		Smart:    SmartOptions{UseLightGBM: true, PreferASN: true},
+		Version:  2,
+		Mode:     ModeNormal,
+		Core:     CoreMeta,
+		Cores:    defaultCores(),
+		Smart:    defaultSmartOptions(),
 		Profiles: map[string]Profile{},
 	}
 	for _, mode := range []string{ModeNormal, ModeRouter} {
@@ -252,7 +303,7 @@ func DefaultFile() File {
 		if err != nil {
 			panic(fmt.Sprintf("invalid embedded %s default profile: %v", mode, err))
 		}
-		profile.Path = userProfileRelPath(mode)
+		profile.Path = "builtin:" + mode
 		file.Profiles[mode] = profile
 	}
 	return file
@@ -265,9 +316,9 @@ func normalizePath(path string) string {
 	return path
 }
 
-func normalizeDiskFile(file diskFile) diskFile {
+func normalizeDiskFile(file diskFile) File {
 	if file.Version == 0 {
-		file.Version = 1
+		file.Version = 2
 	}
 	if file.Mode == "" {
 		file.Mode = ModeNormal
@@ -275,93 +326,22 @@ func normalizeDiskFile(file diskFile) diskFile {
 	if file.Core == "" {
 		file.Core = CoreMeta
 	}
-	if file.Cores == nil {
-		file.Cores = map[string]Core{}
-	}
-	if !file.Smart.UseLightGBM && !file.Smart.PreferASN && !file.Smart.CollectData && file.Smart.SampleRate == 0 && file.Smart.PolicyPriority == "" {
-		file.Smart = SmartOptions{UseLightGBM: true, PreferASN: true}
-	}
-	for name, core := range file.Cores {
-		core.Path = expandRuntimePlaceholders(core.Path)
-		file.Cores[name] = core
-	}
-	if len(file.Profiles) == 0 {
-		file.Profiles = map[string]profileRef{}
-		for _, mode := range []string{ModeNormal, ModeRouter} {
-			file.Profiles[mode] = profileRef{Path: userProfileRelPath(mode)}
-		}
-	}
-	return file
+	out := DefaultFile()
+	out.Version = file.Version
+	out.Mode = file.Mode
+	out.Core = file.Core
+	return out
 }
 
-func materializeDiskFile(path string, disk diskFile) (File, error) {
-	file := File{
-		Version:  disk.Version,
-		Mode:     disk.Mode,
-		Core:     disk.Core,
-		Cores:    disk.Cores,
-		Smart:    disk.Smart,
-		Profiles: map[string]Profile{},
+func defaultCores() map[string]Core {
+	return map[string]Core{
+		CoreMeta:  {Path: MetaCorePath},
+		CoreSmart: {Path: SmartCorePath},
 	}
-	baseDir := filepath.Dir(path)
-	for mode, ref := range disk.Profiles {
-		profilePath := strings.TrimSpace(ref.Path)
-		if profilePath == "" {
-			return File{}, fmt.Errorf("runtime profile %q has no path", mode)
-		}
-		profile, err := readProfileFile(resolveRuntimePath(baseDir, profilePath))
-		if err != nil {
-			return File{}, fmt.Errorf("load runtime profile %q from %s: %w", mode, profilePath, err)
-		}
-		profile.Path = profilePath
-		file.Profiles[mode] = profile
-	}
-	return file, nil
 }
 
-func expandRuntimePlaceholders(value string) string {
-	return strings.NewReplacer(
-		"${LOCALCLASH_HOST_OS}", runtime.GOOS,
-		"${LOCALCLASH_HOST_ARCH}", runtime.GOARCH,
-		"${LOCALCLASH_HOST_PLATFORM}", runtime.GOOS+"-"+runtime.GOARCH,
-	).Replace(value)
-}
-
-func ensureProfileFiles(runtimePath string) error {
-	baseDir := filepath.Dir(normalizePath(runtimePath))
-	for _, mode := range []string{ModeNormal, ModeRouter} {
-		defaultPath := resolveRuntimePath(baseDir, defaultProfileRelPath(mode))
-		if err := writeDefaultProfileFile(defaultPath, defaultProfileBytes(mode)); err != nil {
-			return err
-		}
-		userPath := resolveRuntimePath(baseDir, userProfileRelPath(mode))
-		if _, err := os.Stat(userPath); errors.Is(err, os.ErrNotExist) {
-			data, err := os.ReadFile(defaultPath)
-			if err != nil {
-				return err
-			}
-			if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(userPath, data, 0o644); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeDefaultProfileFile(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	current, err := os.ReadFile(path)
-	if err == nil && string(current) == string(data) {
-		return nil
-	}
-	return os.WriteFile(path, data, 0o644)
+func defaultSmartOptions() SmartOptions {
+	return SmartOptions{UseLightGBM: true, PreferASN: true}
 }
 
 func defaultProfileBytes(mode string) []byte {
@@ -377,19 +357,41 @@ func readEmbeddedDefaultProfile(mode string) (Profile, error) {
 	if err := decodeJSON(defaultProfileBytes(mode), &profile); err != nil {
 		return Profile{}, err
 	}
+	if len(profile.Mihomo) == 0 {
+		return Profile{}, fmt.Errorf("embedded runtime profile %q has no mihomo config", mode)
+	}
 	return profile, nil
 }
 
-func readProfileFile(path string) (Profile, error) {
+func readUserProfileFile(path string) (Profile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Profile{}, err
 	}
-	var profile Profile
-	if err := decodeJSON(data, &profile); err != nil {
+	var mihomo map[string]any
+	if err := decodeJSON(data, &mihomo); err != nil {
 		return Profile{}, err
 	}
-	return profile, nil
+	if mihomo == nil {
+		mihomo = map[string]any{}
+	}
+	if err := validateUserProfile(path, mihomo); err != nil {
+		return Profile{}, err
+	}
+	return Profile{
+		Path:        UserPath,
+		Description: "User-authored Mihomo runtime fragment",
+		Mihomo:      mihomo,
+	}, nil
+}
+
+func validateUserProfile(path string, mihomo map[string]any) error {
+	for key := range mihomo {
+		if IsDynamicConfigKey(key) {
+			return fmt.Errorf("%s contains localClash-owned top-level key %q; remove it from %s", filepath.Base(path), key, UserPath)
+		}
+	}
+	return nil
 }
 
 func decodeJSON(data []byte, out any) error {
@@ -405,14 +407,18 @@ func decodeJSON(data []byte, out any) error {
 func normalizeJSONNumbers(value any) any {
 	switch typed := value.(type) {
 	case *Profile:
-		typed.Mihomo = normalizeJSONNumbers(typed.Mihomo).(map[string]any)
+		typed.Mihomo = normalizeOptionalMap(typed.Mihomo)
 		typed.Deploy = normalizeOptionalMap(typed.Deploy)
 	case *File:
 		for key, profile := range typed.Profiles {
-			profile.Mihomo = normalizeJSONNumbers(profile.Mihomo).(map[string]any)
+			profile.Mihomo = normalizeOptionalMap(profile.Mihomo)
 			profile.Deploy = normalizeOptionalMap(profile.Deploy)
 			typed.Profiles[key] = profile
 		}
+	case *diskFile:
+		return typed
+	case *map[string]any:
+		*typed = normalizeOptionalMap(*typed)
 	case map[string]any:
 		for key, item := range typed {
 			typed[key] = normalizeJSONNumbers(item)
@@ -446,8 +452,16 @@ func defaultProfileRelPath(mode string) string {
 	return filepath.Join("profiles", mode+".default.json")
 }
 
-func userProfileRelPath(mode string) string {
-	return filepath.Join("profiles", mode+".json")
+func expandRuntimePlaceholders(value string) string {
+	return strings.NewReplacer(
+		"${LOCALCLASH_HOST_OS}", runtime.GOOS,
+		"${LOCALCLASH_HOST_ARCH}", runtime.GOARCH,
+		"${LOCALCLASH_HOST_PLATFORM}", runtime.GOOS+"-"+runtime.GOARCH,
+	).Replace(value)
+}
+
+func userProfilePath(runtimePath string) string {
+	return resolveRuntimePath(filepath.Dir(normalizePath(runtimePath)), UserPath)
 }
 
 func resolveRuntimePath(baseDir, path string) string {
@@ -461,36 +475,17 @@ func resolveRuntimePath(baseDir, path string) string {
 }
 
 func validate(file File) error {
-	if file.Version != 1 {
-		return fmt.Errorf("unsupported runtime profile version %d", file.Version)
+	if file.Version != 2 {
+		return fmt.Errorf("unsupported runtime profile version %d; expected 2", file.Version)
 	}
-	if file.Mode == "" {
-		return errors.New("runtime profile mode is required")
+	if file.Mode != ModeNormal && file.Mode != ModeRouter {
+		return fmt.Errorf("runtime mode %q is not supported; use %q or %q", file.Mode, ModeNormal, ModeRouter)
 	}
-	if file.Core == "" {
-		return errors.New("runtime profile core is required")
+	if file.Core != CoreMeta && file.Core != CoreSmart {
+		return fmt.Errorf("runtime core %q is not supported; use %q or %q", file.Core, CoreMeta, CoreSmart)
 	}
-	if len(file.Profiles) == 0 {
-		return errors.New("runtime profile file has no profiles")
-	}
-	if _, ok := file.Profiles[file.Mode]; !ok {
-		return fmt.Errorf("runtime mode %q is not defined", file.Mode)
-	}
-	if _, ok := file.Cores[file.Core]; !ok {
-		return fmt.Errorf("runtime core %q is not defined", file.Core)
-	}
-	for name, core := range file.Cores {
-		if strings.TrimSpace(core.Path) == "" {
-			return fmt.Errorf("runtime core %q has no path", name)
-		}
-	}
-	for name, profile := range file.Profiles {
-		if name != ModeNormal && name != ModeRouter {
-			return fmt.Errorf("unsupported runtime mode %q; only %q and %q are supported in v0", name, ModeNormal, ModeRouter)
-		}
-		if len(profile.Mihomo) == 0 {
-			return fmt.Errorf("runtime profile %q has no mihomo config", name)
-		}
+	if ActiveCorePathFromFile(file) == "" {
+		return fmt.Errorf("runtime core %q has no path", file.Core)
 	}
 	return nil
 }
@@ -503,40 +498,24 @@ func write(path string, file File) error {
 		}
 	}
 	disk := diskFile{
-		Version:  file.Version,
-		Mode:     file.Mode,
-		Core:     file.Core,
-		Cores:    file.Cores,
-		Smart:    file.Smart,
-		Profiles: map[string]profileRef{},
-	}
-	for name, profile := range file.Profiles {
-		profilePath := strings.TrimSpace(profile.Path)
-		if profilePath == "" {
-			profilePath = userProfileRelPath(name)
-		}
-		disk.Profiles[name] = profileRef{Path: profilePath}
+		Version: file.Version,
+		Mode:    file.Mode,
+		Core:    file.Core,
 	}
 	data, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
 	}
+	data = append(data, '\n')
 	return os.WriteFile(path, data, 0o644)
 }
 
-func mergeMihomo(dst map[string]any, src map[string]any) {
-	for key, value := range src {
-		if dynamicConfigKeys[key] {
-			continue
-		}
-		srcMap, srcIsMap := value.(map[string]any)
-		dstMap, dstIsMap := dst[key].(map[string]any)
-		if srcIsMap && dstIsMap {
-			mergeMihomo(dstMap, srcMap)
-			continue
-		}
-		dst[key] = cloneValue(value)
+func cloneMap(in map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range in {
+		out[key] = cloneValue(value)
 	}
+	return out
 }
 
 func cloneValue(value any) any {
@@ -560,10 +539,15 @@ func cloneValue(value any) any {
 	}
 }
 
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func summarize(profile Profile) map[string]any {
 	m := profile.Mihomo
 	summary := map[string]any{}
-	for _, key := range []string{"mixed-port", "redir-port", "tproxy-port", "port", "socks-port", "allow-lan", "bind-address", "external-controller", "ipv6"} {
+	for _, key := range []string{"mixed-port", "redir-port", "tproxy-port", "port", "socks-port", "allow-lan", "bind-address", "external-controller", "ipv6", "mode"} {
 		if value, ok := m[key]; ok {
 			summary[key] = value
 		}

@@ -16,7 +16,7 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	t.Chdir(dir)
 	writeResetFile(t, filepath.Join(".runtime", "logs", "mcp.log"), "log")
 	writeResetFile(t, filepath.Join("generated", "mihomo.yaml"), "config")
-	writeResetFile(t, "localclash.json", "version: 1\n")
+	writeResetFile(t, "localclash-intent.json", "version: 1\n")
 	writeResetFile(t, "localclash-packs.gob", "version: 1\n")
 	writeResetFile(t, "localclash-subscriptions.json", "sources: []\n")
 	writeResetFile(t, "localclash-runtime.json", "active: router\n")
@@ -32,7 +32,7 @@ func TestRunDryRunDoesNotDeleteFactoryResetTargets(t *testing.T) {
 	if !result.DryRun || len(result.Deleted) != 9 {
 		t.Fatalf("result = %+v, want dry-run with nine delete targets", result)
 	}
-	for _, path := range []string{".runtime", "generated", "localclash.json", "localclash-subscriptions.json", "localclash-runtime.json", "profiles", "subscription.gob", "subscription-backup.gob"} {
+	for _, path := range []string{".runtime", "generated", "localclash-intent.json", "localclash-subscriptions.json", "localclash-runtime.json", "profiles", "subscription.gob", "subscription-backup.gob"} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("%s should remain after dry-run: %v", path, err)
 		}
@@ -50,7 +50,7 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	writeResetFile(t, filepath.Join("bin", "mihomo"), "binary")
 	writeResetFile(t, filepath.Join("policy-templates", "minimal.json"), "template")
 	writeResetFile(t, filepath.Join("rule-sources", "source.json"), "source")
-	writeResetFile(t, "localclash.json", "version: 1\n")
+	writeResetFile(t, "localclash-intent.json", "version: 1\n")
 	writeResetFile(t, "localclash-packs.gob", "version: 1\n")
 	writeResetFile(t, "localclash-subscriptions.json", "sources: []\n")
 	writeResetFile(t, "localclash-runtime.json", "active: router\n")
@@ -61,7 +61,7 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	if _, err := Run(Options{Yes: true, Out: &out}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{".runtime", "generated", "localclash.json", "localclash-packs.gob", "localclash-subscriptions.json", "localclash-runtime.json", "profiles", "subscription.gob"} {
+	for _, path := range []string{".runtime", "generated", "localclash-intent.json", "localclash-packs.gob", "localclash-subscriptions.json", "localclash-runtime.json", "profiles", "subscription.gob"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s should be deleted, err=%v", path, err)
 		}
@@ -73,6 +73,27 @@ func TestRunDeletesFactoryResetTargetsWithYes(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Reset complete.") {
 		t.Fatalf("output = %q, want completion", out.String())
+	}
+}
+
+func TestRunFactoryResetPreservesUserProfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	writeResetFile(t, "localclash-intent.json", "version: 1\n")
+	writeResetFile(t, "localclash-runtime.json", `{"version":2,"mode":"router","core":"meta"}`)
+	writeResetFile(t, "localclash-user.json", `{"mixed-port":9000}`)
+
+	if _, err := Run(Options{Yes: true, Out: &bytes.Buffer{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("localclash-intent.json"); !os.IsNotExist(err) {
+		t.Fatalf("localclash-intent.json should be deleted, err=%v", err)
+	}
+	if _, err := os.Stat("localclash-runtime.json"); !os.IsNotExist(err) {
+		t.Fatalf("localclash-runtime.json should be deleted, err=%v", err)
+	}
+	if _, err := os.Stat("localclash-user.json"); err != nil {
+		t.Fatalf("localclash-user.json should be preserved by non-full reset: %v", err)
 	}
 }
 
@@ -144,13 +165,13 @@ func TestRunFullDeletesWorkspaceWithYes(t *testing.T) {
 func TestRunFullRequiresExplicitWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	writeResetFile(t, "localclash.json", "version: 1\n")
+	writeResetFile(t, "localclash-intent.json", "version: 1\n")
 
 	_, err := Run(Options{Full: true, Yes: true, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "requires an explicit workspace") {
 		t.Fatalf("error = %v, want explicit workspace refusal", err)
 	}
-	if _, err := os.Stat("localclash.json"); err != nil {
+	if _, err := os.Stat("localclash-intent.json"); err != nil {
 		t.Fatalf("workspace content should remain after refused full reset: %v", err)
 	}
 }
@@ -161,13 +182,13 @@ func TestRunFullRejectsMissingWorkspaceMarker(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeResetFile(t, filepath.Join(dir, "localclash.json"), "version: 1\n")
+	writeResetFile(t, filepath.Join(dir, "localclash-intent.json"), "version: 1\n")
 
 	_, err := Run(Options{Full: true, Yes: true, Workspace: dir, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "missing .localclash-workspace marker") {
 		t.Fatalf("error = %v, want missing marker refusal", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "localclash.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "localclash-intent.json")); err != nil {
 		t.Fatalf("workspace content should remain after refused full reset: %v", err)
 	}
 }
@@ -194,21 +215,21 @@ func TestRunFullRejectsSourceCheckout(t *testing.T) {
 func TestRunRequiresConfirmation(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	writeResetFile(t, "localclash.json", "version: 1\n")
+	writeResetFile(t, "localclash-intent.json", "version: 1\n")
 
 	_, err := Run(Options{In: strings.NewReader("no\n"), Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "cancelled") {
 		t.Fatalf("error = %v, want cancelled", err)
 	}
-	if _, err := os.Stat("localclash.json"); err != nil {
-		t.Fatalf("localclash.json should remain after cancelled reset: %v", err)
+	if _, err := os.Stat("localclash-intent.json"); err != nil {
+		t.Fatalf("localclash-intent.json should remain after cancelled reset: %v", err)
 	}
 
 	if _, err := Run(Options{In: strings.NewReader(ConfirmationPhrase + "\n"), Out: &bytes.Buffer{}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat("localclash.json"); !os.IsNotExist(err) {
-		t.Fatalf("localclash.json should be deleted after confirmed reset, err=%v", err)
+	if _, err := os.Stat("localclash-intent.json"); !os.IsNotExist(err) {
+		t.Fatalf("localclash-intent.json should be deleted after confirmed reset, err=%v", err)
 	}
 }
 

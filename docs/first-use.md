@@ -9,7 +9,7 @@ commands with `rtk`; otherwise `go run . ...` is enough.
 - Go is installed and can build this module.
 - You have a Clash/Mihomo subscription URL.
 - The subscription URL is secret. Do not commit `subscription*.gob`,
-  `localclash-subscriptions.json`, `localclash.json`, or `.runtime/`.
+  `localclash-subscriptions.json`, `localclash-intent.json`, or `.runtime/`.
 
 ## 1. Download the Host Core
 

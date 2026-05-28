@@ -261,7 +261,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 		RulePacks:     []IntentRulePack{},
 		RuleProviders: []IntentRuleProvider{},
 		Packs:         []IntentPack{},
-		Note:          "Intent is read from durable localclash.json. Use it before creating a patch to preserve existing proxy groups, policy groups, packs, enabled rule packs, custom rules, and rule providers.",
+		Note:          "Intent is read from durable localclash-intent.json. Use it before creating a patch to preserve existing proxy groups, policy groups, packs, enabled rule packs, custom rules, and rule providers.",
 	}
 	config, err := localconfig.Load(path)
 	if err != nil {
@@ -364,7 +364,7 @@ func defaultConfigPath(path string) string {
 
 func defaultIntentConfigPath(path string) string {
 	if strings.TrimSpace(path) == "" {
-		return "localclash.json"
+		return "localclash-intent.json"
 	}
 	return path
 }

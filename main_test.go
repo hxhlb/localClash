@@ -150,7 +150,7 @@ func TestRunProductResetFullDryRunPrintsJSONEnvelope(t *testing.T) {
 	}
 	t.Chdir(dir)
 	t.Setenv("LOCALCLASH_WORKDIR", dir)
-	writeMainTestFile(t, "localclash.json", "version: 1\n")
+	writeMainTestFile(t, "localclash-intent.json", "version: 1\n")
 	expected, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -176,8 +176,8 @@ func TestRunProductResetFullDryRunPrintsJSONEnvelope(t *testing.T) {
 	if !result.OK || result.Changed || !result.Status.Full || !result.Status.DryRun || len(result.Status.Deleted) != 1 || result.Status.Deleted[0].Path != expected {
 		t.Fatalf("product reset result = %+v, want full dry-run envelope for %s", result, expected)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "localclash.json")); err != nil {
-		t.Fatalf("dry-run should keep localclash.json: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "localclash-intent.json")); err != nil {
+		t.Fatalf("dry-run should keep localclash-intent.json: %v", err)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestRunProductConfigRenderUsesDurableLocalClashIntent(t *testing.T) {
     cipher: none
     password: test
 `)
-	writeMainTestFile(t, "localclash.json", `version: 1
+	writeMainTestFile(t, "localclash-intent.json", `version: 1
 policy_template: localclash-default
 proxy_groups:
   AI:
@@ -233,7 +233,7 @@ custom_rules:
 	}
 	text := string(generated)
 	if !strings.Contains(text, "name: AI") || !strings.Contains(text, "DOMAIN,example.ai,AI") {
-		t.Fatalf("generated config did not consume localclash.json intent:\n%s", text)
+		t.Fatalf("generated config did not consume localclash-intent.json intent:\n%s", text)
 	}
 	if _, err := os.Stat("localclash-packs.gob"); err != nil {
 		t.Fatalf("derived localclash-packs.gob missing: %v", err)
@@ -254,7 +254,7 @@ func TestRunProductConfigRenderUsesEnvWorkspaceFromNeutralCwd(t *testing.T) {
     cipher: none
     password: test
 `)
-	writeMainTestFile(t, filepath.Join(installDir, "localclash.json"), `version: 1
+	writeMainTestFile(t, filepath.Join(installDir, "localclash-intent.json"), `version: 1
 policy_template: localclash-default
 proxy_groups:
   AI:
@@ -290,6 +290,85 @@ proxy_groups:
 	}
 	if _, err := os.Stat(filepath.Join(wrongDir, "localclash-packs.gob")); !os.IsNotExist(err) {
 		t.Fatalf("selection should not be written under cwd, err=%v", err)
+	}
+}
+
+func TestRunProductConfigApplyTemplateWritesV2RuntimeWithoutUserProfile(t *testing.T) {
+	dir := t.TempDir()
+	wrongDir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(wrongDir)
+	writeMainTestFile(t, filepath.Join(dir, "policy-templates", "localclash-default.json"), `{
+  "id": "localclash-default",
+  "name": "Test Default",
+  "description": "Test default template.",
+  "config": {
+    "version": 3,
+    "policy_template": "localclash-default",
+    "proxy_groups": {},
+    "packs": []
+  }
+}`)
+	input := filepath.Join(dir, "template-input.json")
+	writeMainTestFile(t, input, `{
+  "version": 1,
+  "template": "localclash-default",
+  "runtime_profile": "router",
+  "core": "meta",
+  "allow_overwrite_modified": false
+}`)
+
+	output := captureStdout(t, func() error {
+		return run([]string{"config", "apply-template", "--input", input, "--json"})
+	})
+	var result struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("config apply-template JSON = %q, error = %v", output, err)
+	}
+	if !result.OK {
+		t.Fatalf("config apply-template result = %+v, want ok", result)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "localclash-intent.json")); err != nil {
+		t.Fatalf("localclash-intent.json should be written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wrongDir, "localclash-intent.json")); !os.IsNotExist(err) {
+		t.Fatalf("localclash-intent.json should not be written under cwd, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "localclash-user.json")); !os.IsNotExist(err) {
+		t.Fatalf("localclash-user.json should not be created by default bootstrap path, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "profiles")); !os.IsNotExist(err) {
+		t.Fatalf("profiles working directory should not be created, err=%v", err)
+	}
+	runtimeData, err := os.ReadFile(filepath.Join(dir, "localclash-runtime.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runtimeFile struct {
+		Version int    `json:"version"`
+		Mode    string `json:"mode"`
+		Core    string `json:"core"`
+	}
+	if err := json.Unmarshal(runtimeData, &runtimeFile); err != nil {
+		t.Fatal(err)
+	}
+	if runtimeFile.Version != 2 || runtimeFile.Mode != runtimeprofile.ModeRouter || runtimeFile.Core != runtimeprofile.CoreMeta {
+		t.Fatalf("runtime file = %+v, want v2 router/meta", runtimeFile)
+	}
+}
+
+func TestRunProductConfigStatusRejectsInvalidUserProfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	writeMainTestFile(t, "localclash-runtime.json", `{"version":2,"mode":"router","core":"meta"}`)
+	writeMainTestFile(t, "localclash-user.json", `{"rules":["MATCH,DIRECT"]}`)
+
+	err := run([]string{"config", "status", "--json"})
+	if err == nil || !strings.Contains(err.Error(), "rules") || !strings.Contains(err.Error(), "localclash-user.json") {
+		t.Fatalf("config status error = %v, want banned user profile key", err)
 	}
 }
 

@@ -6,7 +6,7 @@ localClash 是一个 Go 1.24 编写的 Mihomo 运行时管理工具（`internal/
 
 ### 核心设计原则
 
-- **localclash.json 是唯一真相源**，generated/mihomo.yaml 是构建产物
+- **localclash-intent.json 是唯一真相源**，generated/mihomo.yaml 是构建产物
 - **安全基线不可禁**，本地网络保护规则硬编码在渲染器中
 - **两层策略体系**：精简（minimal）与预设（localclash-default）
 - **Patch 叠加模型**：预设模板通过 8 个有序 patch 文件叠加构建
@@ -126,7 +126,7 @@ packs: []
 ### 4.1 配置渲染管线
 
 ```
-localclash.json + subscription.gob + policy template + packs selection
+localclash-intent.json + subscription.gob + policy template + packs selection
     │
     ▼
 localconfig.Resolve()
@@ -162,9 +162,9 @@ generated/mihomo.yaml
 
 这是 localClash 最重要的安全设计：
 
-1. **config_patch_create**：加载当前 localclash.json → 叠加 overlay → 解析 → 渲染 → 写入 `.runtime/patches/<id>/`（不触碰活跃文件）
+1. **config_patch_create**：加载当前 localclash-intent.json → 叠加 overlay → 解析 → 渲染 → 写入 `.runtime/patches/<id>/`（不触碰活跃文件）
 2. **审查**：Agent 展示 diff/summary 给用户确认
-3. **config_patch_apply**：验证 → 备份旧文件到 `.runtime/backups/` → 准备 temp 候选文件 → fsync → rename 提交 localclash.json、localclash-packs.gob、generated/mihomo.yaml；提交失败会尝试回滚已切换的 active 文件
+3. **config_patch_apply**：验证 → 备份旧文件到 `.runtime/backups/` → 准备 temp 候选文件 → fsync → rename 提交 localclash-intent.json、localclash-packs.gob、generated/mihomo.yaml；提交失败会尝试回滚已切换的 active 文件
 4. **不自动重启**：应用后需要单独确认 restart_runtime
 
 ### 4.3 MCP 工具安全分级
@@ -194,7 +194,7 @@ generated/mihomo.yaml
 
 ### 5.1 设计层面
 
-1. **真相源与构建产物分离**：localclash.json vs generated/mihomo.yaml，避免直接编辑 YAML 带来的不可维护性
+1. **真相源与构建产物分离**：localclash-intent.json vs generated/mihomo.yaml，避免直接编辑 YAML 带来的不可维护性
 2. **两层策略互补**：minimal 给高级用户最大自由度，localclash-default 给普通用户开箱即用体验
 3. **Patch 叠加模型**：创建阶段完全隔离（写入 `.runtime/patches/` 而非活跃文件），应用阶段先备份再顺序写入，patch 之间职责单一
 4. **AI Agent 原生设计**：MCP 工具提供了完整的观察→计划→审查→应用的闭环
@@ -205,8 +205,8 @@ generated/mihomo.yaml
 
 1. **明确的文件边界**：`.runtime/` 所有运行时产物，`generated/` 构建产物，`internal/` 功能代码
 2. **结构化错误处理**：Resolve/Patch/Apply 都使用 Stage 事件机制，可观测性强
-3. **配置版本化**：localclash.json 有 version 字段（当前 v1/v2），为未来迁移留空间
-4. **go:embed 嵌入默认配置**：runtime profile 默认文件编译进二进制，首次运行时自动写出
+3. **配置版本化**：localclash-intent.json 有 version 字段（当前 v1/v2），为未来迁移留空间
+4. **go:embed 嵌入默认配置**：runtime builtin 模板编译进二进制，未提供 `localclash-user.json` 时作为渲染基底
 5. **Pack 目录缓存**：避免每次渲染都重新下载规则数据
 
 ---
@@ -264,7 +264,7 @@ localClash 的核心产品价值是“Agent 产生意图，localClash 编译为 
 完成标准：
 
 - 不存在“进程启动就改 generated config”的常规路径。
-- patch apply 任意一步失败后，不会留下 localclash.json、packs gob、generated yaml 互相不匹配的 active 状态。
+- patch apply 任意一步失败后，不会留下 localclash-intent.json、packs gob、generated yaml 互相不匹配的 active 状态。
 
 当前实现状态：Bootstrap、`run_runtime`、`restart_runtime` 均不再自动渲染 generated config；`config_patch_apply` 使用 temp+fsync+rename 提交并在失败时按备份回滚已提交目标。
 
@@ -387,13 +387,13 @@ func configPlanStageEmitter(...) { ... }
 
 ### 6.9 配置版本迁移路径（不构成当前问题）
 
-**说明**：`localclash.json` 的 `policy_groups` / version 语义仍属于未发布内容，还不是对外稳定格式。当前代码中曾经出现的 v2 语义不应被视为已经发布的兼容性承诺。
+**说明**：`localclash-intent.json` 的 `policy_groups` / version 语义仍属于未发布内容，还不是对外稳定格式。当前代码中曾经出现的 v2 语义不应被视为已经发布的兼容性承诺。
 
 **决策**：不按 v1→v2 迁移债处理。正式发布前可以把 schema 直接收敛并落到 version 1；只有发布后形成用户可依赖格式时，才需要记录 schema 历史和迁移路径。
 
 ### 6.10 config_patch_apply 非原子事务（已处理）
 
-**原问题**：`config_patch_apply` 在备份后顺序写入三个文件（`localclash.json` → `localclash-packs.gob` → `generated/mihomo.yaml`），如果中途失败，已写入的文件不回滚，可能留下部分更新的状态。create/review 阶段是完全隔离的，但 apply 阶段不是 temp+rename 原子提交。
+**原问题**：`config_patch_apply` 在备份后顺序写入三个文件（`localclash-intent.json` → `localclash-packs.gob` → `generated/mihomo.yaml`），如果中途失败，已写入的文件不回滚，可能留下部分更新的状态。create/review 阶段是完全隔离的，但 apply 阶段不是 temp+rename 原子提交。
 
 **当前状态**：已改为准备三个 temp 文件、fsync 后再提交；若提交中途失败，会根据备份恢复已切换的 active 文件。`config_patch_apply` 结果包含 `transaction` 元数据，task log 会记录 commit 阶段和失败后的 rollback 指引。
 
