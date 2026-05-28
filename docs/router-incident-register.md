@@ -71,6 +71,15 @@ Required evidence for the next reproduction:
 - DNS upstream errors and rule match samples for Telegram and other affected
   services
 
+Collection entrypoint:
+
+- `scripts/collect-mihomo-warnings.py` streams
+  `http://192.168.6.1:9090/logs?level=warning` and writes warning, snapshot,
+  summary, event, and error JSONL artifacts under `.runtime/diagnostics/`.
+- The script is read-only against the Mihomo controller. Add
+  `--ssh-host root@192.168.6.1` only when process samples are needed in the
+  same time window.
+
 ### Smart Config-Test Isolation
 
 Observed symptom:
