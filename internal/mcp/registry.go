@@ -378,6 +378,16 @@ func inputSchemaForTool(name string) map[string]any {
 			},
 			"required": []string{"id", "target", "rules"},
 		}
+		localRulePackIntent := map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"id":     map[string]any{"type": "string", "description": "Local rule pack id from rule-packs/*.json."},
+				"target": map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id, or a policy group id. Defaults to the pack default_target when omitted."},
+				"reason": map[string]any{"type": "string", "description": "Short durable reason for enabling this local rule pack."},
+			},
+			"required": []string{"id"},
+		}
 		ruleProviderIntent := ruleProviderInputSchema("External rule-provider id, for example US-Proxy.")
 		proxyGroupIntent := map[string]any{
 			"type":                 "object",
@@ -415,11 +425,12 @@ func inputSchemaForTool(name string) map[string]any {
 					"description":          "Desired localClash overlay. If a target references a proxy group or policy group that is not already in durable localclash.json, include it in overlay.proxy_groups or overlay.policy_groups in this same call. policy_groups are business-layer entries whose exits point to proxy_groups or terminal targets.",
 					"additionalProperties": false,
 					"properties": map[string]any{
-						"packs":          map[string]any{"type": "array", "items": packIntent},
-						"custom_rules":   map[string]any{"type": "array", "items": customRuleIntent},
-						"rule_providers": map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},
-						"proxy_groups":   map[string]any{"type": "array", "items": proxyGroupIntent},
-						"policy_groups":  map[string]any{"type": "array", "items": policyGroupIntent},
+						"packs":              map[string]any{"type": "array", "items": packIntent},
+						"custom_rules":       map[string]any{"type": "array", "items": customRuleIntent},
+						"enabled_rule_packs": map[string]any{"type": "array", "items": localRulePackIntent, "description": "Standalone local rule packs backed by rule-packs/*.json and rendered after custom rules but before catalog/template packs."},
+						"rule_providers":     map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},
+						"proxy_groups":       map[string]any{"type": "array", "items": proxyGroupIntent},
+						"policy_groups":      map[string]any{"type": "array", "items": policyGroupIntent},
 					},
 				},
 			},

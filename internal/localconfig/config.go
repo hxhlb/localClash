@@ -16,13 +16,14 @@ import (
 )
 
 type Config struct {
-	Version        int                    `json:"version" yaml:"version"`
-	PolicyTemplate string                 `json:"policy_template,omitempty" yaml:"policy_template,omitempty"`
-	ProxyGroups    map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
-	PolicyGroups   map[string]PolicyGroup `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
-	CustomRules    []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
-	RuleProviders  []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
-	Packs          []Pack                 `json:"packs" yaml:"packs,omitempty"`
+	Version          int                    `json:"version" yaml:"version"`
+	PolicyTemplate   string                 `json:"policy_template,omitempty" yaml:"policy_template,omitempty"`
+	ProxyGroups      map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
+	PolicyGroups     map[string]PolicyGroup `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
+	CustomRules      []CustomRule           `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
+	EnabledRulePacks []RulePackSelection    `json:"enabled_rule_packs,omitempty" yaml:"enabled_rule_packs,omitempty"`
+	RuleProviders    []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
+	Packs            []Pack                 `json:"packs" yaml:"packs,omitempty"`
 }
 
 type ProxyGroup struct {
@@ -71,6 +72,32 @@ type CustomRuleLine struct {
 	NoResolve bool   `json:"no_resolve,omitempty" yaml:"no_resolve,omitempty"`
 }
 
+type RulePackSelection struct {
+	ID     string `json:"id" yaml:"id"`
+	Target string `json:"target,omitempty" yaml:"target,omitempty"`
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+type LocalRulePack struct {
+	ID            string              `json:"id" yaml:"id"`
+	Name          string              `json:"name,omitempty" yaml:"name,omitempty"`
+	Description   string              `json:"description,omitempty" yaml:"description,omitempty"`
+	Version       int                 `json:"version" yaml:"version"`
+	DefaultTarget string              `json:"default_target,omitempty" yaml:"default_target,omitempty"`
+	TargetOptions []string            `json:"target_options,omitempty" yaml:"target_options,omitempty"`
+	Rules         []LocalRulePackRule `json:"rules" yaml:"rules"`
+}
+
+type LocalRulePackRule struct {
+	Type         string `json:"type,omitempty" yaml:"type,omitempty"`
+	Value        string `json:"value,omitempty" yaml:"value,omitempty"`
+	Domain       string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	DomainSuffix string `json:"domain_suffix,omitempty" yaml:"domain_suffix,omitempty"`
+	IPCIDR       string `json:"ip_cidr,omitempty" yaml:"ip_cidr,omitempty"`
+	IPCIDR6      string `json:"ip_cidr6,omitempty" yaml:"ip_cidr6,omitempty"`
+	NoResolve    bool   `json:"no_resolve,omitempty" yaml:"no_resolve,omitempty"`
+}
+
 type ExternalRuleProvider struct {
 	ID       string `json:"id" yaml:"id"`
 	Target   string `json:"target" yaml:"target"`
@@ -90,6 +117,7 @@ type ResolveOptions struct {
 	SubscriptionRuntime string
 	SubscriptionNodes   []SubscriptionNode `json:"-"`
 	RulesCache          string
+	LocalRulePacksDir   string
 	OnStage             func(StageEvent) `json:"-"`
 }
 
@@ -130,6 +158,7 @@ type Resolved struct {
 	ProxyGroups   []ProxyGroupResult   `json:"proxy_groups"`
 	PolicyGroups  []PolicyGroupResult  `json:"policy_groups"`
 	CustomRules   []CustomRuleResult   `json:"custom_rules"`
+	RulePacks     []RulePackResult     `json:"enabled_rule_packs"`
 	RuleProviders []RuleProviderResult `json:"rule_providers"`
 	Packs         []PackResult         `json:"packs"`
 	Warnings      []string             `json:"warnings"`
@@ -168,6 +197,14 @@ type CustomRuleResult struct {
 	RuleCount int              `json:"rule_count"`
 	Reason    string           `json:"reason,omitempty"`
 	Rules     []CustomRuleLine `json:"rules,omitempty"`
+}
+
+type RulePackResult struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Target    string `json:"target"`
+	RuleCount int    `json:"rule_count"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 type RuleProviderResult struct {
@@ -462,6 +499,16 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	finish(nil, map[string]any{"resolved_custom_rules": len(customRuleResults)})
 	resolvedConfig.CustomRules = resolvedCustomRules
 	selection.CustomRules = customRulesForSelection(resolvedCustomRules)
+	finish = stage("resolve_enabled_rule_packs", map[string]any{"enabled_rule_pack_count": len(resolvedConfig.EnabledRulePacks), "rule_packs_dir": opts.LocalRulePacksDir})
+	resolvedRulePacks, rulePackResults, rulePackRules, err := resolveEnabledRulePacks(resolvedConfig.EnabledRulePacks, opts.LocalRulePacksDir, selection.ProxyGroups, selection.PolicyGroups)
+	if err != nil {
+		finish(err, nil)
+		return Resolved{}, err
+	}
+	finish(nil, map[string]any{"resolved_rule_packs": len(rulePackResults)})
+	resolvedConfig.EnabledRulePacks = resolvedRulePacks
+	selection.LocalRulePacks = localRulePacksForSelection(rulePackResults)
+	selection.CustomRules = append(selection.CustomRules, rulePackRules...)
 	finish = stage("resolve_rule_providers", map[string]any{"rule_provider_count": len(resolvedConfig.RuleProviders)})
 	resolvedRuleProviders, ruleProviderResults, err := resolveRuleProviders(resolvedConfig.RuleProviders, selection.ProxyGroups, selection.PolicyGroups)
 	if err != nil {
@@ -471,7 +518,7 @@ func Resolve(opts ResolveOptions) (Resolved, error) {
 	finish(nil, map[string]any{"resolved_rule_providers": len(ruleProviderResults)})
 	resolvedConfig.RuleProviders = resolvedRuleProviders
 	selection.RuleProviders = ruleProvidersForSelection(resolvedRuleProviders)
-	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, PolicyGroups: policyResults, CustomRules: customRuleResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
+	return Resolved{Config: resolvedConfig, Selection: selection, ProxyGroups: groupResults, PolicyGroups: policyResults, CustomRules: customRuleResults, RulePacks: rulePackResults, RuleProviders: ruleProviderResults, Packs: packResults}, nil
 }
 
 func assertPackType(id, declared, actual string) error {
@@ -555,6 +602,23 @@ type SubscriptionNodeOptions struct {
 func LoadSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNode, error) {
 	opts = normalizeSubscriptionNodeOptions(opts)
 	stage := localConfigStageEmitter(opts.OnStage)
+	if !fileExists(opts.SubscriptionConfig) {
+		finish := stage("load_source_subscription_nodes", map[string]any{
+			"subscription_config":  opts.SubscriptionConfig,
+			"subscription_runtime": opts.SubscriptionRuntime,
+			"used":                 false,
+			"fallback_reason":      "subscription sources are not configured",
+		})
+		finish(nil, nil)
+		finish = stage("load_merged_subscription_nodes", map[string]any{"subscription": opts.SubscriptionPath})
+		nodes, err := loadMergedSubscriptionNodes(opts.SubscriptionPath, stage)
+		if err != nil {
+			finish(err, nil)
+			return nil, err
+		}
+		finish(nil, map[string]any{"node_count": len(nodes)})
+		return nodes, nil
+	}
 	finish := stage("load_source_subscription_nodes", map[string]any{
 		"subscription_config":  opts.SubscriptionConfig,
 		"subscription_runtime": opts.SubscriptionRuntime,
@@ -564,19 +628,13 @@ func LoadSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNode, er
 		finish(nil, map[string]any{"node_count": len(sourceNodes), "used": true})
 		return sourceNodes, nil
 	}
-	fields := map[string]any{"node_count": len(sourceNodes), "used": false}
 	if err != nil {
-		fields["fallback_reason"] = err.Error()
-	}
-	finish(nil, fields)
-	finish = stage("load_merged_subscription_nodes", map[string]any{"subscription": opts.SubscriptionPath})
-	nodes, err := loadMergedSubscriptionNodes(opts.SubscriptionPath, stage)
-	if err != nil {
-		finish(err, nil)
+		finish(err, map[string]any{"node_count": len(sourceNodes), "used": false})
 		return nil, err
 	}
-	finish(nil, map[string]any{"node_count": len(nodes)})
-	return nodes, nil
+	err = fmt.Errorf("subscription source artifacts produced no nodes; run subscriptions_refresh")
+	finish(err, map[string]any{"node_count": len(sourceNodes), "used": false})
+	return nil, err
 }
 
 func BuildSubscriptionNodesFromArtifacts(artifacts []SubscriptionSourceArtifact) []SubscriptionNode {
@@ -995,6 +1053,203 @@ func normalizeCustomRuleLine(id string, rule CustomRuleLine) (CustomRuleLine, er
 	return rule, nil
 }
 
+func resolveEnabledRulePacks(selections []RulePackSelection, dir string, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) ([]RulePackSelection, []RulePackResult, []rules.CustomRule, error) {
+	if len(selections) == 0 {
+		return nil, nil, nil, nil
+	}
+	packs, err := LoadLocalRulePacks(dir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	resolved := make([]RulePackSelection, 0, len(selections))
+	results := make([]RulePackResult, 0, len(selections))
+	renderRules := make([]rules.CustomRule, 0, len(selections))
+	ids := map[string]bool{}
+	for _, selection := range selections {
+		id := strings.TrimSpace(selection.ID)
+		if id == "" {
+			return nil, nil, nil, fmt.Errorf("enabled rule pack id is required")
+		}
+		if ids[id] {
+			return nil, nil, nil, fmt.Errorf("enabled rule pack %q is defined more than once", id)
+		}
+		ids[id] = true
+		pack, ok := packs[id]
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("local rule pack %q not found in %s", id, dir)
+		}
+		target := strings.TrimSpace(selection.Target)
+		if target == "" {
+			target = strings.TrimSpace(pack.DefaultTarget)
+		}
+		if target == "" {
+			return nil, nil, nil, fmt.Errorf("enabled rule pack %q target is required", id)
+		}
+		if !localRulePackAllowsTarget(pack, target) {
+			return nil, nil, nil, fmt.Errorf("enabled rule pack %q target %q is not listed in target_options", id, target)
+		}
+		if !isKnownTarget(target, proxyGroups, policyGroups) {
+			return nil, nil, nil, fmt.Errorf("enabled rule pack target %q requires a terminal action, proxy group, or policy group", target)
+		}
+		lines, err := localRulePackLines(pack)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		reason := strings.TrimSpace(selection.Reason)
+		if reason == "" {
+			reason = strings.TrimSpace(pack.Description)
+		}
+		resolved = append(resolved, RulePackSelection{ID: id, Target: target, Reason: reason})
+		results = append(results, RulePackResult{ID: id, Name: pack.Name, Target: target, RuleCount: len(lines), Reason: reason})
+		renderRules = append(renderRules, rules.CustomRule{
+			ID:     "rule_pack:" + id,
+			Target: target,
+			Reason: reason,
+			Rules:  lines,
+		})
+	}
+	return resolved, results, renderRules, nil
+}
+
+func LoadLocalRulePacks(dir string) (map[string]LocalRulePack, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		dir = DefaultLocalRulePacksDir
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	packs := map[string]LocalRulePack{}
+	for _, entry := range entries {
+		if shouldSkipLocalRulePackFile(entry.Name(), entry.IsDir()) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		var pack LocalRulePack
+		if err := json.Unmarshal(data, &pack); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		pack, err = normalizeLocalRulePack(path, pack)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := packs[pack.ID]; exists {
+			return nil, fmt.Errorf("local rule pack %q is defined more than once", pack.ID)
+		}
+		packs[pack.ID] = pack
+	}
+	if len(packs) == 0 {
+		return nil, fmt.Errorf("no local rule packs found in %s", dir)
+	}
+	return packs, nil
+}
+
+const DefaultLocalRulePacksDir = "rule-packs"
+
+func shouldSkipLocalRulePackFile(name string, isDir bool) bool {
+	return isDir || !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "._")
+}
+
+func normalizeLocalRulePack(path string, pack LocalRulePack) (LocalRulePack, error) {
+	pack.ID = strings.TrimSpace(pack.ID)
+	if pack.ID == "" {
+		return LocalRulePack{}, fmt.Errorf("%s: id is required", path)
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9_.-]+$`).MatchString(pack.ID) {
+		return LocalRulePack{}, fmt.Errorf("%s: local rule pack id %q contains unsupported characters", path, pack.ID)
+	}
+	if pack.Version == 0 {
+		pack.Version = 1
+	}
+	if pack.Version != 1 {
+		return LocalRulePack{}, fmt.Errorf("%s: local rule pack %q version must be 1", path, pack.ID)
+	}
+	pack.Name = strings.TrimSpace(pack.Name)
+	pack.Description = strings.TrimSpace(pack.Description)
+	pack.DefaultTarget = strings.TrimSpace(pack.DefaultTarget)
+	pack.TargetOptions = normalizeTargetOptions(pack.TargetOptions)
+	if len(pack.Rules) == 0 {
+		return LocalRulePack{}, fmt.Errorf("%s: local rule pack %q rules is required", path, pack.ID)
+	}
+	if _, err := localRulePackLines(pack); err != nil {
+		return LocalRulePack{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return pack, nil
+}
+
+func normalizeTargetOptions(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func localRulePackAllowsTarget(pack LocalRulePack, target string) bool {
+	if len(pack.TargetOptions) == 0 {
+		return true
+	}
+	for _, option := range pack.TargetOptions {
+		if option == target {
+			return true
+		}
+	}
+	return false
+}
+
+func localRulePackLines(pack LocalRulePack) ([]rules.CustomRuleLine, error) {
+	lines := make([]rules.CustomRuleLine, 0, len(pack.Rules))
+	for i, rule := range pack.Rules {
+		line, err := normalizeLocalRulePackRule(pack.ID, i, rule)
+		if err != nil {
+			return nil, err
+		}
+		lines = append(lines, rules.CustomRuleLine{
+			Type:      line.Type,
+			Value:     line.Value,
+			NoResolve: line.NoResolve,
+		})
+	}
+	return lines, nil
+}
+
+func normalizeLocalRulePackRule(packID string, index int, rule LocalRulePackRule) (CustomRuleLine, error) {
+	if strings.TrimSpace(rule.Type) != "" || strings.TrimSpace(rule.Value) != "" {
+		return normalizeCustomRuleLine(fmt.Sprintf("rule pack %s rule %d", packID, index+1), CustomRuleLine{
+			Type:      rule.Type,
+			Value:     rule.Value,
+			NoResolve: rule.NoResolve,
+		})
+	}
+	candidates := []CustomRuleLine{
+		{Type: "domain", Value: rule.Domain, NoResolve: rule.NoResolve},
+		{Type: "domain_suffix", Value: rule.DomainSuffix, NoResolve: rule.NoResolve},
+		{Type: "ip_cidr", Value: rule.IPCIDR, NoResolve: rule.NoResolve},
+		{Type: "ip_cidr6", Value: rule.IPCIDR6, NoResolve: rule.NoResolve},
+	}
+	var selected []CustomRuleLine
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.Value) != "" {
+			selected = append(selected, candidate)
+		}
+	}
+	if len(selected) != 1 {
+		return CustomRuleLine{}, fmt.Errorf("local rule pack %q rule %d must specify exactly one of domain, domain_suffix, ip_cidr, ip_cidr6, or type/value", packID, index+1)
+	}
+	return normalizeCustomRuleLine(fmt.Sprintf("rule pack %s rule %d", packID, index+1), selected[0])
+}
+
 func resolveRuleProviders(providers []ExternalRuleProvider, proxyGroups map[string]rules.ProxyGroup, policyGroups map[string]rules.PolicyGroup) ([]ExternalRuleProvider, []RuleProviderResult, error) {
 	resolved := make([]ExternalRuleProvider, 0, len(providers))
 	results := make([]RuleProviderResult, 0, len(providers))
@@ -1116,6 +1371,20 @@ func customRulesForSelection(customRules []CustomRule) []rules.CustomRule {
 	return out
 }
 
+func localRulePacksForSelection(packs []RulePackResult) []rules.SelectedLocalRulePack {
+	out := make([]rules.SelectedLocalRulePack, 0, len(packs))
+	for _, pack := range packs {
+		out = append(out, rules.SelectedLocalRulePack{
+			ID:        pack.ID,
+			Name:      pack.Name,
+			Target:    pack.Target,
+			Reason:    pack.Reason,
+			RuleCount: pack.RuleCount,
+		})
+	}
+	return out
+}
+
 func ruleProvidersForSelection(providers []ExternalRuleProvider) []rules.ExternalRuleProvider {
 	out := make([]rules.ExternalRuleProvider, 0, len(providers))
 	for _, provider := range providers {
@@ -1147,6 +1416,9 @@ func normalizeResolveOptions(opts ResolveOptions) ResolveOptions {
 	if strings.TrimSpace(opts.RulesCache) == "" {
 		opts.RulesCache = filepath.Join(".runtime", "rules", "packs")
 	}
+	if strings.TrimSpace(opts.LocalRulePacksDir) == "" {
+		opts.LocalRulePacksDir = DefaultLocalRulePacksDir
+	}
 	return opts
 }
 
@@ -1161,6 +1433,11 @@ func normalizeSubscriptionNodeOptions(opts SubscriptionNodeOptions) Subscription
 		opts.SubscriptionRuntime = filepath.Join(".runtime", "subscriptions")
 	}
 	return opts
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func anyMapSlice(value any) []map[string]any {

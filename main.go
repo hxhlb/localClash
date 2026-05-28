@@ -49,7 +49,7 @@ Usage:
   localclash reset --json
   localclash mcp serve [flags]
 
-Legacy/internal commands still available during the CLI rewrite:
+Advanced/internal commands:
   localclash core download [flags]
   localclash subscription download --url <url> [flags]
   localclash dashboard download [flags]
@@ -227,9 +227,6 @@ func run(args []string) error {
 }
 
 func bootstrapOptionsForArgs(args []string) appinit.Options {
-	if productCommandWasHandled(args) {
-		return appinit.Options{SkipGeneratedConfig: true}
-	}
 	return appinit.Options{}
 }
 

@@ -14,17 +14,20 @@ import (
 	"syscall"
 	"time"
 
+	"localclash/internal/mihomotest"
 	"localclash/internal/runtimeprofile"
 )
 
 type StartOptions struct {
-	CorePath       string
-	ConfigPath     string
-	WorkDir        string
-	LogPath        string
-	Foreground     bool
-	SkipConfigTest bool
-	OnStage        func(StartStageEvent) `json:"-"`
+	CorePath            string
+	ConfigPath          string
+	WorkDir             string
+	LogPath             string
+	Foreground          bool
+	SkipConfigTest      bool
+	ValidationCachePath string
+	ForceConfigTest     bool
+	OnStage             func(StartStageEvent) `json:"-"`
 }
 
 type StartStageEvent struct {
@@ -37,17 +40,18 @@ type StartStageEvent struct {
 }
 
 type StartResult struct {
-	Started            bool     `json:"started"`
-	AlreadyRunning     bool     `json:"already_running"`
-	PID                int      `json:"pid,omitempty"`
-	Config             string   `json:"config"`
-	RuntimeDir         string   `json:"runtime_dir"`
-	LogFile            string   `json:"log_file"`
-	ExternalController string   `json:"external_controller,omitempty"`
-	ExternalUIURL      string   `json:"external_ui_url,omitempty"`
-	ConfigTestSkipped  bool     `json:"config_test_skipped,omitempty"`
-	Warnings           []string `json:"warnings"`
-	NextActions        []string `json:"next_actions,omitempty"`
+	Started            bool                        `json:"started"`
+	AlreadyRunning     bool                        `json:"already_running"`
+	PID                int                         `json:"pid,omitempty"`
+	Config             string                      `json:"config"`
+	RuntimeDir         string                      `json:"runtime_dir"`
+	LogFile            string                      `json:"log_file"`
+	ExternalController string                      `json:"external_controller,omitempty"`
+	ExternalUIURL      string                      `json:"external_ui_url,omitempty"`
+	ConfigTestSkipped  bool                        `json:"config_test_skipped,omitempty"`
+	ConfigValidation   mihomotest.ValidationResult `json:"config_validation"`
+	Warnings           []string                    `json:"warnings"`
+	NextActions        []string                    `json:"next_actions,omitempty"`
 }
 
 var NetworkInterruptionWarnings = []string{
@@ -115,10 +119,12 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	if opts.SkipConfigTest {
 		baseResult.ConfigTestSkipped = true
 	} else {
-		finish := stage("config_test", nil)
-		if err := testConfig(ctx, runOpts); err != nil {
+		finish := stage("config_test", map[string]any{"cache": validationCachePath(opts.ValidationCachePath, runOpts.WorkDir)})
+		validation, err := validateConfig(ctx, runOpts, opts.ValidationCachePath, opts.ForceConfigTest)
+		baseResult.ConfigValidation = validation
+		if err != nil {
 			finish(err, 0)
-			return StartResult{}, err
+			return baseResult, err
 		}
 		finish(nil, 0)
 	}
@@ -237,14 +243,31 @@ func processRunning(pid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-func testConfig(ctx context.Context, opts Options) error {
-	runCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	output, err := exec.CommandContext(runCtx, opts.CorePath, "-d", opts.WorkDir, "-f", opts.ConfigPath, "-t").CombinedOutput()
+func validateConfig(ctx context.Context, opts Options, cachePath string, force bool) (mihomotest.ValidationResult, error) {
+	result, err := mihomotest.ValidateCached(ctx, mihomotest.ValidationOptions{
+		CorePath:   opts.CorePath,
+		ConfigPath: opts.ConfigPath,
+		WorkDir:    opts.WorkDir,
+		CachePath:  validationCachePath(cachePath, opts.WorkDir),
+		Force:      force,
+	})
 	if err != nil {
-		return fmt.Errorf("mihomo config test failed: %s", compactStartOutput(output, err))
+		if result.Output != "" {
+			return result, fmt.Errorf("mihomo config test failed: %s", compactStartOutput([]byte(result.Output), err))
+		}
+		return result, fmt.Errorf("mihomo config test failed: %w", err)
 	}
-	return nil
+	if !result.Passed {
+		return result, fmt.Errorf("mihomo config test failed: %s", result.Output)
+	}
+	return result, nil
+}
+
+func validationCachePath(path, workDir string) string {
+	if strings.TrimSpace(path) != "" {
+		return path
+	}
+	return mihomotest.DefaultCachePath(workDir)
 }
 
 func compactStartOutput(output []byte, err error) string {

@@ -100,6 +100,64 @@ func TestRenderPlanIDDoesNotOverwriteExistingPlan(t *testing.T) {
 	}
 }
 
+func TestRenderEnabledRulePackPlanWritesDurableIntent(t *testing.T) {
+	paths := writePlanFixture(t)
+	writeFile(t, filepath.Join(paths.dir, "rule-packs", "ads.json"), `{
+  "id": "ads",
+  "name": "Ads",
+  "version": 1,
+  "default_target": "REJECT",
+  "target_options": ["REJECT", "DIRECT"],
+  "rules": [
+    {"domain_suffix": "doubleclick.net"},
+    {"domain_suffix": "googlesyndication.com"}
+  ]
+}`)
+
+	result, err := Render(context.Background(), Options{
+		PlanName:     "ads-reject",
+		Subscription: paths.subscription,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			EnabledRulePacks: []OverlayRulePackIntent{{ID: "ads"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Overlay.EnabledRulePacks) != 1 || result.Overlay.EnabledRulePacks[0].RuleCount != 2 {
+		t.Fatalf("enabled rule packs = %+v, want ads with two rules", result.Overlay.EnabledRulePacks)
+	}
+	if result.Changes.RulePacksAdded != 1 || result.Changes.RulesAdded != 2 {
+		t.Fatalf("changes = %+v, want one rule pack and two rules", result.Changes)
+	}
+	candidate := readFile(t, result.ConfigPath)
+	if !strings.Contains(candidate, `"enabled_rule_packs"`) || !strings.Contains(candidate, `"ads"`) {
+		t.Fatalf("candidate localclash.json missing enabled_rule_packs:\n%s", candidate)
+	}
+	config := readYAMLMap(t, result.Output)
+	rules := config["rules"].([]any)
+	found := false
+	for _, rule := range rules {
+		if rule == "DOMAIN-SUFFIX,doubleclick.net,REJECT" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("rendered rules = %+v, missing local rule pack rule", rules)
+	}
+	metadata := config["x-localclash"].(map[string]any)
+	overlay := metadata["overlay"].(map[string]any)
+	packs := overlay["packs"].([]any)
+	if len(packs) != 1 || packs[0].(map[string]any)["source"] != "local" {
+		t.Fatalf("metadata packs = %+v, want local rule pack", packs)
+	}
+}
+
 func TestRenderProxyGroupPlan(t *testing.T) {
 	paths := writePlanFixture(t)
 
@@ -547,6 +605,9 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 	if !result.Applied || !result.Valid {
 		t.Fatalf("apply result = %+v, want applied valid plan", result)
 	}
+	if !result.Transaction.Prepared || !result.Transaction.Atomic || len(result.Transaction.Targets) != 3 {
+		t.Fatalf("transaction = %+v, want atomic three-target commit", result.Transaction)
+	}
 	if len(result.Backups) != 2 {
 		t.Fatalf("backups = %+v, want selection and generated backups", result.Backups)
 	}
@@ -566,6 +627,95 @@ func TestApplyPlanWritesSelectionAndGeneratedConfig(t *testing.T) {
 	}
 	if strings.Contains(readFile(t, generated), "sentinel") {
 		t.Fatalf("generated config was not replaced: %s", readFile(t, generated))
+	}
+}
+
+func TestApplyPlanRollsBackWhenAtomicCommitFails(t *testing.T) {
+	paths := writePlanFixture(t)
+	activeConfig := filepath.Join(paths.dir, "localclash.json")
+	selectionPath := filepath.Join(paths.dir, "localclash-packs.gob")
+	generated := filepath.Join(paths.dir, "generated", "mihomo.yaml")
+	writeFile(t, activeConfig, `version: 1
+proxy_groups:
+  OLD:
+    mode: direct
+packs: []
+`)
+	writeFile(t, selectionPath, `version: 1
+proxy_groups:
+  OLD:
+    direct: true
+enabled_packs: []
+`)
+	writeFile(t, generated, "sentinel: old generated\n")
+
+	plan, err := Render(context.Background(), Options{
+		PlanName:     "ai-sg",
+		Subscription: paths.subscription,
+		RulesCache:   paths.cacheDir,
+		OutputDir:    paths.planDir,
+		ConfigPath:   activeConfig,
+		Test:         false,
+		Now:          fixedPlanTime(),
+		Overlay: OverlayIntent{
+			Packs: []OverlayPackIntent{{ID: "blackmatrix7_OpenAI", Target: "AI"}},
+			ProxyGroups: []OverlayProxyGroupIntent{
+				{ID: "AI", Nodes: []string{"SG 01"}, Mode: "manual"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	originalRename := renameFile
+	renameFile = func(oldPath, newPath string) error {
+		if filepath.Base(newPath) == "localclash-packs.gob" {
+			return fmt.Errorf("injected selection commit failure")
+		}
+		return originalRename(oldPath, newPath)
+	}
+	t.Cleanup(func() { renameFile = originalRename })
+
+	result, err := Apply(context.Background(), ApplyOptions{
+		PlanID:        plan.PlanID,
+		PlansDir:      paths.planDir,
+		ConfigPath:    activeConfig,
+		Subscription:  paths.subscription,
+		RulesCache:    paths.cacheDir,
+		SelectionPath: selectionPath,
+		OutputPath:    generated,
+		Test:          false,
+		Now:           fixedPlanTime(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "rolled back") {
+		t.Fatalf("error = %v, want rollback commit error", err)
+	}
+	if result.Applied || result.Error == "" || result.Transaction.Prepared != true || result.Transaction.Atomic != true {
+		t.Fatalf("result = %+v, want structured rollback failure", result)
+	}
+	if len(result.Backups) == 0 || len(result.NextActions) == 0 {
+		t.Fatalf("result = %+v, want backups and recovery next actions", result)
+	}
+	active, err := localconfig.Load(activeConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := active.ProxyGroups["OLD"]; !ok {
+		t.Fatalf("active config = %+v, want OLD after rollback", active.ProxyGroups)
+	}
+	if _, ok := active.ProxyGroups["AI"]; ok {
+		t.Fatalf("active config = %+v, AI should not be committed after rollback", active.ProxyGroups)
+	}
+	if got := readFile(t, generated); got != "sentinel: old generated\n" {
+		t.Fatalf("generated = %q, want old generated after rollback", got)
+	}
+	selection, err := rules.LoadSelection(selectionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := selection.ProxyGroups["OLD"]; !ok {
+		t.Fatalf("selection = %+v, want OLD after rollback", selection.ProxyGroups)
 	}
 }
 

@@ -1,0 +1,15 @@
+{
+  "id": "ai",
+  "name": "AI Services",
+  "description": "Route common AI service domains through the selected target.",
+  "version": 1,
+  "default_target": "⚡ 自动选择",
+  "target_options": ["⚡ 自动选择", "🎯 手动选择", "DIRECT"],
+  "rules": [
+    {"domain_suffix": "openai.com"},
+    {"domain_suffix": "chatgpt.com"},
+    {"domain_suffix": "anthropic.com"},
+    {"domain_suffix": "claude.ai"},
+    {"domain_suffix": "perplexity.ai"}
+  ]
+}

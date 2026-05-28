@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"localclash/internal/configrender"
-	"localclash/internal/localconfig"
 	"localclash/internal/rules"
 	"localclash/internal/runtimeprofile"
 	"localclash/internal/subscriptions"
@@ -27,7 +25,6 @@ type Options struct {
 	CorePath            string
 	PacksSelectionPath  string
 	RuntimeProfilePath  string
-	SkipGeneratedConfig bool
 }
 
 type RuntimeState struct {
@@ -121,9 +118,7 @@ func Bootstrap(ctx context.Context, opts Options) RuntimeState {
 	inspectCore(ctx, &state, opts)
 	inspectSubscription(&state, opts)
 	ensureRulesCatalog(ctx, &state, opts)
-	if !opts.SkipGeneratedConfig {
-		ensureGeneratedConfig(&state, opts)
-	}
+	inspectGeneratedConfig(&state, opts)
 	return state
 }
 
@@ -242,7 +237,7 @@ func inspectCore(ctx context.Context, state *RuntimeState, opts Options) {
 		return
 	}
 	state.Core.Exists = true
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(runCtx, opts.CorePath, "-v").CombinedOutput()
 	if err == nil {
@@ -304,64 +299,17 @@ func ensureRulesCatalog(ctx context.Context, state *RuntimeState, opts Options) 
 	state.Rules.Details = catalog.Details
 }
 
-func ensureGeneratedConfig(state *RuntimeState, opts Options) {
+func inspectGeneratedConfig(state *RuntimeState, opts Options) {
+	state.Config.Available = fileExists(opts.GeneratedConfig)
+	if state.Config.Available {
+		return
+	}
 	if !state.Subscription.Available {
-		state.Config.Available = fileExists(opts.GeneratedConfig)
-		state.Config.Diagnostic = "config render skipped because effective subscription is unavailable"
-		state.addDiagnostic("config_render", "warning", state.Config.Diagnostic)
-		return
+		state.Config.Diagnostic = "generated config is missing and effective subscription is unavailable; run subscriptions_refresh before config_render"
+	} else {
+		state.Config.Diagnostic = "generated config is missing; run config_render to build generated/mihomo.yaml from durable localClash state"
 	}
-	renderOpts := configrender.Options{
-		SourcePath:         opts.SubscriptionPath,
-		OutputPath:         opts.GeneratedConfig,
-		RulesCacheDir:      opts.RulesCacheDir,
-		RuntimeProfilePath: opts.RuntimeProfilePath,
-		Force:              true,
-	}
-	configPath := defaultWorkDirPath(opts.RuntimeRoot, "localclash.json")
-	if fileExists(configPath) {
-		config, err := localconfig.Load(configPath)
-		if err != nil {
-			state.Config.Available = fileExists(opts.GeneratedConfig)
-			state.Config.Diagnostic = err.Error()
-			state.addDiagnostic("config_render", "warning", err.Error())
-			return
-		}
-		resolved, err := localconfig.Resolve(localconfig.ResolveOptions{
-			Config:              config,
-			SubscriptionPath:    opts.SubscriptionPath,
-			SubscriptionConfig:  opts.SubscriptionConfig,
-			SubscriptionRuntime: opts.SubscriptionRuntime,
-			RulesCache:          opts.RulesCacheDir,
-		})
-		if err != nil {
-			state.Config.Available = fileExists(opts.GeneratedConfig)
-			state.Config.Diagnostic = err.Error()
-			state.addDiagnostic("config_render", "warning", err.Error())
-			return
-		}
-		selectionPath := opts.PacksSelectionPath
-		if strings.TrimSpace(selectionPath) == "" {
-			selectionPath = defaultWorkDirPath(opts.RuntimeRoot, "localclash-packs.gob")
-		}
-		if err := localconfig.WriteSelection(selectionPath, resolved.Selection); err != nil {
-			state.Config.Available = fileExists(opts.GeneratedConfig)
-			state.Config.Diagnostic = err.Error()
-			state.addDiagnostic("config_render", "warning", err.Error())
-			return
-		}
-		renderOpts.PacksSelectionPath = selectionPath
-	} else if opts.PacksSelectionPath != "" && fileExists(opts.PacksSelectionPath) {
-		renderOpts.PacksSelectionPath = opts.PacksSelectionPath
-	}
-	if _, err := configrender.Render(renderOpts); err != nil {
-		state.Config.Available = fileExists(opts.GeneratedConfig)
-		state.Config.Diagnostic = err.Error()
-		state.addDiagnostic("config_render", "warning", err.Error())
-		return
-	}
-	state.Config.Rendered = true
-	state.Config.Available = true
+	state.addDiagnostic("generated_config", "warning", state.Config.Diagnostic)
 }
 
 func defaultWorkDirPath(runtimeRoot, name string) string {

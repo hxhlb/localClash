@@ -37,13 +37,14 @@ type Report struct {
 }
 
 type Check struct {
-	ID      string         `json:"id"`
-	Title   string         `json:"title"`
-	Status  string         `json:"status"`
-	Path    string         `json:"path,omitempty"`
-	Summary string         `json:"summary,omitempty"`
-	Details []string       `json:"details,omitempty"`
-	Metrics map[string]int `json:"metrics,omitempty"`
+	ID       string         `json:"id"`
+	Title    string         `json:"title"`
+	Status   string         `json:"status"`
+	Path     string         `json:"path,omitempty"`
+	Summary  string         `json:"summary,omitempty"`
+	Details  []string       `json:"details,omitempty"`
+	Metrics  map[string]int `json:"metrics,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 const (
@@ -149,9 +150,9 @@ func checkCore(ctx context.Context, opts Options) Check {
 		return check
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
+	runCtx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, opts.CorePath, "-v").CombinedOutput()
+	output, err := exec.CommandContext(runCtx, opts.CorePath, "-v").CombinedOutput()
 	if err != nil {
 		check.Status = statusFail
 		check.Summary = "core exists but version command failed"
@@ -446,38 +447,33 @@ func checkMihomoTest(ctx context.Context, opts Options, coreStatus, configStatus
 		return check
 	}
 
-	info, err := os.Stat(opts.WorkDir)
-	if err != nil {
-		check.Status = statusFail
-		check.Summary = fmt.Sprintf("workdir snapshot source is not available: %v", err)
-		return check
+	result, err := mihomotest.ValidateCached(ctx, mihomotest.ValidationOptions{
+		CorePath:   opts.CorePath,
+		ConfigPath: opts.ConfigPath,
+		WorkDir:    opts.WorkDir,
+		CachePath:  mihomotest.DefaultCachePath(opts.WorkDir),
+		Force:      true,
+		Timeout:    opts.Timeout,
+	})
+	check.Metadata = map[string]any{
+		"cache_path":    result.CachePath,
+		"cached":        result.Cached,
+		"config_sha256": result.ConfigSHA256,
+		"core_type":     result.CoreType,
+		"core_version":  result.CoreVersion,
+		"core_sha256":   result.CoreSHA256,
+		"duration_ms":   result.DurationMS,
+		"isolated":      result.Isolated,
 	}
-	if !info.IsDir() {
-		check.Status = statusFail
-		check.Summary = "workdir snapshot source is not a directory"
-		return check
-	}
-	workDir, cleanup, err := mihomotest.SnapshotRuntimeDir(opts.WorkDir, "localclash-doctor-mihomo-*")
-	if err != nil {
-		check.Status = statusFail
-		check.Summary = fmt.Sprintf("cannot create runtime snapshot: %v", err)
-		return check
-	}
-	defer cleanup()
-
-	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, opts.CorePath, "-d", workDir, "-f", opts.ConfigPath, "-t")
-	output, err := cmd.CombinedOutput()
 	if err != nil {
 		check.Status = statusFail
 		check.Summary = "mihomo config test failed"
-		check.Details = []string{compactOutput(output, err)}
+		check.Details = []string{result.Output}
 		return check
 	}
 	check.Status = statusOK
 	check.Summary = "mihomo config test passed"
-	line := lastNonEmptyLine(output)
+	line := lastNonEmptyLine([]byte(result.Output))
 	if line != "" {
 		check.Details = []string{line}
 	}

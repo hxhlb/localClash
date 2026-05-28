@@ -48,11 +48,11 @@ func TestBootstrapBuildsRuntimeStateFromLocalArtifacts(t *testing.T) {
 	if !state.Rules.CatalogAvailable || len(state.Rules.Packs) != 1 {
 		t.Fatalf("rules = %+v, want one pack catalog", state.Rules)
 	}
-	if !state.Config.Rendered || !state.Config.Available {
-		t.Fatalf("config = %+v, want rendered", state.Config)
+	if state.Config.Rendered || state.Config.Available {
+		t.Fatalf("config = %+v, bootstrap should not render generated config", state.Config)
 	}
-	if _, err := os.Stat(state.Paths.GeneratedConfig); err != nil {
-		t.Fatalf("generated config missing: %v", err)
+	if _, err := os.Stat(state.Paths.GeneratedConfig); !os.IsNotExist(err) {
+		t.Fatalf("generated config should not be created by bootstrap, err=%v", err)
 	}
 }
 
@@ -86,7 +86,7 @@ func TestBootstrapRecordsDiagnosticsWithoutFailingProcess(t *testing.T) {
 	}
 }
 
-func TestBootstrapCanSkipGeneratedConfigRender(t *testing.T) {
+func TestBootstrapDoesNotRenderGeneratedConfigOnStartup(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "bin", "mihomo")
 	writeAppinitFile(t, core, "#!/bin/sh\nif [ \"$1\" = \"-v\" ]; then echo Mihomo test; exit 0; fi\nexit 0\n", 0o755)
@@ -100,15 +100,14 @@ func TestBootstrapCanSkipGeneratedConfigRender(t *testing.T) {
 	generated := filepath.Join(dir, "generated", "mihomo.yaml")
 
 	state := Bootstrap(context.Background(), Options{
-		RuntimeRoot:         filepath.Join(dir, ".runtime"),
-		RuleSourcesDir:      filepath.Join(dir, "missing-rule-sources"),
-		RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
-		GeneratedConfig:     generated,
-		SubscriptionPath:    subscription,
-		MihomoRuntimeDir:    filepath.Join(dir, ".runtime", "mihomo"),
-		CorePath:            core,
-		RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
-		SkipGeneratedConfig: true,
+		RuntimeRoot:        filepath.Join(dir, ".runtime"),
+		RuleSourcesDir:     filepath.Join(dir, "missing-rule-sources"),
+		RulesCacheDir:      filepath.Join(dir, ".runtime", "rules", "packs"),
+		GeneratedConfig:    generated,
+		SubscriptionPath:   subscription,
+		MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+		CorePath:           core,
+		RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 	})
 
 	if state.Config.Rendered {

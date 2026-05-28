@@ -57,13 +57,15 @@ func TestHTTPHandlerServesJSONRPC(t *testing.T) {
 }
 
 func TestHTTPHandlerLogsToolCallSummary(t *testing.T) {
+	dir := t.TempDir()
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tools_list","arguments":{"url":"https://example.invalid/secret","view":"durable"}}}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
+	server := NewServerWithState(appinit.RuntimeState{Paths: appinit.RuntimePaths{MihomoRuntimeDir: filepath.Join(dir, "mihomo")}})
 
 	stderr := captureStderr(t, func() {
-		NewServer().HTTPHandler("/mcp").ServeHTTP(w, req)
+		server.HTTPHandler("/mcp").ServeHTTP(w, req)
 	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
@@ -75,6 +77,18 @@ func TestHTTPHandlerLogsToolCallSummary(t *testing.T) {
 	}
 	if strings.Contains(stderr, "https://example.invalid/secret") {
 		t.Fatalf("stderr leaked redacted URL: %q", stderr)
+	}
+	serviceLog := filepath.Join(dir, "logs", "mcp-http.jsonl")
+	logData, err := os.ReadFile(serviceLog)
+	if err != nil {
+		t.Fatalf("read service log: %v", err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, `"event":"mcp_http"`) || !strings.Contains(logText, `"tool":"tools_list"`) || !strings.Contains(logText, `url=\u003credacted\u003e`) {
+		t.Fatalf("service log = %s, want redacted mcp_http tools_list entry", logText)
+	}
+	if strings.Contains(logText, "https://example.invalid/secret") {
+		t.Fatalf("service log leaked redacted URL: %s", logText)
 	}
 }
 
@@ -453,6 +467,9 @@ packs:
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
 		t.Fatalf("routing_explain structured content is not serializable: %v", err)
 	}
+	if content["task_log_file"] == "" || content["task_status_file"] == "" {
+		t.Fatalf("content = %+v, want sync task artifact paths", content)
+	}
 }
 
 func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testing.T) {
@@ -485,6 +502,9 @@ func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testi
 	content := result.StructuredContent.(map[string]any)
 	if content["rendered"] != true || content["source"] != "base" {
 		t.Fatalf("content = %+v, want rendered base config", content)
+	}
+	if content["task_log_file"] == "" || content["task_status_file"] == "" {
+		t.Fatalf("content = %+v, want sync task artifact paths", content)
 	}
 	if _, err := os.Stat(generated); err != nil {
 		t.Fatalf("generated config should be written, stat err=%v", err)
@@ -1921,10 +1941,14 @@ func TestRunRuntimeToolReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")
 	writeTestExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo run_runtime should not run mihomo config test >&2
-    exit 99
+    echo configuration test is successful
+    exit 0
   fi
 done
 echo runtime started
@@ -2100,10 +2124,14 @@ func TestStopRuntimeToolStopsStartedRuntime(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")
 	writeTestExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo run_runtime should not run mihomo config test >&2
-    exit 99
+    echo configuration test is successful
+    exit 0
   fi
 done
 sleep 30
@@ -2247,15 +2275,19 @@ func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 	}
 }
 
-func TestRunRuntimeToolRendersMissingGeneratedConfigFromSubscription(t *testing.T) {
+func TestRunRuntimeToolRefusesMissingGeneratedConfigWithoutAutoRender(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
 	core := filepath.Join(dir, "mihomo")
 	writeTestExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo run_runtime should not run mihomo config test >&2
-    exit 99
+    echo configuration test is successful
+    exit 0
   fi
 done
 echo runtime started
@@ -2293,12 +2325,11 @@ sleep 30
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	defer killMCPProcess(int(content["pid"].(float64)))
-	if content["started"] != true {
-		t.Fatalf("content = %+v, want started after auto render", content)
+	if content["started"] != false || !strings.Contains(content["error"].(string), "call config_render") {
+		t.Fatalf("content = %+v, want explicit config_render guidance", content)
 	}
-	if _, err := os.Stat(generated); err != nil {
-		t.Fatalf("generated config missing after run_runtime auto render: %v", err)
+	if _, err := os.Stat(generated); !os.IsNotExist(err) {
+		t.Fatalf("generated config should not be created by run_runtime, err=%v", err)
 	}
 }
 

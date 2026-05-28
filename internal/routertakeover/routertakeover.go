@@ -161,8 +161,10 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 	}
 	finish = stage("apply_script", map[string]any{"state_dir": opts.StateDir, "tun_device": opts.TunDevice})
 	if _, err := defaultRunner(ctx, script); err != nil {
-		finish(err, nil)
-		return Result{}, err
+		finish(err, map[string]any{"recovery": "runtime takeover state is non-persistent; reboot clears localClash-owned rules"})
+		result.Checks = append(result.Checks, check("apply_script", false, "router takeover script applied", err.Error()))
+		result.NextActions = takeoverFailureNextActions("apply", err)
+		return result, nil
 	}
 	finish(nil, nil)
 	finish = stage("verify_takeover_status", nil)
@@ -199,8 +201,10 @@ func Stop(ctx context.Context, opts Options) (Result, error) {
 	}
 	finish = stage("stop_script", map[string]any{"state_dir": opts.StateDir, "tun_device": opts.TunDevice})
 	if _, err := defaultRunner(ctx, script); err != nil {
-		finish(err, nil)
-		return Result{}, err
+		finish(err, map[string]any{"recovery": "runtime takeover state is non-persistent; reboot clears localClash-owned rules"})
+		result.Checks = append(result.Checks, check("stop_script", false, "router takeover cleanup script ran", err.Error()))
+		result.NextActions = takeoverFailureNextActions("stop", err)
+		return result, nil
 	}
 	finish(nil, nil)
 	finish = stage("verify_takeover_status", nil)
@@ -377,6 +381,22 @@ func nextActions(result Result) []string {
 		return []string{"call run_runtime after user confirmation", "call router_takeover_apply"}
 	}
 	return []string{"call router_takeover_apply after user confirmation"}
+}
+
+func takeoverFailureNextActions(action string, err error) []string {
+	actions := []string{
+		"inspect the MCP task log stage_error entry for the failing command output",
+		"call router_takeover_status to see which runtime-only checks are still effective",
+		"retry after fixing the reported OpenWrt prerequisite or Mihomo runtime state",
+		"rebooting the router clears localClash runtime takeover state because no persistent firewall config is written",
+	}
+	if action == "apply" {
+		actions = append(actions, "call router_takeover_stop after user confirmation if status shows partially installed localClash rules")
+	}
+	if err != nil {
+		actions = append([]string{"failure: " + err.Error()}, actions...)
+	}
+	return actions
 }
 
 func defaultRunner(ctx context.Context, command string) (string, error) {

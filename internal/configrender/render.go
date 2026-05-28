@@ -395,6 +395,15 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			})
 			markTarget(enabled.Target)
 		}
+		for _, enabled := range selection.LocalRulePacks {
+			metadata.Overlay.Packs = append(metadata.Overlay.Packs, configmeta.OverlayPack{
+				ID:     enabled.ID,
+				Source: "local",
+				Type:   "local_rule_pack",
+				Target: enabled.Target,
+			})
+			markTarget(enabled.Target)
+		}
 		for _, custom := range selection.CustomRules {
 			markTarget(custom.Target)
 		}

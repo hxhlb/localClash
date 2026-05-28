@@ -127,7 +127,7 @@ type routingPatchGuidance struct {
 
 func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in routingExplainInput
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if strings.TrimSpace(in.Query) == "" {
@@ -291,6 +291,12 @@ func queryRoutingMatches(query string, index routingIndex) []routingExplainMatch
 			matches = append(matches, routingExplainMatch{Kind: "pack", ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route})
 		}
 	}
+	for _, pack := range index.Config.EnabledRulePacks {
+		if score := matchScore(query, pack.ID, pack.Target, pack.Reason); score > 0 {
+			route := "local_rule_pack:" + pack.ID + " -> " + pack.Target
+			matches = append(matches, routingExplainMatch{Kind: "local_rule_pack", ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route})
+		}
+	}
 	for _, custom := range index.Config.CustomRules {
 		if score := matchScore(query, custom.ID, custom.Target, custom.Reason, customRulesText(custom.Rules)); score > 0 {
 			route := "custom_rule:" + custom.ID + " -> " + custom.Target
@@ -331,8 +337,11 @@ func routesFromMatches(matches []routingExplainMatch, index routingIndex) []rout
 	var routes []routingExplainRoute
 	for _, match := range matches {
 		switch match.Kind {
-		case "pack":
+		case "pack", "local_rule_pack":
 			route := routeForSource("pack", match.ID, match.Target, match.Reason, index)
+			if match.Kind == "local_rule_pack" {
+				route = routeForSource("local_rule_pack", match.ID, match.Target, match.Reason, index)
+			}
 			if addRoute(route, seen) {
 				routes = append(routes, route)
 			}
@@ -400,6 +409,9 @@ func routeForSource(sourceKind, id, target, reason string, index routingIndex) r
 				"rule_template": strings.ReplaceAll(detail.RenderRuleTemplate, "<target>", target),
 			}
 		}
+	}
+	if sourceKind == "local_rule_pack" {
+		route.Pack = &routingExplainPack{ID: id, Type: "local_rule_pack"}
 	}
 	if group, ok := index.PolicyGroups[target]; ok {
 		policy := routingExplainPolicy{ID: target, Mode: group.Mode, Exits: append([]string{}, group.Exits...), Reason: group.Reason, Boundary: group.Boundary}
@@ -511,7 +523,7 @@ func defaultRoutingPatchGuidance(target string) routingPatchGuidance {
 		Steps: []string{
 			"Call config_status to capture current durable localclash.json intent.",
 			"For a new or changed exit, call proxy_group_build or reuse an existing proxy group returned by routing_explain.reusable_exits.",
-			"For ACL4SSR-style business routing, call policy_group_build with the desired exits, then config_patch_create with overlay.policy_groups and matching packs/custom_rules/rule_providers.",
+			"For ACL4SSR-style business routing, call policy_group_build with the desired exits, then config_patch_create with overlay.policy_groups and matching packs/enabled_rule_packs/custom_rules/rule_providers.",
 			"Review the returned candidate localclash.json and mihomo.yaml, then call config_patch_apply with the exact patch_id.",
 			"Call config_status or routing_explain again to verify the durable intent; restart_runtime only after user confirmation if the running Mihomo process should load the change.",
 		},

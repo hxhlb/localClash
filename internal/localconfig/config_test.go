@@ -70,6 +70,140 @@ func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
 	}
 }
 
+func TestLoadSubscriptionNodesDoesNotFallbackWhenConfiguredSourceArtifactIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash-subscriptions.json")
+	writeTestFile(t, configPath, `sources:
+  - id: main
+`)
+	merged := filepath.Join(dir, "subscription.gob")
+	writeTestFile(t, merged, `proxies:
+  - name: Merged Only
+    type: ss
+`)
+
+	_, err := LoadSubscriptionNodes(SubscriptionNodeOptions{
+		SubscriptionPath:    merged,
+		SubscriptionConfig:  configPath,
+		SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "main.gob") {
+		t.Fatalf("error = %v, want missing source artifact error", err)
+	}
+}
+
+func TestResolveEnabledLocalRulePacks(t *testing.T) {
+	dir := t.TempDir()
+	rulePacksDir := filepath.Join(dir, "rule-packs")
+	writeTestFile(t, filepath.Join(rulePacksDir, "ai.json"), `{
+  "id": "ai",
+  "name": "AI services",
+  "version": 1,
+  "default_target": "DIRECT",
+  "target_options": ["DIRECT", "AI"],
+  "rules": [
+    {"domain_suffix": "openai.com"},
+    {"ip_cidr": "1.1.1.0/24", "no_resolve": true}
+  ]
+}`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			EnabledRulePacks: []RulePackSelection{{ID: "ai", Reason: "local AI routing"}},
+		},
+		SubscriptionNodes: []SubscriptionNode{{Name: "SG 01"}},
+		LocalRulePacksDir: rulePacksDir,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(resolved.RulePacks) != 1 || resolved.RulePacks[0].Target != "DIRECT" || resolved.RulePacks[0].RuleCount != 2 {
+		t.Fatalf("rule packs = %+v, want resolved local rule pack", resolved.RulePacks)
+	}
+	if len(resolved.Selection.LocalRulePacks) != 1 || resolved.Selection.LocalRulePacks[0].ID != "ai" {
+		t.Fatalf("selection local rule packs = %+v, want ai metadata", resolved.Selection.LocalRulePacks)
+	}
+	if len(resolved.Selection.CustomRules) != 1 || resolved.Selection.CustomRules[0].ID != "rule_pack:ai" {
+		t.Fatalf("selection custom rules = %+v, want rendered rule pack custom rule", resolved.Selection.CustomRules)
+	}
+	fragment, err := rules.RenderFragment(resolved.Selection, nil, []string{"SG 01"})
+	if err != nil {
+		t.Fatalf("RenderFragment returned error: %v", err)
+	}
+	want := []string{"DOMAIN-SUFFIX,openai.com,DIRECT", "IP-CIDR,1.1.1.0/24,DIRECT,no-resolve"}
+	if !reflect.DeepEqual(fragment.Rules, want) {
+		t.Fatalf("fragment rules = %#v, want %#v", fragment.Rules, want)
+	}
+}
+
+func TestResolveEnabledRulePacksFromLocalFiles(t *testing.T) {
+	dir := t.TempDir()
+	rulePacksDir := filepath.Join(dir, "rule-packs")
+	writeTestFile(t, filepath.Join(rulePacksDir, "ai.json"), `{
+  "id": "ai",
+  "name": "AI Services",
+  "version": 1,
+  "default_target": "AI",
+  "target_options": ["AI", "DIRECT"],
+  "rules": [
+    {"domain_suffix": "openai.com"},
+    {"type": "domain", "value": "chatgpt.com"}
+  ]
+}`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"AI": {Mode: "direct"},
+			},
+			EnabledRulePacks: []RulePackSelection{{ID: "ai"}},
+		},
+		SubscriptionNodes: []SubscriptionNode{{Name: "JP 01", Type: "ss"}},
+		LocalRulePacksDir: rulePacksDir,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(resolved.RulePacks) != 1 || resolved.RulePacks[0].RuleCount != 2 || resolved.RulePacks[0].Target != "AI" {
+		t.Fatalf("rule packs = %+v, want resolved ai pack", resolved.RulePacks)
+	}
+	if len(resolved.Selection.LocalRulePacks) != 1 || resolved.Selection.LocalRulePacks[0].ID != "ai" {
+		t.Fatalf("selection local packs = %+v, want ai", resolved.Selection.LocalRulePacks)
+	}
+	fragment, err := rules.RenderFragment(resolved.Selection, map[string]rules.PackCache{}, []string{"JP 01"})
+	if err != nil {
+		t.Fatalf("RenderFragment returned error: %v", err)
+	}
+	if len(fragment.Rules) < 2 || fragment.Rules[0] != "DOMAIN-SUFFIX,openai.com,AI" || fragment.Rules[1] != "DOMAIN,chatgpt.com,AI" {
+		t.Fatalf("fragment rules = %+v, want local rule pack rules", fragment.Rules)
+	}
+}
+
+func TestResolveEnabledRulePacksRejectsUnsupportedTargetOption(t *testing.T) {
+	dir := t.TempDir()
+	rulePacksDir := filepath.Join(dir, "rule-packs")
+	writeTestFile(t, filepath.Join(rulePacksDir, "ai.json"), `{
+  "id": "ai",
+  "version": 1,
+  "target_options": ["DIRECT"],
+  "rules": [{"domain_suffix": "openai.com"}]
+}`)
+
+	_, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"AI": {Mode: "direct"},
+			},
+			EnabledRulePacks: []RulePackSelection{{ID: "ai", Target: "AI"}},
+		},
+		SubscriptionNodes: []SubscriptionNode{{Name: "JP 01", Type: "ss"}},
+		LocalRulePacksDir: rulePacksDir,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not listed in target_options") {
+		t.Fatalf("error = %v, want target_options error", err)
+	}
+}
+
 func TestResolveNameRegexEnforcesMin(t *testing.T) {
 	dir := t.TempDir()
 	subscriptionPath := filepath.Join(dir, "subscription.gob")
@@ -370,6 +504,7 @@ func TestResolveEmitsStageTimings(t *testing.T) {
 	assertStageEvent(t, events, "resolve_proxy_group", "done")
 	assertStageEvent(t, events, "resolve_policy_group", "done")
 	assertStageEvent(t, events, "resolve_pack", "done")
+	assertStageEvent(t, events, "resolve_enabled_rule_packs", "done")
 	assertStageEvent(t, events, "resolve_rule_providers", "done")
 }
 

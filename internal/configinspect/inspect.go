@@ -90,6 +90,8 @@ type IntentResult struct {
 	PolicyGroups       []IntentPolicyGroup  `json:"policy_groups"`
 	CustomRulesCount   int                  `json:"custom_rules_count"`
 	CustomRules        []IntentCustomRule   `json:"custom_rules"`
+	RulePacksCount     int                  `json:"enabled_rule_packs_count"`
+	RulePacks          []IntentRulePack     `json:"enabled_rule_packs"`
 	RuleProvidersCount int                  `json:"rule_providers_count"`
 	RuleProviders      []IntentRuleProvider `json:"rule_providers"`
 	PacksCount         int                  `json:"packs_count"`
@@ -127,6 +129,15 @@ type IntentCustomRule struct {
 	Reason    string                       `json:"reason,omitempty"`
 	Rules     []localconfig.CustomRuleLine `json:"rules,omitempty"`
 	Status    string                       `json:"status"`
+}
+
+type IntentRulePack struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Target    string `json:"target"`
+	RuleCount int    `json:"rule_count"`
+	Reason    string `json:"reason,omitempty"`
+	Status    string `json:"status"`
 }
 
 type IntentRuleProvider struct {
@@ -246,9 +257,10 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 		ProxyGroups:   []IntentProxyGroup{},
 		PolicyGroups:  []IntentPolicyGroup{},
 		CustomRules:   []IntentCustomRule{},
+		RulePacks:     []IntentRulePack{},
 		RuleProviders: []IntentRuleProvider{},
 		Packs:         []IntentPack{},
-		Note:          "Intent is read from durable localclash.json. Use it before creating a patch to preserve existing proxy groups, policy groups, packs, custom rules, and rule providers.",
+		Note:          "Intent is read from durable localclash.json. Use it before creating a patch to preserve existing proxy groups, policy groups, packs, enabled rule packs, custom rules, and rule providers.",
 	}
 	config, err := localconfig.Load(path)
 	if err != nil {
@@ -269,17 +281,20 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.ProxyGroupsCount = len(config.ProxyGroups)
 	result.PolicyGroupsCount = len(config.PolicyGroups)
 	result.CustomRulesCount = len(config.CustomRules)
+	result.RulePacksCount = len(config.EnabledRulePacks)
 	result.RuleProvidersCount = len(config.RuleProviders)
 	result.PacksCount = len(config.Packs)
 
 	result.ProxyGroups = proxyGroupIntents(config.ProxyGroups, nil, limit)
 	result.PolicyGroups = policyGroupIntents(config.PolicyGroups, nil, limit)
 	result.CustomRules = customRuleIntents(config.CustomRules, nil, limit)
+	result.RulePacks = rulePackIntents(config.EnabledRulePacks, nil, limit)
 	result.RuleProviders = ruleProviderIntents(config.RuleProviders, nil, limit)
 	result.Packs = packIntents(config.Packs, nil, limit)
 	result.Truncated = result.ProxyGroupsCount > len(result.ProxyGroups) ||
 		result.PolicyGroupsCount > len(result.PolicyGroups) ||
 		result.CustomRulesCount > len(result.CustomRules) ||
+		result.RulePacksCount > len(result.RulePacks) ||
 		result.RuleProvidersCount > len(result.RuleProviders) ||
 		result.PacksCount > len(result.Packs)
 
@@ -302,6 +317,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.ProxyGroups = proxyGroupIntents(resolved.Config.ProxyGroups, resolved.ProxyGroups, limit)
 	result.PolicyGroups = policyGroupIntents(resolved.Config.PolicyGroups, resolved.PolicyGroups, limit)
 	result.CustomRules = customRuleIntents(resolved.Config.CustomRules, resolved.CustomRules, limit)
+	result.RulePacks = rulePackIntents(resolved.Config.EnabledRulePacks, resolved.RulePacks, limit)
 	result.RuleProviders = ruleProviderIntents(resolved.Config.RuleProviders, resolved.RuleProviders, limit)
 	result.Packs = packIntents(resolved.Config.Packs, resolved.Packs, limit)
 	return result, nil
@@ -457,6 +473,40 @@ func customRuleIntents(rules []localconfig.CustomRule, resolved []localconfig.Cu
 			RuleCount: len(rule.Rules),
 			Reason:    rule.Reason,
 			Rules:     append([]localconfig.CustomRuleLine{}, rule.Rules...),
+			Status:    status,
+		})
+	}
+	return out
+}
+
+func rulePackIntents(packs []localconfig.RulePackSelection, resolved []localconfig.RulePackResult, limit int) []IntentRulePack {
+	resolvedByID := map[string]localconfig.RulePackResult{}
+	for _, pack := range resolved {
+		resolvedByID[pack.ID] = pack
+	}
+	if len(packs) > limit {
+		packs = packs[:limit]
+	}
+	out := make([]IntentRulePack, 0, len(packs))
+	for _, pack := range packs {
+		status := "configured"
+		name := ""
+		ruleCount := 0
+		target := pack.Target
+		reason := pack.Reason
+		if resolvedPack, ok := resolvedByID[pack.ID]; ok {
+			status = "resolved"
+			name = resolvedPack.Name
+			ruleCount = resolvedPack.RuleCount
+			target = resolvedPack.Target
+			reason = resolvedPack.Reason
+		}
+		out = append(out, IntentRulePack{
+			ID:        pack.ID,
+			Name:      name,
+			Target:    target,
+			RuleCount: ruleCount,
+			Reason:    reason,
 			Status:    status,
 		})
 	}

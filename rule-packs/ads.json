@@ -1,0 +1,14 @@
+{
+  "id": "ads",
+  "name": "Ads and Tracking",
+  "description": "Reject common advertising and tracking domains.",
+  "version": 1,
+  "default_target": "REJECT",
+  "target_options": ["REJECT", "DIRECT"],
+  "rules": [
+    {"domain_suffix": "doubleclick.net"},
+    {"domain_suffix": "googlesyndication.com"},
+    {"domain_suffix": "google-analytics.com"},
+    {"domain_suffix": "adsystem.com"}
+  ]
+}

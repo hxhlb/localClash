@@ -262,7 +262,7 @@ func TestStopRemovesStalePIDFile(t *testing.T) {
 	}
 }
 
-func TestRestartSkipsConfigTestAndRestartsRuntime(t *testing.T) {
+func TestRestartValidatesConfigBeforeRestartingRuntime(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -279,10 +279,14 @@ func TestRestartSkipsConfigTestAndRestartsRuntime(t *testing.T) {
 	}
 	core := filepath.Join(dir, "mihomo")
 	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo restart should not run mihomo config test >&2
-    exit 99
+    echo configuration test is successful
+    exit 0
   fi
 done
 sleep 30
@@ -296,12 +300,72 @@ sleep 30
 		WorkDir:    workDir,
 	})
 	if err != nil {
-		t.Fatalf("restart error = %v, want skipped config test", err)
+		t.Fatalf("restart error = %v", err)
 	}
 	defer killProcess(result.Start.PID)
+	if !result.ConfigValidation.Passed || result.ConfigValidation.Cached {
+		t.Fatalf("validation = %+v, want uncached pass before restart", result.ConfigValidation)
+	}
 	status := Status(StatusOptions{ConfigPath: config, WorkDir: workDir})
 	if !status.Running || status.PID == cmd.Process.Pid {
 		t.Fatalf("status after restart = %+v, want new runtime", status)
+	}
+}
+
+func TestRestartReusesCachedValidationForUnchangedConfigAndCore(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "mihomo")
+	counter := filepath.Join(dir, "count")
+	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    count=0
+    [ -f "`+counter+`" ] && count=$(cat "`+counter+`")
+    count=$((count + 1))
+    echo "$count" > "`+counter+`"
+    echo configuration test is successful
+    exit 0
+  fi
+done
+sleep 30
+`)
+	config := writeStartConfig(t, dir)
+	workDir := filepath.Join(dir, "runtime")
+	cache := filepath.Join(dir, "validation-cache.json")
+
+	first, err := Restart(context.Background(), RestartOptions{
+		CorePath:            core,
+		ConfigPath:          config,
+		WorkDir:             workDir,
+		ValidationCachePath: cache,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(first.Start.PID)
+	if !first.ConfigValidation.Passed || first.ConfigValidation.Cached {
+		t.Fatalf("first validation = %+v, want uncached pass", first.ConfigValidation)
+	}
+
+	second, err := Restart(context.Background(), RestartOptions{
+		CorePath:            core,
+		ConfigPath:          config,
+		WorkDir:             workDir,
+		ValidationCachePath: cache,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer killProcess(second.Start.PID)
+	if !second.ConfigValidation.Passed || !second.ConfigValidation.Cached {
+		t.Fatalf("second validation = %+v, want cached pass", second.ConfigValidation)
+	}
+	if got := strings.TrimSpace(readControlTestFile(t, counter)); got != "1" {
+		t.Fatalf("validation count = %q, want one actual mihomo -t run", got)
 	}
 }
 
@@ -364,6 +428,15 @@ func stubProcessList(t *testing.T, pids ...int) {
 	})
 }
 
+func readControlTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
@@ -384,10 +457,14 @@ func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {
 	}
 	core := filepath.Join(dir, "mihomo")
 	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
-    echo restart should not run mihomo config test >&2
-    exit 99
+    echo configuration test is successful
+    exit 0
   fi
 done
 sleep 30
@@ -421,13 +498,10 @@ sleep 30
 	if result.Timings.TotalMS == 0 {
 		t.Fatalf("restart timings = %+v, want total duration", result.Timings)
 	}
-	for _, want := range []string{"stop:done", "start:done", "status:done"} {
+	for _, want := range []string{"config_test:done", "stop:done", "start:done", "status:done"} {
 		if !restartStagesContain(stages, want) {
 			t.Fatalf("restart stages = %+v, missing %s", stages, want)
 		}
-	}
-	if restartStagesContain(stages, "config_test:done") || restartStagesContain(stages, "config_test:error") {
-		t.Fatalf("restart stages = %+v, should not run config_test", stages)
 	}
 	select {
 	case <-oldDone:

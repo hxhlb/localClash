@@ -26,6 +26,7 @@ import (
 	"localclash/internal/envinspect"
 	"localclash/internal/fileops"
 	"localclash/internal/localconfig"
+	"localclash/internal/mihomotest"
 	"localclash/internal/policytemplate"
 	"localclash/internal/routertakeover"
 	"localclash/internal/rules"
@@ -206,18 +207,18 @@ func (s *Server) HTTPHandler(path string) http.Handler {
 		var raw json.RawMessage
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&raw); err != nil {
 			response := errorResponse(nil, -32700, "parse error")
-			logHTTPMCPCall(r, rpcLogSummary{Method: "parse_error"}, http.StatusOK, response, time.Since(started))
+			s.logHTTPMCPCall(r, rpcLogSummary{Method: "parse_error"}, http.StatusOK, response, time.Since(started))
 			writeJSON(w, http.StatusOK, response)
 			return
 		}
 		summary := summarizeRPCLog(raw)
 		response := s.Handle(r.Context(), raw)
 		if response == nil {
-			logHTTPMCPCall(r, summary, http.StatusAccepted, nil, time.Since(started))
+			s.logHTTPMCPCall(r, summary, http.StatusAccepted, nil, time.Since(started))
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		logHTTPMCPCall(r, summary, http.StatusOK, response, time.Since(started))
+		s.logHTTPMCPCall(r, summary, http.StatusOK, response, time.Since(started))
 		writeJSON(w, http.StatusOK, response)
 	})
 	return mux
@@ -298,7 +299,7 @@ func isSensitiveLogKey(key string) bool {
 	return false
 }
 
-func logHTTPMCPCall(r *http.Request, summary rpcLogSummary, httpStatus int, response *rpcResponse, duration time.Duration) {
+func (s *Server) logHTTPMCPCall(r *http.Request, summary rpcLogSummary, httpStatus int, response *rpcResponse, duration time.Duration) {
 	parts := []string{
 		"mcp_http",
 		"method=" + r.Method,
@@ -315,17 +316,50 @@ func logHTTPMCPCall(r *http.Request, summary rpcLogSummary, httpStatus int, resp
 		fmt.Sprintf("http_status=%d", httpStatus),
 		fmt.Sprintf("duration_ms=%d", duration.Milliseconds()),
 	)
+	record := map[string]any{
+		"ts":          time.Now().UTC().Format(time.RFC3339),
+		"event":       "mcp_http",
+		"http_method": r.Method,
+		"path":        r.URL.Path,
+		"rpc":         summary.Method,
+		"http_status": httpStatus,
+		"duration_ms": duration.Milliseconds(),
+	}
+	if summary.Tool != "" {
+		record["tool"] = summary.Tool
+	}
+	if summary.Args != "" {
+		record["args"] = summary.Args
+	}
 	if response == nil {
 		parts = append(parts, "response=notification")
+		record["response"] = "notification"
 	} else if response.Error != nil {
 		parts = append(parts,
 			fmt.Sprintf("error_code=%d", response.Error.Code),
 			"error="+strconv.Quote(response.Error.Message),
 		)
+		record["error_code"] = response.Error.Code
+		record["error"] = response.Error.Message
 	} else {
 		parts = append(parts, "response=ok")
+		record["response"] = "ok"
 	}
 	fmt.Fprintln(os.Stderr, strings.Join(parts, " "))
+	appendBoundedJSONLog(s.serviceLogPath("mcp-http.jsonl"), record, serviceLogMaxBytes())
+}
+
+func (s *Server) serviceLogPath(name string) string {
+	if s.state != nil {
+		runtimeDir := strings.TrimSpace(s.state.Paths.MihomoRuntimeDir)
+		if runtimeDir != "" && runtimeDir != "." {
+			parent := filepath.Dir(runtimeDir)
+			if parent != "." && parent != "" {
+				return filepath.Join(parent, "logs", name)
+			}
+		}
+	}
+	return filepath.Join(".runtime", "logs", name)
 }
 
 func safeLogToken(value string) string {
@@ -444,7 +478,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 	case "router_takeover_status":
 		return s.callRouterTakeoverStatus(ctx, args)
 	case "routing_explain":
-		return s.callRoutingExplain(ctx, args)
+		return s.runLoggedSyncTool(ctx, "routing_explain", args, s.callRoutingExplain)
 	case "subscriptions_status":
 		return s.callSubscriptionsStatus(args)
 	case "tools_list":
@@ -483,6 +517,16 @@ func isJSONObject(data json.RawMessage) bool {
 	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
+func decodeToolInput(args json.RawMessage, out any) error {
+	if len(bytes.TrimSpace(args)) == 0 {
+		args = []byte("{}")
+	}
+	if !isJSONObject(args) {
+		return fmt.Errorf("tool arguments must be a JSON object")
+	}
+	return json.Unmarshal(args, out)
+}
+
 func callNLFile(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Path       string `json:"path"`
@@ -490,7 +534,7 @@ func callNLFile(args json.RawMessage) (toolResult, error) {
 		LimitLines int    `json:"limit_lines"`
 		MaxBytes   int    `json:"max_bytes"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	result, err := fileops.NLFile(fileops.NLFileOptions{
@@ -512,7 +556,7 @@ func callSedFile(args json.RawMessage) (toolResult, error) {
 		ExpectedSHA256 string         `json:"expected_sha256"`
 		Edits          []fileops.Edit `json:"edits"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	dryRun := true
@@ -536,7 +580,7 @@ func callConfigBaseInspect(args json.RawMessage) (toolResult, error) {
 		Config string `json:"config"`
 		Limit  int    `json:"limit"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	result, err := configinspect.InspectBase(configinspect.Options{ConfigPath: in.Config, Limit: in.Limit})
@@ -551,7 +595,7 @@ func callConfigOverlayInspect(args json.RawMessage) (toolResult, error) {
 		Config string `json:"config"`
 		Limit  int    `json:"limit"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	result, err := configinspect.InspectOverlay(configinspect.Options{ConfigPath: in.Config, Limit: in.Limit})
@@ -572,7 +616,7 @@ func (s *Server) callConfigIntentInspect(args json.RawMessage) (toolResult, erro
 		RuntimeProfile      string `json:"runtime_profile"`
 		Limit               int    `json:"limit"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	view := strings.TrimSpace(in.View)
@@ -801,7 +845,7 @@ func (s *Server) callProxyGroupBuild(args json.RawMessage) (toolResult, error) {
 		SubscriptionConfig  string             `json:"subscription_config"`
 		SubscriptionRuntime string             `json:"subscription_runtime"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -860,7 +904,7 @@ func callPolicyGroupBuild(args json.RawMessage) (toolResult, error) {
 		Reason   string   `json:"reason"`
 		Boundary string   `json:"boundary"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	id := strings.TrimSpace(in.ID)
@@ -924,7 +968,7 @@ func canonicalBuildTarget(target string) string {
 
 func callCustomRulesBuild(args json.RawMessage) (toolResult, error) {
 	var in localconfig.CustomRule
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	id := strings.TrimSpace(in.ID)
@@ -962,7 +1006,7 @@ func callCustomRulesBuild(args json.RawMessage) (toolResult, error) {
 
 func callRuleProviderBuild(args json.RawMessage) (toolResult, error) {
 	var in localconfig.ExternalRuleProvider
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	provider, err := localconfig.NormalizeRuleProvider(in)
@@ -1016,6 +1060,9 @@ type configToolInput struct {
 	SubscriptionRuntime string `json:"subscription_runtime"`
 	RulesCache          string `json:"rules_cache"`
 	RuntimeProfile      string `json:"runtime_profile"`
+	Core                string `json:"core"`
+	RuntimeDir          string `json:"runtime_dir"`
+	ValidationCache     string `json:"validation_cache"`
 	Selection           string `json:"selection"`
 	Output              string `json:"output"`
 	PatchesDir          string `json:"patches_dir"`
@@ -1049,7 +1096,7 @@ type configPatchSummary struct {
 
 func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	var in configToolInput
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	s.applyConfigToolDefaults(&in)
@@ -1095,9 +1142,10 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 			"output":               in.Output,
 			"patches_dir":          in.PatchesDir,
 		},
-		"intent":  intent,
-		"render":  s.configRenderState(in, intent, generated.Present),
-		"patches": listConfigPatches(in.PatchesDir, limit),
+		"intent":     intent,
+		"render":     s.configRenderState(in, intent, generated.Present),
+		"validation": s.configValidationState(in, generated.Present),
+		"patches":    listConfigPatches(in.PatchesDir, limit),
 		"usage_guidance": []string{
 			"config_status is the preferred tool for checking durable localClash routing intent and generated overlay state.",
 			"By default config_status is lightweight and does not resolve subscription-node matches or inspect generated overlay details; pass detail=true when a full audit is needed.",
@@ -1118,6 +1166,29 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	}
 	status["next_actions"] = configStatusNextActions(status["render"].(configRenderState))
 	return jsonToolResult(status)
+}
+
+func (s *Server) configValidationState(in configToolInput, generatedPresent bool) any {
+	if !generatedPresent {
+		return map[string]any{
+			"status":       "missing_generated_config",
+			"cache_path":   validationCachePath(in.ValidationCache, in.RuntimeDir),
+			"next_actions": []string{"call config_render before runtime validation"},
+		}
+	}
+	if strings.TrimSpace(in.Core) == "" {
+		return map[string]any{
+			"status":       "missing_core_path",
+			"cache_path":   validationCachePath(in.ValidationCache, in.RuntimeDir),
+			"next_actions": []string{"configure or download a Mihomo core before runtime validation"},
+		}
+	}
+	return mihomotest.CacheStatus(context.Background(), mihomotest.ValidationOptions{
+		CorePath:   in.Core,
+		ConfigPath: in.Output,
+		WorkDir:    in.RuntimeDir,
+		CachePath:  validationCachePath(in.ValidationCache, in.RuntimeDir),
+	})
 }
 
 func trimConfigStatusIntent(intent *configinspect.IntentResult) {
@@ -1168,7 +1239,7 @@ func configStatusNextActions(render configRenderState) []string {
 
 func (s *Server) callConfigRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in configToolInput
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	s.applyConfigToolDefaults(&in)
@@ -1225,11 +1296,12 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 		source = "durable_state"
 		warnings = append(warnings, resolved.Warnings...)
 		finishTaskStage(finish, nil, map[string]any{
-			"selection":     in.Selection,
-			"proxy_groups":  len(resolved.ProxyGroups),
-			"policy_groups": len(resolved.PolicyGroups),
-			"packs":         len(resolved.Packs),
-			"custom_rules":  len(resolved.CustomRules),
+			"selection":          in.Selection,
+			"proxy_groups":       len(resolved.ProxyGroups),
+			"policy_groups":      len(resolved.PolicyGroups),
+			"packs":              len(resolved.Packs),
+			"custom_rules":       len(resolved.CustomRules),
+			"enabled_rule_packs": len(resolved.RulePacks),
 		})
 	}
 	finish := startTaskStage(ctx, "render_generated_config", map[string]any{"output": in.Output})
@@ -1274,7 +1346,7 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 		RuntimeDir           string                   `json:"runtime_dir"`
 		Overlay              configplan.OverlayIntent `json:"overlay"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	test := false
@@ -1345,7 +1417,7 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 		Core                 string `json:"core"`
 		RuntimeDir           string `json:"runtime_dir"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	test := true
@@ -1400,6 +1472,14 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 		OnStage:             configPlanTaskLogger(ctx),
 	})
 	if err != nil {
+		if result.PlanID != "" {
+			tool, encodeErr := jsonToolResult(result)
+			if encodeErr != nil {
+				return toolResult{}, encodeErr
+			}
+			tool.IsError = true
+			return tool, nil
+		}
 		return toolResult{}, err
 	}
 	return jsonToolResult(result)
@@ -1413,7 +1493,7 @@ func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 		Limit  int    `json:"limit"`
 		Cache  string `json:"cache"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -1443,7 +1523,7 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 		Cache      string `json:"cache"`
 		RuntimeDir string `json:"runtime_dir"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -1471,7 +1551,7 @@ func (s *Server) callPackRulesRead(ctx context.Context, args json.RawMessage) (t
 		Sources       string `json:"sources"`
 		ProviderCache string `json:"provider_cache"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
@@ -1504,7 +1584,7 @@ func (s *Server) callPackRulesPrefetch(ctx context.Context, args json.RawMessage
 		Sources       string   `json:"sources"`
 		ProviderCache string   `json:"provider_cache"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
@@ -1538,7 +1618,7 @@ func (s *Server) callPackRulesQuery(ctx context.Context, args json.RawMessage) (
 		Sources       string `json:"sources"`
 		ProviderCache string `json:"provider_cache"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
@@ -1585,7 +1665,7 @@ func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, erro
 		Merged     string `json:"merged"`
 		RuntimeDir string `json:"runtime_dir"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -1615,7 +1695,7 @@ func (s *Server) callSubscriptionNodesList(args json.RawMessage) (toolResult, er
 		Subscription string `json:"subscription"`
 		Limit        int    `json:"limit"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil && in.Subscription == "" {
@@ -1639,7 +1719,7 @@ func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, 
 		CaseSensitive bool     `json:"case_sensitive"`
 		Limit         int      `json:"limit"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil && in.Subscription == "" {
@@ -1704,7 +1784,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 		RuntimeProfileConfig string   `json:"runtime_profile"`
 		Output               string   `json:"output"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -1910,7 +1990,12 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 		impact.NextActions = []string{"read localclash.json", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
 		return impact
 	}
-	finishTaskStage(finish, nil, map[string]any{"proxy_groups": len(resolved.ProxyGroups), "policy_groups": len(resolved.PolicyGroups), "packs": len(resolved.Packs)})
+	finishTaskStage(finish, nil, map[string]any{
+		"proxy_groups":       len(resolved.ProxyGroups),
+		"policy_groups":      len(resolved.PolicyGroups),
+		"packs":              len(resolved.Packs),
+		"enabled_rule_packs": len(resolved.RulePacks),
+	})
 	impact.State = "auto_applied"
 	impact.Valid = true
 	impact.ProxyGroups = proxyGroupImpacts(config, resolved.Config)
@@ -2034,7 +2119,7 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 		DashboardDir string `json:"dashboard_dir"`
 		WorkDir      string `json:"workdir"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	opts := doctor.Options{
@@ -2072,7 +2157,7 @@ func (s *Server) callDoctor(ctx context.Context, args json.RawMessage) (toolResu
 
 func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct{}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	opts := envinspect.Options{}
@@ -2094,7 +2179,7 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 		Foreground bool   `json:"foreground"`
 		LogFile    string `json:"log_file"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -2111,7 +2196,7 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 			in.Core = s.state.Paths.CorePath
 		}
 		if in.Config == s.state.Paths.GeneratedConfig {
-			if err := s.ensureRunnableConfig(ctx, in.Config); err != nil {
+			if err := s.ensureRunnableConfig(in.Config); err != nil {
 				return jsonToolResult(runtimeErrorResult("generated config is unavailable: " + err.Error()))
 			}
 		}
@@ -2119,13 +2204,14 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := corerun.Start(ctx, corerun.StartOptions{
-		CorePath:       in.Core,
-		ConfigPath:     in.Config,
-		WorkDir:        in.RuntimeDir,
-		LogPath:        in.LogFile,
-		Foreground:     in.Foreground,
-		SkipConfigTest: true,
-		OnStage:        startRuntimeStageLogger(ctx),
+		CorePath:            in.Core,
+		ConfigPath:          in.Config,
+		WorkDir:             in.RuntimeDir,
+		LogPath:             in.LogFile,
+		Foreground:          in.Foreground,
+		SkipConfigTest:      false,
+		ValidationCachePath: validationCachePath("", in.RuntimeDir),
+		OnStage:             startRuntimeStageLogger(ctx),
 	})
 	if err != nil {
 		return jsonToolResult(runtimeErrorResult(err.Error()))
@@ -2149,7 +2235,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 		TimeoutMS  int    `json:"timeout_ms"`
 		Force      bool   `json:"force"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if in.Foreground {
@@ -2166,7 +2252,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 			in.Core = s.state.Paths.CorePath
 		}
 		if in.Config == s.state.Paths.GeneratedConfig {
-			if err := s.ensureRunnableConfig(ctx, in.Config); err != nil {
+			if err := s.ensureRunnableConfig(in.Config); err != nil {
 				return jsonToolResult(runtimeErrorResult("generated config is unavailable: " + err.Error()))
 			}
 		}
@@ -2174,13 +2260,14 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	result, err := corerun.Restart(ctx, corerun.RestartOptions{
-		CorePath:    in.Core,
-		ConfigPath:  in.Config,
-		WorkDir:     in.RuntimeDir,
-		LogPath:     in.LogFile,
-		StopTimeout: time.Duration(in.TimeoutMS) * time.Millisecond,
-		ForceKill:   in.Force,
-		OnStage:     restartRuntimeStageLogger(ctx),
+		CorePath:            in.Core,
+		ConfigPath:          in.Config,
+		WorkDir:             in.RuntimeDir,
+		LogPath:             in.LogFile,
+		ValidationCachePath: validationCachePath("", in.RuntimeDir),
+		StopTimeout:         time.Duration(in.TimeoutMS) * time.Millisecond,
+		ForceKill:           in.Force,
+		OnStage:             restartRuntimeStageLogger(ctx),
 	})
 	if err != nil {
 		return jsonToolResult(runtimeErrorResult(err.Error()))
@@ -2283,25 +2370,17 @@ func logGenericStage(ctx context.Context, stage, event string, durationMS int64,
 	appendTaskStage(ctx, "stage_"+event, stage, out)
 }
 
-func (s *Server) ensureRunnableConfig(ctx context.Context, configPath string) error {
+func (s *Server) ensureRunnableConfig(configPath string) error {
 	if fileExists(configPath) {
 		return nil
 	}
 	if s.state == nil {
 		return fmt.Errorf("missing %s", configPath)
 	}
-	if !fileExists(s.state.Paths.SubscriptionPath) {
-		if s.state.Config.Diagnostic != "" {
-			return fmt.Errorf("%s; call subscriptions_refresh before run_runtime", s.state.Config.Diagnostic)
-		}
-		return fmt.Errorf("effective subscription is unavailable; call subscriptions_refresh before run_runtime")
+	if s.state.Config.Diagnostic != "" {
+		return fmt.Errorf("%s; call config_render before run_runtime", s.state.Config.Diagnostic)
 	}
-	in := configToolInput{Output: configPath}
-	s.applyConfigToolDefaults(&in)
-	if _, err := renderCurrentConfig(ctx, in, true); err != nil {
-		return fmt.Errorf("render %s: %w", configPath, err)
-	}
-	return nil
+	return fmt.Errorf("missing %s; call config_render before run_runtime", configPath)
 }
 
 func runtimeErrorResult(message string) map[string]any {
@@ -2333,6 +2412,8 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
 		setDefault(&in.Output, s.state.Paths.GeneratedConfig)
+		setDefault(&in.Core, s.state.Paths.CorePath)
+		setDefault(&in.RuntimeDir, s.state.Paths.MihomoRuntimeDir)
 		if s.state.Paths.PacksSelectionPath != "" {
 			setDefault(&in.Selection, s.state.Paths.PacksSelectionPath)
 		}
@@ -2345,6 +2426,8 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 	setDefault(&in.SubscriptionRuntime, filepath.Join(".runtime", "subscriptions"))
 	setDefault(&in.Selection, "localclash-packs.gob")
 	setDefault(&in.Output, filepath.Join("generated", "mihomo.yaml"))
+	setDefault(&in.RuntimeDir, filepath.Join(".runtime", "mihomo"))
+	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
 	setDefault(&in.PatchesDir, filepath.Join(".runtime", "patches"))
 }
 
@@ -2423,6 +2506,13 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+func validationCachePath(path, runtimeDir string) string {
+	if strings.TrimSpace(path) != "" {
+		return path
+	}
+	return mihomotest.DefaultCachePath(runtimeDir)
+}
+
 func setDefault(value *string, fallback string) {
 	if strings.TrimSpace(*value) == "" && strings.TrimSpace(fallback) != "" {
 		*value = fallback
@@ -2442,7 +2532,7 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 		Subscription         string `json:"subscription"`
 		SubscriptionRuntime  string `json:"subscription_runtime"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -2595,7 +2685,7 @@ func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, err
 	var in struct {
 		Config string `json:"config"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil && in.Config == "" {
@@ -2615,7 +2705,7 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 		Core       string `json:"core"`
 		LogFile    string `json:"log_file"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {
@@ -2651,7 +2741,7 @@ type routerTakeoverInput struct {
 
 func (s *Server) routerTakeoverOptions(args json.RawMessage) (routertakeover.Options, error) {
 	var in routerTakeoverInput
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return routertakeover.Options{}, err
 	}
 	if s.state != nil {
@@ -2730,7 +2820,7 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 		TimeoutMS      int    `json:"timeout_ms"`
 		Force          bool   `json:"force"`
 	}
-	if err := json.Unmarshal(args, &in); err != nil {
+	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	if s.state != nil {

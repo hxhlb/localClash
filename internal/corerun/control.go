@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"localclash/internal/mihomotest"
 )
 
 type StatusOptions struct {
@@ -46,13 +48,15 @@ type StopOptions struct {
 }
 
 type RestartOptions struct {
-	CorePath    string
-	ConfigPath  string
-	WorkDir     string
-	LogPath     string
-	StopTimeout time.Duration
-	ForceKill   bool
-	OnStage     func(RestartStageEvent) `json:"-"`
+	CorePath            string
+	ConfigPath          string
+	WorkDir             string
+	LogPath             string
+	ValidationCachePath string
+	ForceConfigTest     bool
+	StopTimeout         time.Duration
+	ForceKill           bool
+	OnStage             func(RestartStageEvent) `json:"-"`
 }
 
 type RestartStageEvent struct {
@@ -64,10 +68,11 @@ type RestartStageEvent struct {
 }
 
 type RestartTimings struct {
-	StopMS   int64 `json:"stop_ms"`
-	StartMS  int64 `json:"start_ms"`
-	StatusMS int64 `json:"status_ms"`
-	TotalMS  int64 `json:"total_ms"`
+	ValidateMS int64 `json:"validate_ms,omitempty"`
+	StopMS     int64 `json:"stop_ms"`
+	StartMS    int64 `json:"start_ms"`
+	StatusMS   int64 `json:"status_ms"`
+	TotalMS    int64 `json:"total_ms"`
 }
 
 type StopResult struct {
@@ -93,14 +98,15 @@ type StopResult struct {
 }
 
 type RestartResult struct {
-	Restarted   bool           `json:"restarted"`
-	Stop        StopResult     `json:"stop"`
-	Start       StartResult    `json:"start"`
-	Status      StatusResult   `json:"status"`
-	Timings     RestartTimings `json:"timings"`
-	Error       string         `json:"error,omitempty"`
-	Warnings    []string       `json:"warnings,omitempty"`
-	NextActions []string       `json:"next_actions,omitempty"`
+	Restarted        bool                        `json:"restarted"`
+	ConfigValidation mihomotest.ValidationResult `json:"config_validation"`
+	Stop             StopResult                  `json:"stop"`
+	Start            StartResult                 `json:"start"`
+	Status           StatusResult                `json:"status"`
+	Timings          RestartTimings              `json:"timings"`
+	Error            string                      `json:"error,omitempty"`
+	Warnings         []string                    `json:"warnings,omitempty"`
+	NextActions      []string                    `json:"next_actions,omitempty"`
 }
 
 func Status(opts StatusOptions) StatusResult {
@@ -185,6 +191,8 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 		LogPath:        opts.LogPath,
 		SkipConfigTest: true,
 	})
+	startOpts.ValidationCachePath = opts.ValidationCachePath
+	startOpts.ForceConfigTest = opts.ForceConfigTest
 	runOpts := normalizeOptions(Options{
 		CorePath:   startOpts.CorePath,
 		ConfigPath: startOpts.ConfigPath,
@@ -206,6 +214,24 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 	if err := os.MkdirAll(filepath.Dir(runOpts.LogPath), 0o755); err != nil {
 		return result, err
 	}
+	validateStarted := time.Now()
+	stage(RestartStageEvent{Stage: "config_test", Event: "started"})
+	validation, err := validateConfig(ctx, runOpts, opts.ValidationCachePath, opts.ForceConfigTest)
+	result.ConfigValidation = validation
+	result.Timings.ValidateMS = elapsedMS(validateStarted)
+	if err != nil {
+		result.Error = err.Error()
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		result.NextActions = []string{
+			"inspect config_validation and fix generated config before restarting runtime",
+			"call config_render after durable localClash intent changes",
+			"call doctor --json for a full validation report",
+		}
+		stage(RestartStageEvent{Stage: "config_test", Event: "error", DurationMS: result.Timings.ValidateMS, Error: err.Error()})
+		return result, nil
+	}
+	stage(RestartStageEvent{Stage: "config_test", Event: "done", DurationMS: result.Timings.ValidateMS})
+
 	stopStarted := time.Now()
 	stage(RestartStageEvent{Stage: "stop", Event: "started"})
 	stop, err := Stop(StopOptions{
@@ -241,6 +267,8 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 		stage(RestartStageEvent{Stage: "start", Event: "error", DurationMS: result.Timings.StartMS, PID: start.PID, Error: err.Error()})
 		return result, nil
 	}
+	start.ConfigValidation = validation
+	result.Start = start
 	stage(RestartStageEvent{Stage: "start", Event: "done", DurationMS: result.Timings.StartMS, PID: start.PID})
 
 	statusStarted := time.Now()

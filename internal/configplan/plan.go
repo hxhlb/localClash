@@ -67,11 +67,12 @@ type StageEvent struct {
 }
 
 type OverlayIntent struct {
-	Packs         []OverlayPackIntent         `json:"packs,omitempty" yaml:"packs,omitempty"`
-	CustomRules   []OverlayCustomRuleIntent   `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
-	RuleProviders []OverlayRuleProviderIntent `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
-	ProxyGroups   []OverlayProxyGroupIntent   `json:"proxy_groups,omitempty" yaml:"proxy_groups,omitempty"`
-	PolicyGroups  []OverlayPolicyGroupIntent  `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
+	Packs            []OverlayPackIntent         `json:"packs,omitempty" yaml:"packs,omitempty"`
+	CustomRules      []OverlayCustomRuleIntent   `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
+	EnabledRulePacks []OverlayRulePackIntent     `json:"enabled_rule_packs,omitempty" yaml:"enabled_rule_packs,omitempty"`
+	RuleProviders    []OverlayRuleProviderIntent `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
+	ProxyGroups      []OverlayProxyGroupIntent   `json:"proxy_groups,omitempty" yaml:"proxy_groups,omitempty"`
+	PolicyGroups     []OverlayPolicyGroupIntent  `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
 }
 
 type OverlayPackIntent struct {
@@ -99,6 +100,7 @@ type OverlayPolicyGroupIntent struct {
 }
 
 type OverlayCustomRuleIntent = localconfig.CustomRule
+type OverlayRulePackIntent = localconfig.RulePackSelection
 type OverlayRuleProviderIntent = localconfig.ExternalRuleProvider
 
 type Result struct {
@@ -124,24 +126,32 @@ type PlanInputs struct {
 }
 
 type ApplyResult struct {
-	Applied       bool                `json:"applied"`
-	PlanID        string              `json:"patch_id"`
-	SummaryPath   string              `json:"summary_path"`
-	ConfigPath    string              `json:"config_path"`
-	SelectionPath string              `json:"selection_path"`
-	OutputPath    string              `json:"output_path"`
-	Valid         bool                `json:"valid"`
-	MihomoTest    MihomoTestResult    `json:"mihomo_test"`
-	Overlay       OverlaySummary      `json:"overlay"`
-	Render        configrender.Result `json:"render"`
-	Backups       []BackupResult      `json:"backups,omitempty"`
-	Warnings      []string            `json:"warnings"`
-	NextActions   []string            `json:"next_actions,omitempty"`
+	Applied       bool                   `json:"applied"`
+	PlanID        string                 `json:"patch_id"`
+	SummaryPath   string                 `json:"summary_path"`
+	ConfigPath    string                 `json:"config_path"`
+	SelectionPath string                 `json:"selection_path"`
+	OutputPath    string                 `json:"output_path"`
+	Valid         bool                   `json:"valid"`
+	Error         string                 `json:"error,omitempty"`
+	MihomoTest    MihomoTestResult       `json:"mihomo_test"`
+	Overlay       OverlaySummary         `json:"overlay"`
+	Render        configrender.Result    `json:"render"`
+	Backups       []BackupResult         `json:"backups,omitempty"`
+	Transaction   ApplyTransactionResult `json:"transaction"`
+	Warnings      []string               `json:"warnings"`
+	NextActions   []string               `json:"next_actions,omitempty"`
 }
 
 type BackupResult struct {
 	Source string `json:"source"`
 	Backup string `json:"backup"`
+}
+
+type ApplyTransactionResult struct {
+	Prepared bool     `json:"prepared"`
+	Atomic   bool     `json:"atomic"`
+	Targets  []string `json:"targets"`
 }
 
 type MihomoTestResult struct {
@@ -158,11 +168,12 @@ type MihomoTestResult struct {
 }
 
 type OverlaySummary struct {
-	Packs         []OverlayPackSummary         `json:"packs"`
-	CustomRules   []OverlayCustomRuleSummary   `json:"custom_rules"`
-	RuleProviders []OverlayRuleProviderSummary `json:"rule_providers"`
-	ProxyGroups   []OverlayProxyGroupSummary   `json:"proxy_groups"`
-	PolicyGroups  []OverlayPolicyGroupSummary  `json:"policy_groups"`
+	Packs            []OverlayPackSummary         `json:"packs"`
+	CustomRules      []OverlayCustomRuleSummary   `json:"custom_rules"`
+	EnabledRulePacks []OverlayRulePackSummary     `json:"enabled_rule_packs"`
+	RuleProviders    []OverlayRuleProviderSummary `json:"rule_providers"`
+	ProxyGroups      []OverlayProxyGroupSummary   `json:"proxy_groups"`
+	PolicyGroups     []OverlayPolicyGroupSummary  `json:"policy_groups"`
 }
 
 type OverlayPackSummary struct {
@@ -200,6 +211,14 @@ type OverlayCustomRuleSummary struct {
 	Rules     []localconfig.CustomRuleLine `json:"rules,omitempty"`
 }
 
+type OverlayRulePackSummary struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Target    string `json:"target"`
+	RuleCount int    `json:"rule_count"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type OverlayRuleProviderSummary struct {
 	ID       string `json:"id"`
 	Target   string `json:"target"`
@@ -214,6 +233,7 @@ type OverlayRuleProviderSummary struct {
 
 type ChangesSummary struct {
 	RuleProvidersAdded int `json:"rule_providers_added"`
+	RulePacksAdded     int `json:"rule_packs_added"`
 	ProxyGroupsAdded   int `json:"proxy_groups_added"`
 	PolicyGroupsAdded  int `json:"policy_groups_added"`
 	RulesAdded         int `json:"rules_added"`
@@ -221,8 +241,8 @@ type ChangesSummary struct {
 
 func Render(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
-	if len(opts.Overlay.Packs) == 0 && len(opts.Overlay.CustomRules) == 0 && len(opts.Overlay.RuleProviders) == 0 {
-		return Result{}, fmt.Errorf("overlay.packs, overlay.custom_rules, or overlay.rule_providers is required")
+	if len(opts.Overlay.Packs) == 0 && len(opts.Overlay.CustomRules) == 0 && len(opts.Overlay.EnabledRulePacks) == 0 && len(opts.Overlay.RuleProviders) == 0 {
+		return Result{}, fmt.Errorf("overlay.packs, overlay.custom_rules, overlay.enabled_rule_packs, or overlay.rule_providers is required")
 	}
 	stage := configPlanStageEmitter(opts.OnStage)
 
@@ -247,10 +267,11 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	overlaySummary := requestedOverlaySummary(resolved, opts.Overlay, opts.RulesCache)
 	warnings := resolved.Warnings
 	finish(nil, map[string]any{
-		"proxy_groups":  len(resolved.ProxyGroups),
-		"policy_groups": len(resolved.PolicyGroups),
-		"packs":         len(resolved.Packs),
-		"custom_rules":  len(resolved.CustomRules),
+		"proxy_groups":       len(resolved.ProxyGroups),
+		"policy_groups":      len(resolved.PolicyGroups),
+		"packs":              len(resolved.Packs),
+		"custom_rules":       len(resolved.CustomRules),
+		"enabled_rule_packs": len(resolved.RulePacks),
 	})
 
 	finish = stage("allocate_patch", map[string]any{"patches_dir": opts.OutputDir, "patch_name": opts.PlanName})
@@ -393,10 +414,11 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	overlaySummary := overlaySummaryFromResolved(resolved)
 	warnings := resolved.Warnings
 	finish(nil, map[string]any{
-		"proxy_groups":  len(resolved.ProxyGroups),
-		"policy_groups": len(resolved.PolicyGroups),
-		"packs":         len(resolved.Packs),
-		"custom_rules":  len(resolved.CustomRules),
+		"proxy_groups":       len(resolved.ProxyGroups),
+		"policy_groups":      len(resolved.PolicyGroups),
+		"packs":              len(resolved.Packs),
+		"custom_rules":       len(resolved.CustomRules),
+		"enabled_rule_packs": len(resolved.RulePacks),
 	})
 
 	finish = stage("prepare_temp_render", nil)
@@ -478,21 +500,28 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	result.Backups = backups
 	finish(nil, map[string]any{"backup_count": len(backups)})
 
-	finish = stage("write_active_config", map[string]any{"config": opts.ConfigPath, "selection": opts.SelectionPath, "output": opts.OutputPath})
-	if err := localconfig.Write(opts.ConfigPath, resolved.Config); err != nil {
-		finish(err, nil)
-		return ApplyResult{}, err
+	finish = stage("commit_active_transaction", map[string]any{"config": opts.ConfigPath, "selection": opts.SelectionPath, "output": opts.OutputPath})
+	transaction, err := commitApplyTargets(opts, resolved.Config, resolved.Selection, tempOutput, backups)
+	if err != nil {
+		result.Valid = false
+		result.Transaction = transaction
+		result.Error = err.Error()
+		result.NextActions = []string{
+			"Call config_status to verify the active durable intent, selection, and generated artifact after rollback.",
+			"Review the saved patch summary before retrying config_patch_apply.",
+			"Fix the filesystem or permission error reported by commit_active_transaction, then retry config_patch_apply with the same patch_id.",
+			"Use the backup paths in backups only for manual recovery if rollback verification shows a mismatch.",
+		}
+		finish(err, map[string]any{
+			"active_state": "rolled_back",
+			"candidate":    summaryPath,
+			"backup_dir":   opts.BackupDir,
+		})
+		return result, err
 	}
-	if err := localconfig.WriteSelection(opts.SelectionPath, resolved.Selection); err != nil {
-		finish(err, nil)
-		return ApplyResult{}, err
-	}
-	if err := copyFile(tempOutput, opts.OutputPath); err != nil {
-		finish(err, nil)
-		return ApplyResult{}, err
-	}
+	result.Transaction = transaction
 	result.Applied = true
-	finish(nil, nil)
+	finish(nil, map[string]any{"targets": transaction.Targets, "atomic": transaction.Atomic})
 	return result, nil
 }
 
@@ -672,12 +701,13 @@ func applyPlanInputDefaults(opts ApplyOptions, inputs PlanInputs) ApplyOptions {
 
 func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	config := localconfig.Config{
-		Version:       1,
-		ProxyGroups:   map[string]localconfig.ProxyGroup{},
-		PolicyGroups:  map[string]localconfig.PolicyGroup{},
-		Packs:         make([]localconfig.Pack, 0, len(overlay.Packs)),
-		CustomRules:   make([]localconfig.CustomRule, 0, len(overlay.CustomRules)),
-		RuleProviders: make([]localconfig.ExternalRuleProvider, 0, len(overlay.RuleProviders)),
+		Version:          1,
+		ProxyGroups:      map[string]localconfig.ProxyGroup{},
+		PolicyGroups:     map[string]localconfig.PolicyGroup{},
+		Packs:            make([]localconfig.Pack, 0, len(overlay.Packs)),
+		CustomRules:      make([]localconfig.CustomRule, 0, len(overlay.CustomRules)),
+		EnabledRulePacks: make([]localconfig.RulePackSelection, 0, len(overlay.EnabledRulePacks)),
+		RuleProviders:    make([]localconfig.ExternalRuleProvider, 0, len(overlay.RuleProviders)),
 	}
 	if len(overlay.PolicyGroups) > 0 {
 		config.Version = 2
@@ -704,6 +734,9 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	}
 	for _, custom := range overlay.CustomRules {
 		config.CustomRules = append(config.CustomRules, custom)
+	}
+	for _, pack := range overlay.EnabledRulePacks {
+		config.EnabledRulePacks = append(config.EnabledRulePacks, pack)
 	}
 	for _, provider := range overlay.RuleProviders {
 		config.RuleProviders = append(config.RuleProviders, provider)
@@ -743,6 +776,7 @@ func mergeOverlayConfig(base localconfig.Config, overlay localconfig.Config) loc
 	}
 	base.Packs = mergePacks(base.Packs, overlay.Packs)
 	base.CustomRules = mergeCustomRules(base.CustomRules, overlay.CustomRules)
+	base.EnabledRulePacks = mergeRulePacks(base.EnabledRulePacks, overlay.EnabledRulePacks)
 	base.RuleProviders = mergeRuleProviders(base.RuleProviders, overlay.RuleProviders)
 	if overlay.Version > base.Version {
 		base.Version = overlay.Version
@@ -751,6 +785,24 @@ func mergeOverlayConfig(base localconfig.Config, overlay localconfig.Config) loc
 		base.Version = 2
 	}
 	return base
+}
+
+func mergeRulePacks(base []localconfig.RulePackSelection, overlay []localconfig.RulePackSelection) []localconfig.RulePackSelection {
+	merged := append([]localconfig.RulePackSelection{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range overlay {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
 }
 
 func mergePacks(base []localconfig.Pack, overlay []localconfig.Pack) []localconfig.Pack {
@@ -821,11 +873,12 @@ func preserveExistingPolicyTemplate(path string, config localconfig.Config) loca
 
 func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 	summary := OverlaySummary{
-		Packs:         make([]OverlayPackSummary, 0, len(resolved.Packs)),
-		CustomRules:   make([]OverlayCustomRuleSummary, 0, len(resolved.CustomRules)),
-		RuleProviders: make([]OverlayRuleProviderSummary, 0, len(resolved.RuleProviders)),
-		ProxyGroups:   make([]OverlayProxyGroupSummary, 0, len(resolved.ProxyGroups)),
-		PolicyGroups:  make([]OverlayPolicyGroupSummary, 0, len(resolved.PolicyGroups)),
+		Packs:            make([]OverlayPackSummary, 0, len(resolved.Packs)),
+		CustomRules:      make([]OverlayCustomRuleSummary, 0, len(resolved.CustomRules)),
+		EnabledRulePacks: make([]OverlayRulePackSummary, 0, len(resolved.RulePacks)),
+		RuleProviders:    make([]OverlayRuleProviderSummary, 0, len(resolved.RuleProviders)),
+		ProxyGroups:      make([]OverlayProxyGroupSummary, 0, len(resolved.ProxyGroups)),
+		PolicyGroups:     make([]OverlayPolicyGroupSummary, 0, len(resolved.PolicyGroups)),
 	}
 	for _, pack := range resolved.Packs {
 		summary.Packs = append(summary.Packs, OverlayPackSummary{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
@@ -837,6 +890,15 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 			RuleCount: custom.RuleCount,
 			Reason:    custom.Reason,
 			Rules:     append([]localconfig.CustomRuleLine{}, custom.Rules...),
+		})
+	}
+	for _, pack := range resolved.RulePacks {
+		summary.EnabledRulePacks = append(summary.EnabledRulePacks, OverlayRulePackSummary{
+			ID:        pack.ID,
+			Name:      pack.Name,
+			Target:    pack.Target,
+			RuleCount: pack.RuleCount,
+			Reason:    pack.Reason,
 		})
 	}
 	for _, provider := range resolved.RuleProviders {
@@ -881,11 +943,12 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayIntent, rulesCache string) OverlaySummary {
 	full := overlaySummaryFromResolved(resolved)
 	summary := OverlaySummary{
-		Packs:         make([]OverlayPackSummary, 0, len(overlay.Packs)),
-		CustomRules:   make([]OverlayCustomRuleSummary, 0, len(overlay.CustomRules)),
-		RuleProviders: make([]OverlayRuleProviderSummary, 0, len(overlay.RuleProviders)),
-		ProxyGroups:   make([]OverlayProxyGroupSummary, 0, len(overlay.ProxyGroups)),
-		PolicyGroups:  make([]OverlayPolicyGroupSummary, 0, len(overlay.PolicyGroups)),
+		Packs:            make([]OverlayPackSummary, 0, len(overlay.Packs)),
+		CustomRules:      make([]OverlayCustomRuleSummary, 0, len(overlay.CustomRules)),
+		EnabledRulePacks: make([]OverlayRulePackSummary, 0, len(overlay.EnabledRulePacks)),
+		RuleProviders:    make([]OverlayRuleProviderSummary, 0, len(overlay.RuleProviders)),
+		ProxyGroups:      make([]OverlayProxyGroupSummary, 0, len(overlay.ProxyGroups)),
+		PolicyGroups:     make([]OverlayPolicyGroupSummary, 0, len(overlay.PolicyGroups)),
 	}
 	packsByID := map[string]OverlayPackSummary{}
 	for _, item := range full.Packs {
@@ -919,6 +982,17 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 		id := strings.TrimSpace(item.ID)
 		if found, ok := customRulesByID[id]; ok {
 			summary.CustomRules = append(summary.CustomRules, found)
+		}
+	}
+
+	rulePacksByID := map[string]OverlayRulePackSummary{}
+	for _, item := range full.EnabledRulePacks {
+		rulePacksByID[item.ID] = item
+	}
+	for _, item := range overlay.EnabledRulePacks {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := rulePacksByID[id]; ok {
+			summary.EnabledRulePacks = append(summary.EnabledRulePacks, found)
 		}
 	}
 
@@ -962,6 +1036,7 @@ func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) Ch
 		ProxyGroupsAdded:   len(overlay.ProxyGroups),
 		PolicyGroupsAdded:  len(overlay.PolicyGroups),
 		RuleProvidersAdded: len(overlay.RuleProviders),
+		RulePacksAdded:     len(overlay.EnabledRulePacks),
 		RulesAdded:         len(summary.Packs) + len(summary.RuleProviders),
 	}
 	for _, pack := range summary.Packs {
@@ -971,6 +1046,9 @@ func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) Ch
 	}
 	for _, custom := range summary.CustomRules {
 		changes.RulesAdded += custom.RuleCount
+	}
+	for _, pack := range summary.EnabledRulePacks {
+		changes.RulesAdded += pack.RuleCount
 	}
 	return changes
 }
@@ -1251,11 +1329,12 @@ func resolveSummaryPath(opts ApplyOptions) (string, error) {
 
 func intentFromSummary(summary OverlaySummary) OverlayIntent {
 	intent := OverlayIntent{
-		Packs:         make([]OverlayPackIntent, 0, len(summary.Packs)),
-		CustomRules:   make([]OverlayCustomRuleIntent, 0, len(summary.CustomRules)),
-		RuleProviders: make([]OverlayRuleProviderIntent, 0, len(summary.RuleProviders)),
-		ProxyGroups:   make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
-		PolicyGroups:  make([]OverlayPolicyGroupIntent, 0, len(summary.PolicyGroups)),
+		Packs:            make([]OverlayPackIntent, 0, len(summary.Packs)),
+		CustomRules:      make([]OverlayCustomRuleIntent, 0, len(summary.CustomRules)),
+		EnabledRulePacks: make([]OverlayRulePackIntent, 0, len(summary.EnabledRulePacks)),
+		RuleProviders:    make([]OverlayRuleProviderIntent, 0, len(summary.RuleProviders)),
+		ProxyGroups:      make([]OverlayProxyGroupIntent, 0, len(summary.ProxyGroups)),
+		PolicyGroups:     make([]OverlayPolicyGroupIntent, 0, len(summary.PolicyGroups)),
 	}
 	for _, pack := range summary.Packs {
 		intent.Packs = append(intent.Packs, OverlayPackIntent{ID: pack.ID, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
@@ -1266,6 +1345,13 @@ func intentFromSummary(summary OverlaySummary) OverlayIntent {
 			Target: custom.Target,
 			Reason: custom.Reason,
 			Rules:  append([]localconfig.CustomRuleLine{}, custom.Rules...),
+		})
+	}
+	for _, pack := range summary.EnabledRulePacks {
+		intent.EnabledRulePacks = append(intent.EnabledRulePacks, localconfig.RulePackSelection{
+			ID:     pack.ID,
+			Target: pack.Target,
+			Reason: pack.Reason,
 		})
 	}
 	for _, provider := range summary.RuleProviders {
@@ -1325,6 +1411,182 @@ func backupApplyTargets(opts ApplyOptions) ([]BackupResult, error) {
 		backups = append(backups, BackupResult{Source: target.source, Backup: backup})
 	}
 	return backups, nil
+}
+
+type applyCommitFile struct {
+	target string
+	temp   string
+	backup string
+	exists bool
+}
+
+var renameFile = os.Rename
+
+func commitApplyTargets(opts ApplyOptions, config localconfig.Config, selection rules.Selection, renderedConfig string, backups []BackupResult) (ApplyTransactionResult, error) {
+	backupBySource := map[string]string{}
+	for _, backup := range backups {
+		backupBySource[backup.Source] = backup.Backup
+	}
+	files := []applyCommitFile{
+		{target: opts.ConfigPath, backup: backupBySource[opts.ConfigPath], exists: fileExists(opts.ConfigPath)},
+		{target: opts.SelectionPath, backup: backupBySource[opts.SelectionPath], exists: fileExists(opts.SelectionPath)},
+		{target: opts.OutputPath, backup: backupBySource[opts.OutputPath], exists: fileExists(opts.OutputPath)},
+	}
+	cleanup := func() {
+		for _, file := range files {
+			if file.temp != "" {
+				_ = os.Remove(file.temp)
+			}
+		}
+	}
+	defer cleanup()
+
+	var err error
+	if files[0].temp, err = prepareConfigTemp(files[0].target, opts.PlanID, config); err != nil {
+		return ApplyTransactionResult{}, err
+	}
+	if files[1].temp, err = prepareSelectionTemp(files[1].target, opts.PlanID, selection); err != nil {
+		return ApplyTransactionResult{}, err
+	}
+	if files[2].temp, err = prepareRenderedTemp(files[2].target, opts.PlanID, renderedConfig); err != nil {
+		return ApplyTransactionResult{}, err
+	}
+	for _, file := range files {
+		if err := fsyncFile(file.temp); err != nil {
+			return ApplyTransactionResult{}, err
+		}
+		if err := fsyncDir(filepath.Dir(file.temp)); err != nil {
+			return ApplyTransactionResult{}, err
+		}
+	}
+
+	transaction := ApplyTransactionResult{Prepared: true, Atomic: true}
+	for _, file := range files {
+		transaction.Targets = append(transaction.Targets, file.target)
+	}
+	if err := commitPreparedFiles(files); err != nil {
+		return transaction, err
+	}
+	return transaction, nil
+}
+
+func prepareConfigTemp(target, planID string, config localconfig.Config) (string, error) {
+	temp, err := tempSibling(target, planID)
+	if err != nil {
+		return "", err
+	}
+	if err := localconfig.Write(temp, config); err != nil {
+		_ = os.Remove(temp)
+		return "", err
+	}
+	return temp, nil
+}
+
+func prepareSelectionTemp(target, planID string, selection rules.Selection) (string, error) {
+	temp, err := tempSibling(target, planID)
+	if err != nil {
+		return "", err
+	}
+	if err := localconfig.WriteSelection(temp, selection); err != nil {
+		_ = os.Remove(temp)
+		return "", err
+	}
+	return temp, nil
+}
+
+func prepareRenderedTemp(target, planID string, renderedConfig string) (string, error) {
+	temp, err := tempSibling(target, planID)
+	if err != nil {
+		return "", err
+	}
+	if err := copyFile(renderedConfig, temp); err != nil {
+		_ = os.Remove(temp)
+		return "", err
+	}
+	return temp, nil
+}
+
+func tempSibling(target, planID string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+"."+slugify(planID)+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func commitPreparedFiles(files []applyCommitFile) error {
+	var committed []applyCommitFile
+	for _, file := range files {
+		if err := renameFile(file.temp, file.target); err != nil {
+			if rollbackErr := rollbackCommittedFiles(committed); rollbackErr != nil {
+				return fmt.Errorf("commit %s failed: %w; rollback failed: %v", file.target, err, rollbackErr)
+			}
+			return fmt.Errorf("commit %s failed: %w; active config rolled back", file.target, err)
+		}
+		committed = append(committed, file)
+		if err := fsyncDir(filepath.Dir(file.target)); err != nil {
+			if rollbackErr := rollbackCommittedFiles(committed); rollbackErr != nil {
+				return fmt.Errorf("commit %s fsync failed: %w; rollback failed: %v", file.target, err, rollbackErr)
+			}
+			return fmt.Errorf("commit %s fsync failed: %w; active config rolled back", file.target, err)
+		}
+	}
+	return nil
+}
+
+func rollbackCommittedFiles(files []applyCommitFile) error {
+	var errs []string
+	for i := len(files) - 1; i >= 0; i-- {
+		file := files[i]
+		if file.exists {
+			if file.backup == "" {
+				errs = append(errs, fmt.Sprintf("%s had no backup", file.target))
+				continue
+			}
+			if err := copyFile(file.backup, file.target); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: %v", file.target, err))
+				continue
+			}
+			if err := fsyncFile(file.target); err != nil {
+				errs = append(errs, fmt.Sprintf("%s fsync: %v", file.target, err))
+			}
+		} else if err := os.Remove(file.target); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Sprintf("%s remove: %v", file.target, err))
+		}
+		if err := fsyncDir(filepath.Dir(file.target)); err != nil {
+			errs = append(errs, fmt.Sprintf("%s dir fsync: %v", filepath.Dir(file.target), err))
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func fsyncFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
+}
+
+func fsyncDir(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
 }
 
 func copyFile(src, dst string) error {

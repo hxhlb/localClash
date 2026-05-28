@@ -86,7 +86,9 @@ category system.
 
 Optional rule packs are the primary web UI customization layer. Users should
 be able to enable or disable packs from the UI and choose the target behavior
-when a pack supports more than one target.
+when a pack supports more than one target. Targets are exact Mihomo/localClash
+targets such as `DIRECT`, `REJECT`, or a configured proxy/policy group name;
+there are no Go-side aliases such as `proxy` or `smart`.
 
 Examples:
 
@@ -111,8 +113,8 @@ First version schema:
   "name": "AI Services",
   "description": "Route common AI services through a selected target.",
   "version": 1,
-  "default_target": "proxy",
-  "target_options": ["proxy", "direct", "manual", "smart"],
+  "default_target": "⚡ 自动选择",
+  "target_options": ["⚡ 自动选择", "🎯 手动选择", "DIRECT"],
   "rules": [
     {"domain_suffix": "openai.com"},
     {"domain_suffix": "chatgpt.com"},
@@ -227,7 +229,11 @@ Current code has:
   communication/social/Telegram routing (including Telegram IP CIDR ranges),
   AI/developer routing, Steam,
   media/platform routing, games, and tail fallback routing
+- standalone local `rule-packs/*.json` files enabled through durable
+  `enabled_rule_packs`
 - renderer support for selected third-party packs
+- renderer support for enabled local rule packs, emitted after inline
+  `custom_rules` and before catalog/template packs
 - renderer support for inline `custom_rules`
 - renderer support for user-supplied external `rule_providers`
 - MCP patch tools for proxy groups, custom rules, external rule-providers,
@@ -235,7 +241,6 @@ Current code has:
 
 Current code still does not yet have:
 
-- standalone local rule pack files
 - UI support for policy template and rule pack selection
 - doctor checks for custom rule or external provider schema and target
   references
@@ -247,7 +252,9 @@ Current code still does not yet have:
 - `intent.proxy_groups` lists reusable exit groups such as region selectors and
   direct exits
 - `intent.policy_groups` lists business-layer Dashboard groups and their exits
-- `intent.packs` lists active rule packs and their targets
+- `intent.enabled_rule_packs` lists local rule packs selected from
+  `rule-packs/*.json`
+- `intent.packs` lists active generated/catalog rule packs and their targets
 - `overlay.rules` shows rendered localClash-managed rule targets
 
 That is enough for a careful Agent to discover that `localclash-default` is a
@@ -286,11 +293,10 @@ Build this in small steps:
    editing YAML directly.
 2. Add read-only MCP routing discovery tools so Agents can inspect default
    business groups without parsing the full `config_status` payload.
-3. Add declarative `rule-packs/*.json` for localClash-owned reusable packs.
-4. Add doctor checks for pack parsing, custom rule validity, target validity,
+3. Add doctor checks for pack parsing, custom rule validity, target validity,
    and missing providers.
-5. Add CLI flags for config path and dry-run diff.
-6. Expose the same model through the local web UI.
+4. Add CLI flags for config path and dry-run diff.
+5. Expose the same model through the local web UI.
 
 Do not start by adding many pack contents. First make the mechanism correct.
 

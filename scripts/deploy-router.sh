@@ -350,9 +350,14 @@ WORKDIR='${remote_workdir}'
 MCP_ADDR='${mcp_addr}'
 MCP_PATH='${mcp_path}'
 LOG_FILE='${mcp_log}'
+LOG_MAX_BYTES='524288'
 
 start_service() {
   mkdir -p "\$(dirname "\${LOG_FILE}")"
+  if [ -f "\${LOG_FILE}" ] && [ "\$(wc -c <"\${LOG_FILE}" 2>/dev/null || echo 0)" -gt "\${LOG_MAX_BYTES}" ]; then
+    rm -f "\${LOG_FILE}.1"
+    mv "\${LOG_FILE}" "\${LOG_FILE}.1"
+  fi
   procd_open_instance
   procd_set_param command /bin/sh -c "cd \"\${WORKDIR}\" && exec \"\${COMMAND}\" mcp --addr \"\${MCP_ADDR}\" --path \"\${MCP_PATH}\" >>\"\${LOG_FILE}\" 2>&1"
   procd_set_param respawn 3600 5 5

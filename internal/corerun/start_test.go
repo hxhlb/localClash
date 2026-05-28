@@ -29,6 +29,10 @@ func TestStartRejectsConfigTestFailure(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")
 	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
     echo bad config >&2
@@ -84,6 +88,10 @@ func TestStartIgnoresZombiePIDFile(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")
 	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
     echo configuration test is successful
@@ -121,6 +129,10 @@ func TestStartLaunchesBackgroundRuntime(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")
 	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
     echo configuration test is successful
@@ -162,6 +174,10 @@ func TestStartKillsRuntimeWhenPIDFileCannotBeWritten(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "mihomo")
 	writeStartExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
 for arg in "$@"; do
   if [ "$arg" = "-t" ]; then
     echo configuration test is successful

@@ -82,13 +82,14 @@ type PackBackend struct {
 }
 
 type Selection struct {
-	Version         int                    `json:"version"`
-	ProxyGroups     map[string]ProxyGroup  `json:"proxy_groups,omitempty"`
-	PolicyGroups    map[string]PolicyGroup `json:"policy_groups,omitempty"`
-	CustomRules     []CustomRule           `json:"custom_rules,omitempty"`
-	RuleProviders   []ExternalRuleProvider `json:"rule_providers,omitempty"`
-	EnabledPack     []SelectedPack         `json:"enabled_packs"`
-	RequiredTargets []string               `json:"required_targets,omitempty"`
+	Version         int                     `json:"version"`
+	ProxyGroups     map[string]ProxyGroup   `json:"proxy_groups,omitempty"`
+	PolicyGroups    map[string]PolicyGroup  `json:"policy_groups,omitempty"`
+	CustomRules     []CustomRule            `json:"custom_rules,omitempty"`
+	LocalRulePacks  []SelectedLocalRulePack `json:"local_rule_packs,omitempty"`
+	RuleProviders   []ExternalRuleProvider  `json:"rule_providers,omitempty"`
+	EnabledPack     []SelectedPack          `json:"enabled_packs"`
+	RequiredTargets []string                `json:"required_targets,omitempty"`
 }
 
 type ProxyGroup struct {
@@ -111,6 +112,14 @@ type SelectedPack struct {
 	Source string `json:"source"`
 	Pack   string `json:"pack"`
 	Target string `json:"target"`
+}
+
+type SelectedLocalRulePack struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Target    string `json:"target"`
+	Reason    string `json:"reason,omitempty"`
+	RuleCount int    `json:"rule_count"`
 }
 
 type CustomRule struct {
@@ -150,6 +159,7 @@ type RenderSelectionStats struct {
 	ProxyGroups           int
 	PolicyGroups          int
 	EnabledPacks          int
+	LocalRulePacks        int
 	CustomRules           int
 	RuleProviders         int
 	RenderedRules         int
@@ -162,6 +172,7 @@ func (stats RenderSelectionStats) Fields() map[string]any {
 		"proxy_groups":            stats.ProxyGroups,
 		"policy_groups":           stats.PolicyGroups,
 		"enabled_packs":           stats.EnabledPacks,
+		"local_rule_packs":        stats.LocalRulePacks,
 		"custom_rules":            stats.CustomRules,
 		"rule_providers":          stats.RuleProviders,
 		"rendered_rules":          stats.RenderedRules,
@@ -256,6 +267,7 @@ func RenderSelectionWithStats(selection Selection, cacheDir string, proxyNames [
 		ProxyGroups:           len(selection.ProxyGroups),
 		PolicyGroups:          len(selection.PolicyGroups),
 		EnabledPacks:          len(selection.EnabledPack),
+		LocalRulePacks:        len(selection.LocalRulePacks),
 		CustomRules:           len(selection.CustomRules),
 		RuleProviders:         len(selection.RuleProviders),
 		RenderedRules:         len(fragment.Rules),
