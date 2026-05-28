@@ -623,6 +623,8 @@ func renderCustomRuleLine(id string, rule CustomRuleLine, target string) (string
 		kind = "IP-CIDR"
 	case "ip_cidr6":
 		kind = "IP-CIDR6"
+	case "geoip":
+		kind = "GEOIP"
 	default:
 		return "", fmt.Errorf("custom rule %q type %q is unsupported", id, rule.Type)
 	}

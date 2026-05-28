@@ -71,7 +71,7 @@ func Registry() []Tool {
 		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config patch by writing localclash-intent.json, deriving localclash-packs.gob, and regenerating generated/mihomo.yaml without starting the runtime. Use the exact patch_id returned by config_patch_create."},
 		{Name: "config_patch_create", SafetyLevel: SafeWrite, Description: "Create a reviewable config patch and candidate Mihomo config from proxy groups, packs, and custom rules. It does not modify active localclash-intent.json or generated/mihomo.yaml and does not run Mihomo config test by default; config_patch_apply is the validation boundary."},
 		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated/mihomo.yaml from the current durable localclash-intent.json source of truth, subscription, policy template graph, and runtime profile. Does not read patches and does not start runtime."},
-		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains or CIDRs before adding them to a config patch."},
+		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains, CIDRs, or GEOIP tags before adding them to a config patch."},
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read rules for one exact source/pack pair, downloading missing provider-cache entries for that pack only, and return source/pack/type/render_strategy/component metadata."},
 		{Name: "policy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a business-layer policy group that routes one rule domain, app, or scenario to existing exits such as HK, JP, US, ⚡ 自动选择, or DIRECT. This does not persist state; copy the returned policy_group into config_patch_create.overlay.policy_groups."},
@@ -314,9 +314,9 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6"}, "description": "Mihomo rule type to generate."},
-				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, or CIDR value."},
-				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR rules when needed."},
+				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6", "geoip"}, "description": "Mihomo rule type to generate."},
+				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, CIDR, or GEOIP tag value."},
+				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR or GEOIP rules when needed."},
 			},
 			"required": []string{"type", "value"},
 		}
@@ -363,9 +363,9 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6"}, "description": "Mihomo rule type to generate."},
-				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, or CIDR value."},
-				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR rules when needed."},
+				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6", "geoip"}, "description": "Mihomo rule type to generate."},
+				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, CIDR, or GEOIP tag value."},
+				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR or GEOIP rules when needed."},
 			},
 			"required": []string{"type", "value"},
 		}
@@ -440,7 +440,7 @@ func inputSchemaForTool(name string) map[string]any {
 					"additionalProperties": false,
 					"properties": map[string]any{
 						"packs":              map[string]any{"type": "array", "items": packIntent},
-						"transport_rules":    map[string]any{"type": "array", "items": transportRuleIntent, "description": "High-priority transport rules rendered after the local safety baseline and before domain/CIDR custom rules and catalog packs. Use for AND/NETWORK/DST-PORT rules such as QUIC UDP/443."},
+						"transport_rules":    map[string]any{"type": "array", "items": transportRuleIntent, "description": "High-priority transport rules rendered after the local safety baseline and before domain/CIDR/GEOIP custom rules and catalog packs. Use for AND/NETWORK/DST-PORT rules such as QUIC UDP/443."},
 						"custom_rules":       map[string]any{"type": "array", "items": customRuleIntent},
 						"enabled_rule_packs": map[string]any{"type": "array", "items": localRulePackIntent, "description": "Standalone local rule packs backed by rule-packs/*.json and rendered after custom rules but before catalog/template packs."},
 						"rule_providers":     map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},

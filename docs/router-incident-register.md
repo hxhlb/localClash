@@ -147,13 +147,14 @@ Current explanation:
 - The new default relied on GEOSITE category routing for Telegram. Telegram
   clients can connect directly to Telegram IP ranges without exposing a domain
   or SNI that `GEOSITE,telegram` can match.
-- The default template now adds explicit Telegram IPv4/IPv6 CIDR custom rules
-  targeting the communication policy group.
+- The default template now adds a `GEOIP,telegram` custom rule targeting the
+  communication policy group. Isolated `mihomo -t` validation on v1.19.25
+  loaded the Telegram GeoIP rule with 12 records.
 
 Required verification:
 
 - render the default patch set
-- confirm generated Mihomo rules include the Telegram CIDRs before fallback
+- confirm generated Mihomo rules include `GEOIP,telegram` before fallback
 - run Telegram traffic and confirm it matches the expected communication group
 
 ### Logging Gap

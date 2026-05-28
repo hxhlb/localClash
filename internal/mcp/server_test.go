@@ -1545,6 +1545,7 @@ func TestToolsCallCustomRulesBuildReturnsReusableIntent(t *testing.T) {
 				"target": "TempLine",
 				"rules": []map[string]any{
 					{"type": "domain_suffix", "value": "huggingface.co"},
+					{"type": "geoip", "value": "telegram", "no_resolve": true},
 				},
 				"reason": "User asked huggingface.co to use the temporary line.",
 			},
@@ -1555,8 +1556,8 @@ func TestToolsCallCustomRulesBuildReturnsReusableIntent(t *testing.T) {
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["target"] != "TempLine" || content["rule_count"] != float64(1) {
-		t.Fatalf("custom rule content = %+v, want TempLine with one rule", content)
+	if content["target"] != "TempLine" || content["rule_count"] != float64(2) {
+		t.Fatalf("custom rule content = %+v, want TempLine with two rules", content)
 	}
 }
 

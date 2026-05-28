@@ -99,7 +99,7 @@ packs: []
 |------|------|------|
 | 00 | `00-region-exits.json` | 全局直连出口 + 6 个区域出口（TW/SG/JP/US/KR/HK），每个通过 name_regex 匹配订阅节点名 |
 | 10 | `10-direct-baseline.json` | REJECT 规则 + 私有/追踪器/下载/大陆直连 packs |
-| 20 | `20-communication-social.json` | 通讯 + 社交媒体 + Telegram（含 IP CIDR 规则） |
+| 20 | `20-communication-social.json` | 通讯 + 社交媒体 + Telegram（含 GEOIP 规则） |
 | 30 | `30-ai-dev-speedtest.json` | ChatGPT + AI + GitHub + Speedtest 业务分组 |
 | 40 | `40-steam.json` | Steam 业务路由 |
 | 50 | `50-platform-media.json` | Apple/Google/Microsoft/TikTok/流媒体平台分组 |

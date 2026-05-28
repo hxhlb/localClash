@@ -332,7 +332,7 @@ MCP patch-building tools:
   `exits` point to existing `proxy_groups` such as `HK`, `JP`, `⚡ 自动选择`, or to
   terminal targets such as `DIRECT`.
 - `custom_rules_build`: build and validate user rules such as domains, domain
-  suffixes, or CIDRs that share one target.
+  suffixes, CIDRs, or GEOIP tags that share one target.
 - `rule_provider_build`: build and validate a user-supplied external Mihomo
   rule-provider, such as `US-Proxy` from a raw GitHub URL, before adding it to
   `config_patch_create.overlay.rule_providers`.

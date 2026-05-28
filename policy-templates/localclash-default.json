@@ -1,7 +1,7 @@
 {
   "id": "localclash-default",
   "name": "localClash Default",
-  "description": "Aethersailor-like default policy using v2fly-dlc GEOSITE packs for common categories.",
+  "description": "Aethersailor-like default policy using GEOSITE packs and GEOIP coverage for common categories.",
   "default": true,
   "patches": [
     {

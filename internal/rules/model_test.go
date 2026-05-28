@@ -581,6 +581,7 @@ func TestRenderFragmentRendersCustomRulesBeforePacks(t *testing.T) {
 				Target: "TempLine",
 				Rules: []CustomRuleLine{
 					{Type: "domain_suffix", Value: "huggingface.co"},
+					{Type: "geoip", Value: "telegram", NoResolve: true},
 				},
 			},
 		},
@@ -595,8 +596,11 @@ func TestRenderFragmentRendersCustomRulesBeforePacks(t *testing.T) {
 	if got := fragment.Rules[0]; got != "DOMAIN-SUFFIX,huggingface.co,TempLine" {
 		t.Fatalf("first rule = %q, want custom rule before packs", got)
 	}
-	if got := fragment.Rules[1]; got != "RULE-SET,sukkaw_ai_non_ip,TempLine" {
-		t.Fatalf("second rule = %q, want pack after custom rule", got)
+	if got := fragment.Rules[1]; got != "GEOIP,telegram,TempLine,no-resolve" {
+		t.Fatalf("second rule = %q, want GEOIP telegram custom rule", got)
+	}
+	if got := fragment.Rules[2]; got != "RULE-SET,sukkaw_ai_non_ip,TempLine" {
+		t.Fatalf("third rule = %q, want pack after custom rule", got)
 	}
 	if !proxyGroupNames(fragment.ProxyGroups)["TempLine"] {
 		t.Fatalf("missing proxy group TempLine in %+v", fragment.ProxyGroups)

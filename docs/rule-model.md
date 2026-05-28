@@ -102,7 +102,7 @@ Examples:
 ```
 
 Rule packs should be declarative files owned by localClash. They can include
-domain rules, domain suffix rules, IP CIDR rules, or references to rule
+domain rules, domain suffix rules, IP CIDR rules, GEOIP rules, or references to rule
 providers when that becomes necessary.
 
 First version schema:
@@ -226,7 +226,7 @@ Current code has:
   initialization into the same durable `localclash-intent.json` intent model that MCP
   patches use
 - default patch files for region exits, direct baselines,
-  communication/social/Telegram routing (including Telegram IP CIDR ranges),
+  communication/social/Telegram routing (including Telegram GEOIP coverage),
   AI/developer routing, Steam,
   media/platform routing, games, and tail fallback routing
 - standalone local `rule-packs/*.json` files enabled through durable

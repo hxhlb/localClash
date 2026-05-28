@@ -41,7 +41,7 @@
 - `config_configure`：改核心、runtime profile、policy template。
 - `proxy_group_build`：建立出口組，例如 HK/JP/US/⚡ 自动选择。
 - `policy_group_build`：建立業務組，例如 Steam -> HK/JP/US。
-- `custom_rules_build`：建立自訂 domain/CIDR 規則。
+- `custom_rules_build`：建立自訂 domain/CIDR/GEOIP 規則。
 - `rule_provider_build`：建立外部 rule-provider intent。
 - `config_patch_create`：生成可審核 patch，不改 active config。
 - `config_patch_apply`：套用指定 `patch_id`，寫入 durable config 並重建 generated config。

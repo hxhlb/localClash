@@ -62,68 +62,13 @@
     ],
     "custom_rules": [
       {
-        "id": "telegram-ip-ranges",
+        "id": "telegram-geoip",
         "target": "💬 通信服务",
-        "reason": "Route Telegram IP connections that do not expose a domain/SNI to GEOSITE.",
+        "reason": "Route Telegram IP connections with Mihomo GEOIP when they do not expose a domain/SNI to GEOSITE.",
         "rules": [
           {
-            "type": "ip_cidr",
-            "value": "91.105.192.0/23",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "91.108.4.0/22",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "91.108.8.0/21",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "91.108.16.0/21",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "91.108.56.0/22",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "95.161.64.0/20",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "149.154.160.0/20",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr",
-            "value": "185.76.151.0/24",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr6",
-            "value": "2001:67c:4e8::/48",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr6",
-            "value": "2001:b28:f23c::/47",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr6",
-            "value": "2001:b28:f23f::/48",
-            "no_resolve": true
-          },
-          {
-            "type": "ip_cidr6",
-            "value": "2a0a:f280::/32",
+            "type": "geoip",
+            "value": "telegram",
             "no_resolve": true
           }
         ]
