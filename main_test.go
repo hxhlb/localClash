@@ -471,6 +471,41 @@ func TestRunProductRuntimeStartRefreshesCoreVersionCache(t *testing.T) {
 	}
 }
 
+func TestRunProductTakeoverApplyFailureReturnsErrorEnvelope(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	writeMainTestFile(t, "localclash-runtime.json", `{"version":2,"mode":"router","core":"meta"}`)
+
+	output, err := captureStdoutAllowError(t, func() error {
+		return run([]string{"takeover", "apply", "--json"})
+	})
+	if err == nil || !strings.Contains(err.Error(), "run_runtime") {
+		t.Fatalf("takeover apply error = %v, output = %s; want run_runtime failure", err, output)
+	}
+	var result struct {
+		OK      bool   `json:"ok"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Details struct {
+			Error  string `json:"error"`
+			Checks []struct {
+				ID string `json:"id"`
+				OK bool   `json:"ok"`
+			} `json:"checks"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("takeover apply JSON = %q, error = %v", output, err)
+	}
+	if result.OK || result.Code != "router_takeover_apply_failed" || !strings.Contains(result.Message, "run_runtime") || !strings.Contains(result.Details.Error, "run_runtime") {
+		t.Fatalf("takeover apply result = %+v, want ok=false router takeover failure", result)
+	}
+	if len(result.Details.Checks) == 0 || result.Details.Checks[0].ID != "runtime_running" || result.Details.Checks[0].OK {
+		t.Fatalf("takeover apply checks = %+v, want runtime_running failure", result.Details.Checks)
+	}
+}
+
 func TestRunDoctorUsesLiveCoreProbeWhenBootstrapUsesCachedVersion(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LOCALCLASH_WORKDIR", dir)
@@ -625,10 +660,19 @@ func TestRunStopRemovesStalePIDFile(t *testing.T) {
 
 func captureStdout(t *testing.T, fn func() error) string {
 	t.Helper()
+	output, err := captureStdoutAllowError(t, fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return output
+}
+
+func captureStdoutAllowError(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
 	original := os.Stdout
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
 	os.Stdout = writer
 	err = fn()
@@ -642,12 +686,9 @@ func captureStdout(t *testing.T, fn func() error) string {
 	})
 	data, readErr := io.ReadAll(reader)
 	if readErr != nil {
-		t.Fatal(readErr)
+		return "", readErr
 	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
+	return string(data), err
 }
 
 func writeMainTestFile(t *testing.T, path string, content string) {

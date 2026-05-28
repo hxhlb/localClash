@@ -3044,7 +3044,14 @@ func (s *Server) callRouterTakeoverApplySync(ctx context.Context, args json.RawM
 	if err != nil {
 		return toolResult{}, err
 	}
-	return jsonToolResult(result)
+	tool, err := jsonToolResult(result)
+	if err != nil {
+		return toolResult{}, err
+	}
+	if result.Error != "" {
+		tool.IsError = true
+	}
+	return tool, nil
 }
 
 func (s *Server) callRouterTakeoverStopSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
@@ -3057,7 +3064,14 @@ func (s *Server) callRouterTakeoverStopSync(ctx context.Context, args json.RawMe
 	if err != nil {
 		return toolResult{}, err
 	}
-	return jsonToolResult(result)
+	tool, err := jsonToolResult(result)
+	if err != nil {
+		return toolResult{}, err
+	}
+	if result.Error != "" {
+		tool.IsError = true
+	}
+	return tool, nil
 }
 
 func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {

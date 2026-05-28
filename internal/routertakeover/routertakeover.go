@@ -3,6 +3,7 @@ package routertakeover
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -65,6 +66,7 @@ type Result struct {
 	TunDevice      string   `json:"tun_device"`
 	LocalDNS       []string `json:"local_dns,omitempty"`
 	LocalDomains   []string `json:"local_domains,omitempty"`
+	Error          string   `json:"error,omitempty"`
 	Checks         []Check  `json:"checks"`
 	Warnings       []string `json:"warnings,omitempty"`
 	NextActions    []string `json:"next_actions,omitempty"`
@@ -142,7 +144,9 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 	opts = mergeProfileDefaults(opts, status)
 	result := baseResult(opts, status)
 	if status.Mode != runtimeprofile.ModeRouter {
-		result.Checks = append(result.Checks, check("profile_router", false, fmt.Sprintf("active profile mode is %s", status.Mode), "call config_configure with runtime_profile=router before router_takeover_apply"))
+		message := "call config_configure with runtime_profile=router before router_takeover_apply"
+		result.Error = message
+		result.Checks = append(result.Checks, check("profile_router", false, fmt.Sprintf("active profile mode is %s", status.Mode), message))
 		result.NextActions = []string{"call config_configure with runtime_profile=router", "call config_render", "call run_runtime", "call router_takeover_apply again"}
 		return result, nil
 	}
@@ -163,13 +167,16 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 		return result, nil
 	}
 	if !runtimeStatus.Running {
-		result.Checks = append(result.Checks, check("runtime_running", false, "localClash Mihomo runtime is not running", "call run_runtime before router_takeover_apply"))
+		message := "call run_runtime before router_takeover_apply"
+		result.Error = message
+		result.Checks = append(result.Checks, check("runtime_running", false, "localClash Mihomo runtime is not running", message))
 		result.NextActions = []string{"call run_runtime after user confirmation", "call router_takeover_apply again"}
 		return result, nil
 	}
 	finish = stage("apply_script", map[string]any{"state_dir": opts.StateDir, "tun_device": opts.TunDevice})
 	if _, err := defaultRunner(ctx, script); err != nil {
 		finish(err, map[string]any{"recovery": "runtime takeover state is non-persistent; reboot clears localClash-owned rules"})
+		result.Error = err.Error()
 		result.Checks = append(result.Checks, check("apply_script", false, "router takeover script applied", err.Error()))
 		result.NextActions = takeoverFailureNextActions("apply", err)
 		return result, nil
@@ -184,6 +191,11 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	finish(nil, map[string]any{"effective": result.Effective})
+	if !result.Effective {
+		result.Error = "router takeover verification failed after apply"
+		result.NextActions = takeoverFailureNextActions("apply", errors.New(result.Error))
+		return result, nil
+	}
 	result.Applied = true
 	return result, nil
 }
@@ -210,6 +222,7 @@ func Stop(ctx context.Context, opts Options) (Result, error) {
 	finish = stage("stop_script", map[string]any{"state_dir": opts.StateDir, "tun_device": opts.TunDevice})
 	if _, err := defaultRunner(ctx, script); err != nil {
 		finish(err, map[string]any{"recovery": "runtime takeover state is non-persistent; reboot clears localClash-owned rules"})
+		result.Error = err.Error()
 		result.Checks = append(result.Checks, check("stop_script", false, "router takeover cleanup script ran", err.Error()))
 		result.NextActions = takeoverFailureNextActions("stop", err)
 		return result, nil
@@ -446,17 +459,56 @@ func defaultRunner(ctx context.Context, command string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
-func applyScript(opts Options) string {
-	return fmt.Sprintf(`set -eu
-STATE_DIR=%s
-DNS_PORT=%d
-REDIR_PORT=%d
-TUN_DEVICE=%s
-FWMARK=%s
-ROUTE_TABLE=%s
-RULE_PREF=%s
-TUN_WAIT_SECONDS=30
+type shellScriptBuilder struct {
+	lines []string
+}
 
+func (builder *shellScriptBuilder) line(line string) {
+	builder.lines = append(builder.lines, line)
+}
+
+func (builder *shellScriptBuilder) raw(text string) {
+	text = strings.Trim(text, "\n")
+	if text == "" {
+		return
+	}
+	builder.lines = append(builder.lines, strings.Split(text, "\n")...)
+}
+
+func (builder *shellScriptBuilder) nft(lines []string) {
+	builder.line("nft -f - <<EOF_NFT")
+	builder.lines = append(builder.lines, lines...)
+	builder.line("EOF_NFT")
+}
+
+func (builder shellScriptBuilder) String() string {
+	return strings.Join(builder.lines, "\n") + "\n"
+}
+
+func applyScript(opts Options) string {
+	var script shellScriptBuilder
+	script.line("set -eu")
+	script.line("STATE_DIR=" + shellQuote(opts.StateDir))
+	script.line("DNS_PORT=" + strconv.Itoa(opts.DNSPort))
+	script.line("REDIR_PORT=" + strconv.Itoa(opts.RedirPort))
+	script.line("TUN_DEVICE=" + shellQuote(opts.TunDevice))
+	script.line("FWMARK=" + shellQuote(defaultFWMark))
+	script.line("ROUTE_TABLE=" + shellQuote(defaultRouteTable))
+	script.line("RULE_PREF=" + shellQuote(defaultRulePref))
+	script.line("TUN_WAIT_SECONDS=30")
+	script.raw(applyShellLibrary)
+	script.raw(applyRoutingSetup)
+	script.nft(applyBaseNftRules())
+	script.raw(`
+add_dynamic_localdns4
+add_dynamic_localdns6
+`)
+	script.nft(applyTakeoverNftRules())
+	script.raw(applyPostNftScript)
+	return script.String()
+}
+
+const applyShellLibrary = `
 command -v fw4 >/dev/null 2>&1
 command -v nft >/dev/null 2>&1
 mkdir -p "$STATE_DIR"
@@ -649,7 +701,9 @@ add_dynamic_localdns6() {
   done
   sort -u "$STATE_DIR/local_dns6" > "$STATE_DIR/local_dns6.tmp" 2>/dev/null && mv "$STATE_DIR/local_dns6.tmp" "$STATE_DIR/local_dns6" || true
 }
+`
 
+const applyRoutingSetup = `
 check_fw4_ready
 trap 'cleanup_localclash_state' ERR
 cleanup_localclash_state
@@ -662,41 +716,44 @@ ip route replace default dev "$TUN_DEVICE" table "$ROUTE_TABLE"
 while ip -6 rule del fwmark "$FWMARK" table "$ROUTE_TABLE" >/dev/null 2>&1; do :; done
 ip -6 rule add fwmark "$FWMARK" table "$ROUTE_TABLE" pref "$RULE_PREF" >/dev/null 2>&1 || true
 ip -6 route replace default dev "$TUN_DEVICE" table "$ROUTE_TABLE" >/dev/null 2>&1 || true
+`
 
-nft -f - <<EOF_NFT
-add set inet fw4 localclash_localnetwork { type ipv4_addr; flags interval; auto-merge; }
-add element inet fw4 localclash_localnetwork { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 }
-add set inet fw4 localclash_localdns4 { type ipv4_addr; flags interval; auto-merge; }
-add set inet fw4 localclash_localdns6 { type ipv6_addr; flags interval; auto-merge; }
-EOF_NFT
+func applyBaseNftRules() []string {
+	return []string{
+		"add set inet fw4 localclash_localnetwork { type ipv4_addr; flags interval; auto-merge; }",
+		"add element inet fw4 localclash_localnetwork { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 }",
+		"add set inet fw4 localclash_localdns4 { type ipv4_addr; flags interval; auto-merge; }",
+		"add set inet fw4 localclash_localdns6 { type ipv6_addr; flags interval; auto-merge; }",
+	}
+}
 
-add_dynamic_localdns4
-add_dynamic_localdns6
+func applyTakeoverNftRules() []string {
+	return []string{
+		"add chain inet fw4 localclash",
+		"add rule inet fw4 localclash ip daddr @localclash_localnetwork counter return",
+		"add rule inet fw4 localclash ct direction reply counter return",
+		"add rule inet fw4 localclash ip protocol tcp counter redirect to $REDIR_PORT",
+		"insert rule inet fw4 dstnat position 0 meta nfproto ipv4 ip protocol tcp counter jump localclash comment \"localClash TCP redirect\"",
+		"add chain inet fw4 localclash_mangle",
+		"add rule inet fw4 localclash_mangle meta l4proto { tcp, udp } iifname \"$TUN_DEVICE\" counter return",
+		"add rule inet fw4 localclash_mangle ip daddr @localclash_localnetwork counter return",
+		"add rule inet fw4 localclash_mangle ct direction reply counter return",
+		"add rule inet fw4 localclash_mangle ip protocol udp mark set $FWMARK counter accept",
+		"add rule inet fw4 localclash_mangle ip protocol icmp icmp type echo-request mark set $FWMARK counter accept comment \"localClash ICMP mark\"",
+		"insert rule inet fw4 mangle_prerouting position 0 meta nfproto ipv4 counter jump localclash_mangle comment \"localClash TUN mark\"",
+		"add chain inet fw4 localclash_dns_redirect",
+		"add rule inet fw4 localclash_dns_redirect ip daddr @localclash_localdns4 counter return comment \"localClash local DNS bypass\"",
+		"add rule inet fw4 localclash_dns_redirect ip6 daddr @localclash_localdns6 counter return comment \"localClash local DNS bypass\"",
+		"add rule inet fw4 localclash_dns_redirect meta l4proto { tcp, udp } th dport 53 counter redirect to $DNS_PORT comment \"localClash DNS hijack\"",
+		"insert rule inet fw4 dstnat position 0 meta l4proto { tcp, udp } th dport 53 counter jump localclash_dns_redirect comment \"localClash DNS hijack\"",
+		"insert rule inet fw4 forward position 0 meta nfproto ipv4 oifname \"$TUN_DEVICE\" counter accept comment \"localClash TUN forward\"",
+		"insert rule inet fw4 forward position 0 meta nfproto ipv4 iifname \"$TUN_DEVICE\" counter accept comment \"localClash TUN forward\"",
+		"insert rule inet fw4 input position 0 meta nfproto ipv4 iifname \"$TUN_DEVICE\" counter accept comment \"localClash TUN input\"",
+		"insert rule inet fw4 srcnat position 0 meta nfproto ipv4 oifname \"$TUN_DEVICE\" counter return comment \"localClash TUN postrouting\"",
+	}
+}
 
-nft -f - <<EOF_NFT
-add chain inet fw4 localclash
-add rule inet fw4 localclash ip daddr @localclash_localnetwork counter return
-add rule inet fw4 localclash ct direction reply counter return
-add rule inet fw4 localclash ip protocol tcp counter redirect to $REDIR_PORT
-insert rule inet fw4 dstnat position 0 meta nfproto ipv4 ip protocol tcp counter jump localclash comment "localClash TCP redirect"
-add chain inet fw4 localclash_mangle
-add rule inet fw4 localclash_mangle meta l4proto { tcp, udp } iifname "$TUN_DEVICE" counter return
-add rule inet fw4 localclash_mangle ip daddr @localclash_localnetwork counter return
-add rule inet fw4 localclash_mangle ct direction reply counter return
-add rule inet fw4 localclash_mangle ip protocol udp mark set $FWMARK counter accept
-add rule inet fw4 localclash_mangle ip protocol icmp icmp type echo-request mark set $FWMARK counter accept comment "localClash ICMP mark"
-insert rule inet fw4 mangle_prerouting position 0 meta nfproto ipv4 counter jump localclash_mangle comment "localClash TUN mark"
-add chain inet fw4 localclash_dns_redirect
-add rule inet fw4 localclash_dns_redirect ip daddr @localclash_localdns4 counter return comment "localClash local DNS bypass"
-add rule inet fw4 localclash_dns_redirect ip6 daddr @localclash_localdns6 counter return comment "localClash local DNS bypass"
-add rule inet fw4 localclash_dns_redirect counter redirect to $DNS_PORT comment "localClash DNS hijack"
-insert rule inet fw4 dstnat position 0 meta l4proto { tcp, udp } th dport 53 counter jump localclash_dns_redirect comment "localClash DNS hijack"
-insert rule inet fw4 forward position 0 meta nfproto ipv4 oifname "$TUN_DEVICE" counter accept comment "localClash TUN forward"
-insert rule inet fw4 forward position 0 meta nfproto ipv4 iifname "$TUN_DEVICE" counter accept comment "localClash TUN forward"
-insert rule inet fw4 input position 0 meta nfproto ipv4 iifname "$TUN_DEVICE" counter accept comment "localClash TUN input"
-insert rule inet fw4 srcnat position 0 meta nfproto ipv4 oifname "$TUN_DEVICE" counter return comment "localClash TUN postrouting"
-EOF_NFT
-
+const applyPostNftScript = `
 add_dynamic_localnetwork4
 
 nft 'add set inet fw4 localclash_localnetwork6 { type ipv6_addr; flags interval; auto-merge; }' >/dev/null 2>&1 || true
@@ -725,14 +782,19 @@ nft "insert rule inet fw4 srcnat position 0 meta nfproto ipv6 oifname \"$TUN_DEV
 
 printf 'applied\n' > "$STATE_DIR/status"
 trap - ERR
-`, shellQuote(opts.StateDir), opts.DNSPort, opts.RedirPort, shellQuote(opts.TunDevice), shellQuote(defaultFWMark), shellQuote(defaultRouteTable), shellQuote(defaultRulePref))
-}
+`
 
 func stopScript(opts Options) string {
-	return fmt.Sprintf(`set -eu
-STATE_DIR=%s
-FWMARK=%s
-ROUTE_TABLE=%s
+	var script shellScriptBuilder
+	script.line("set -eu")
+	script.line("STATE_DIR=" + shellQuote(opts.StateDir))
+	script.line("FWMARK=" + shellQuote(defaultFWMark))
+	script.line("ROUTE_TABLE=" + shellQuote(defaultRouteTable))
+	script.raw(stopShellBody)
+	return script.String()
+}
+
+const stopShellBody = `
 for chain in dstnat nat_output mangle_prerouting mangle_output forward input srcnat; do
   nft -a list chain inet fw4 "$chain" 2>/dev/null | awk '/localClash/{print $NF}' | sort -rn | while read -r handle; do
     [ -n "$handle" ] && nft delete rule inet fw4 "$chain" handle "$handle" 2>/dev/null || true
@@ -751,8 +813,7 @@ ip route del default table "$ROUTE_TABLE" >/dev/null 2>&1 || true
 while ip -6 rule del fwmark "$FWMARK" table "$ROUTE_TABLE" >/dev/null 2>&1; do :; done
 ip -6 route del default table "$ROUTE_TABLE" >/dev/null 2>&1 || true
 rm -f "$STATE_DIR/status" "$STATE_DIR/local_dns4" "$STATE_DIR/local_dns6" "$STATE_DIR/local_domains" "$STATE_DIR/local_dns4.tmp" "$STATE_DIR/local_dns6.tmp" "$STATE_DIR/local_domains.tmp" >/dev/null 2>&1 || true
-	`, shellQuote(opts.StateDir), shellQuote(defaultFWMark), shellQuote(defaultRouteTable))
-}
+`
 
 func shellQuote(value string) string {
 	if value == "" {
