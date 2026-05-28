@@ -2,6 +2,7 @@ package routertakeover
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,7 @@ func TestApplyDryRunBuildsLocalClashOwnedScript(t *testing.T) {
 	if !strings.Contains(result.Script, `comment "localClash TCP redirect"`) {
 		t.Fatalf("nft comments must be quoted for nft parser, got:\n%s", result.Script)
 	}
-	for _, forbidden := range []string{"uci ", "/etc/config/firewall", "/var/etc/localclash", "fw4 reload"} {
+	for _, forbidden := range []string{"uci set", "uci add", "uci delete", "uci commit", "/etc/config/firewall", "/var/etc/localclash", "fw4 reload"} {
 		if strings.Contains(result.Script, forbidden) {
 			t.Fatalf("router takeover must not persist firewall config; found %q in:\n%s", forbidden, result.Script)
 		}
@@ -54,6 +55,16 @@ func TestApplyDryRunBuildsLocalClashOwnedScript(t *testing.T) {
 		if !strings.Contains(result.Script, want) {
 			t.Fatalf("runtime takeover script missing dynamic localnetwork refresh %q:\n%s", want, result.Script)
 		}
+	}
+	for _, want := range []string{"discover_lan_networks()", "discover_lan_domains()", "add_dynamic_localdns4()", "add_dynamic_localdns6()", "localclash_dns_redirect", "localClash local DNS bypass"} {
+		if !strings.Contains(result.Script, want) {
+			t.Fatalf("runtime takeover script missing local DNS preservation %q:\n%s", want, result.Script)
+		}
+	}
+	dnsBypass := strings.Index(result.Script, `comment "localClash local DNS bypass"`)
+	dnsRedirect := strings.Index(result.Script, `redirect to $DNS_PORT comment "localClash DNS hijack"`)
+	if dnsBypass < 0 || dnsRedirect < 0 || dnsBypass > dnsRedirect {
+		t.Fatalf("local DNS bypass must be installed before DNS hijack redirect:\n%s", result.Script)
 	}
 	if strings.Contains(result.Script, "OpenClash") {
 		t.Fatalf("router takeover script should not special-case OpenClash:\n%s", result.Script)
@@ -77,6 +88,33 @@ func TestApplyDryRunScriptHasShellSyntax(t *testing.T) {
 	cmd.Stdin = strings.NewReader(result.Script)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("generated shell script has syntax error: %v\n%s\nscript:\n%s", err, output, result.Script)
+	}
+}
+
+func TestBaseResultReportsLocalDNSState(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "local_dns4"), []byte("192.168.6.1\n192.168.6.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local_dns6"), []byte("fd00::1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local_domains"), []byte("lan\nlocal\nlan\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result := baseResult(Options{
+		StateDir:  dir,
+		DNSPort:   7874,
+		RedirPort: 7892,
+		TunDevice: "utun",
+	}, runtimeprofile.Status{Mode: runtimeprofile.ModeRouter})
+
+	if got := strings.Join(result.LocalDNS, ","); got != "192.168.6.1,fd00::1" {
+		t.Fatalf("LocalDNS = %q", got)
+	}
+	if got := strings.Join(result.LocalDomains, ","); got != "lan,local" {
+		t.Fatalf("LocalDomains = %q", got)
 	}
 }
 
