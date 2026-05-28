@@ -408,6 +408,9 @@ func buildLocalClashMetadata(selection *rulespkg.Selection, fragment *rulespkg.F
 			})
 			markTarget(enabled.Target)
 		}
+		for _, transport := range selection.TransportRules {
+			markTarget(transport.Target)
+		}
 		for _, custom := range selection.CustomRules {
 			markTarget(custom.Target)
 		}
@@ -510,6 +513,17 @@ func policyGroupMode(group rulespkg.PolicyGroup) string {
 }
 
 func parseOverlayRuleLine(line string) (configmeta.OverlayRule, bool) {
+	if strings.HasPrefix(line, "AND,") {
+		index := strings.LastIndex(line, ",")
+		if index <= len("AND,") || index >= len(line)-1 {
+			return configmeta.OverlayRule{}, false
+		}
+		return configmeta.OverlayRule{
+			Type:   "AND",
+			Value:  line[len("AND,"):index],
+			Target: line[index+1:],
+		}, true
+	}
 	parts := strings.Split(line, ",")
 	if len(parts) < 3 {
 		return configmeta.OverlayRule{}, false

@@ -151,6 +151,7 @@ func mergeConfig(base localconfig.Config, patch localconfig.Config) localconfig.
 	for id, group := range patch.PolicyGroups {
 		base.PolicyGroups[id] = group
 	}
+	base.TransportRules = mergeTransportRules(base.TransportRules, patch.TransportRules)
 	base.CustomRules = mergeCustomRules(base.CustomRules, patch.CustomRules)
 	base.RuleProviders = mergeRuleProviders(base.RuleProviders, patch.RuleProviders)
 	base.Packs = mergePacks(base.Packs, patch.Packs)
@@ -183,6 +184,24 @@ func mergePacks(base []localconfig.Pack, patch []localconfig.Pack) []localconfig
 
 func packKey(source, pack string) string {
 	return strings.TrimSpace(source) + "/" + strings.TrimSpace(pack)
+}
+
+func mergeTransportRules(base []localconfig.TransportRule, patch []localconfig.TransportRule) []localconfig.TransportRule {
+	merged := append([]localconfig.TransportRule{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range patch {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
 }
 
 func mergeCustomRules(base []localconfig.CustomRule, patch []localconfig.CustomRule) []localconfig.CustomRule {

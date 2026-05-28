@@ -298,6 +298,12 @@ func queryRoutingMatches(query string, index routingIndex) []routingExplainMatch
 			matches = append(matches, routingExplainMatch{Kind: "local_rule_pack", ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route})
 		}
 	}
+	for _, rule := range index.Config.TransportRules {
+		if score := matchScore(query, rule.ID, rule.Target, rule.Reason, rule.Network, fmt.Sprintf("%d", rule.DstPort)); score > 0 {
+			route := "transport_rule:" + rule.ID + " -> " + rule.Target
+			matches = append(matches, routingExplainMatch{Kind: "transport_rule", ID: rule.ID, Target: rule.Target, Reason: rule.Reason, Score: score, Route: &route})
+		}
+	}
 	for _, custom := range index.Config.CustomRules {
 		if score := matchScore(query, custom.ID, custom.Target, custom.Reason, customRulesText(custom.Rules)); score > 0 {
 			route := "custom_rule:" + custom.ID + " -> " + custom.Target
@@ -346,7 +352,7 @@ func routesFromMatches(matches []routingExplainMatch, index routingIndex) []rout
 			if addRoute(route, seen) {
 				routes = append(routes, route)
 			}
-		case "custom_rule", "rule_provider":
+		case "transport_rule", "custom_rule", "rule_provider":
 			route := routeForSource(match.Kind, match.ID, match.Target, match.Reason, index)
 			if addRoute(route, seen) {
 				routes = append(routes, route)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -123,6 +124,79 @@ func TestRenderFragmentRendersV2FlyDLCGeoSiteAttribute(t *testing.T) {
 	}
 	if got := fragment.Rules[0]; got != "GEOSITE,category-games@cn,DIRECT" {
 		t.Fatalf("rule = %q, want GEOSITE attribute rule", got)
+	}
+}
+
+func TestRenderFragmentRendersTransportRulesBeforeCustomRulesAndPacks(t *testing.T) {
+	selection := Selection{
+		ProxyGroups: map[string]ProxyGroup{
+			"🎯 手动选择":  {Nodes: []string{"HK 01"}, Manual: true},
+			"⚡ 自动选择":  {Nodes: []string{"JP 01"}, Auto: true},
+			"🇭🇰 香港节点": {Nodes: []string{"HK 01"}, Manual: true},
+			"🇯🇵 日本节点": {Nodes: []string{"JP 01"}, Manual: true},
+			"🇺🇸 美国节点": {Nodes: []string{"US 01"}, Manual: true},
+		},
+		PolicyGroups: map[string]PolicyGroup{
+			"🚦 QUIC": {
+				Exits:  []string{"REJECT", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇯🇵 日本节点", "🇺🇸 美国节点", "DIRECT"},
+				Manual: true,
+			},
+			"📺 YouTube": {Exits: []string{"🎯 手动选择"}, Manual: true},
+		},
+		TransportRules: []TransportRule{
+			{ID: "quic-udp-443-main", Network: "udp", DstPort: 443, Target: "🚦 QUIC"},
+		},
+		CustomRules: []CustomRule{
+			{
+				ID:     "example",
+				Target: "🎯 手动选择",
+				Rules:  []CustomRuleLine{{Type: "domain_suffix", Value: "example.com"}},
+			},
+		},
+		EnabledPack: []SelectedPack{
+			{Source: "v2fly-dlc", Pack: "youtube", Target: "📺 YouTube"},
+		},
+	}
+	caches := map[string]PackCache{
+		"v2fly-dlc": {
+			Source: "v2fly-dlc",
+			Packs: []Pack{{
+				ID:         "youtube",
+				Renderable: true,
+				Components: []Component{{
+					ID:       "domain",
+					Behavior: "v2fly-dlc",
+					Format:   "text",
+					URL:      "https://example.com/youtube",
+					Path:     "./rule-packs/v2fly-dlc/youtube.txt",
+				}},
+			}},
+		},
+	}
+
+	fragment, err := RenderFragment(selection, caches, []string{"HK 01", "JP 01", "US 01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"AND,((NETWORK,UDP),(DST-PORT,443)),🚦 QUIC",
+		"DOMAIN-SUFFIX,example.com,🎯 手动选择",
+		"GEOSITE,youtube,📺 YouTube",
+	}
+	if !reflect.DeepEqual(fragment.Rules, want) {
+		t.Fatalf("rules = %#v, want %#v", fragment.Rules, want)
+	}
+	groups := map[string]map[string]any{}
+	for _, group := range fragment.ProxyGroups {
+		groups[group["name"].(string)] = group
+	}
+	quic := groups["🚦 QUIC"]
+	if quic == nil {
+		t.Fatalf("missing QUIC group in %+v", fragment.ProxyGroups)
+	}
+	wantExits := []string{"REJECT", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇯🇵 日本节点", "🇺🇸 美国节点", "DIRECT"}
+	if got := quic["proxies"].([]string); !reflect.DeepEqual(got, wantExits) {
+		t.Fatalf("QUIC exits = %#v, want %#v", got, wantExits)
 	}
 }
 

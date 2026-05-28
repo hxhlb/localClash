@@ -84,6 +84,7 @@ type Selection struct {
 	Version         int                     `json:"version"`
 	ProxyGroups     map[string]ProxyGroup   `json:"proxy_groups,omitempty"`
 	PolicyGroups    map[string]PolicyGroup  `json:"policy_groups,omitempty"`
+	TransportRules  []TransportRule         `json:"transport_rules,omitempty"`
 	CustomRules     []CustomRule            `json:"custom_rules,omitempty"`
 	LocalRulePacks  []SelectedLocalRulePack `json:"local_rule_packs,omitempty"`
 	RuleProviders   []ExternalRuleProvider  `json:"rule_providers,omitempty"`
@@ -129,6 +130,14 @@ type CustomRule struct {
 	Rules  []CustomRuleLine `yaml:"rules" json:"rules"`
 }
 
+type TransportRule struct {
+	ID      string `yaml:"id" json:"id"`
+	Target  string `yaml:"target" json:"target"`
+	Reason  string `yaml:"reason,omitempty" json:"reason,omitempty"`
+	Network string `yaml:"network" json:"network"`
+	DstPort int    `yaml:"dst_port" json:"dst_port"`
+}
+
 type CustomRuleLine struct {
 	Type      string `yaml:"type" json:"type"`
 	Value     string `yaml:"value" json:"value"`
@@ -158,6 +167,7 @@ type RenderSelectionStats struct {
 	ProxyNames            int
 	ProxyGroups           int
 	PolicyGroups          int
+	TransportRules        int
 	EnabledPacks          int
 	LocalRulePacks        int
 	CustomRules           int
@@ -171,6 +181,7 @@ func (stats RenderSelectionStats) Fields() map[string]any {
 		"proxy_names":             stats.ProxyNames,
 		"proxy_groups":            stats.ProxyGroups,
 		"policy_groups":           stats.PolicyGroups,
+		"transport_rules":         stats.TransportRules,
 		"enabled_packs":           stats.EnabledPacks,
 		"local_rule_packs":        stats.LocalRulePacks,
 		"custom_rules":            stats.CustomRules,
@@ -266,6 +277,7 @@ func RenderSelectionWithStats(selection Selection, cacheDir string, proxyNames [
 		ProxyNames:            len(proxyNames),
 		ProxyGroups:           len(selection.ProxyGroups),
 		PolicyGroups:          len(selection.PolicyGroups),
+		TransportRules:        len(selection.TransportRules),
 		EnabledPacks:          len(selection.EnabledPack),
 		LocalRulePacks:        len(selection.LocalRulePacks),
 		CustomRules:           len(selection.CustomRules),
@@ -437,6 +449,18 @@ func RenderFragment(selection Selection, caches map[string]PackCache, proxyNames
 	}
 	usedProxyGroups := map[string]bool{}
 	usedPolicyGroups := map[string]bool{}
+	for _, transport := range selection.TransportRules {
+		target, kind, err := renderTarget(transport.Target, targets)
+		if err != nil {
+			return Fragment{}, err
+		}
+		markUsedTarget(target, kind, usedProxyGroups, usedPolicyGroups)
+		line, err := renderTransportRule(transport, target)
+		if err != nil {
+			return Fragment{}, err
+		}
+		fragment.Rules = append(fragment.Rules, line)
+	}
 	for _, custom := range selection.CustomRules {
 		target, kind, err := renderTarget(custom.Target, targets)
 		if err != nil {
@@ -539,6 +563,27 @@ func renderExternalRuleProvider(provider ExternalRuleProvider) (map[string]any, 
 		out["interval"] = provider.Interval
 	}
 	return out, nil
+}
+
+func renderTransportRule(rule TransportRule, target string) (string, error) {
+	id := strings.TrimSpace(rule.ID)
+	if id == "" {
+		return "", fmt.Errorf("transport rule id is required")
+	}
+	if strings.TrimSpace(target) == "" {
+		return "", fmt.Errorf("transport rule %q target is required", id)
+	}
+	network := strings.ToUpper(strings.TrimSpace(rule.Network))
+	if network == "" {
+		return "", fmt.Errorf("transport rule %q network is required", id)
+	}
+	if network != "UDP" {
+		return "", fmt.Errorf("transport rule %q network %q is unsupported", id, rule.Network)
+	}
+	if rule.DstPort <= 0 || rule.DstPort > 65535 {
+		return "", fmt.Errorf("transport rule %q dst_port must be between 1 and 65535", id)
+	}
+	return fmt.Sprintf("AND,((NETWORK,%s),(DST-PORT,%d)),%s", network, rule.DstPort, target), nil
 }
 
 func renderCustomRuleLines(custom CustomRule, target string) ([]string, error) {

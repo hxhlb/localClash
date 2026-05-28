@@ -67,12 +67,13 @@ type StageEvent struct {
 }
 
 type OverlayIntent struct {
-	Packs            []OverlayPackIntent         `json:"packs,omitempty" yaml:"packs,omitempty"`
-	CustomRules      []OverlayCustomRuleIntent   `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
-	EnabledRulePacks []OverlayRulePackIntent     `json:"enabled_rule_packs,omitempty" yaml:"enabled_rule_packs,omitempty"`
-	RuleProviders    []OverlayRuleProviderIntent `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
-	ProxyGroups      []OverlayProxyGroupIntent   `json:"proxy_groups,omitempty" yaml:"proxy_groups,omitempty"`
-	PolicyGroups     []OverlayPolicyGroupIntent  `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
+	Packs            []OverlayPackIntent          `json:"packs,omitempty" yaml:"packs,omitempty"`
+	TransportRules   []OverlayTransportRuleIntent `json:"transport_rules,omitempty" yaml:"transport_rules,omitempty"`
+	CustomRules      []OverlayCustomRuleIntent    `json:"custom_rules,omitempty" yaml:"custom_rules,omitempty"`
+	EnabledRulePacks []OverlayRulePackIntent      `json:"enabled_rule_packs,omitempty" yaml:"enabled_rule_packs,omitempty"`
+	RuleProviders    []OverlayRuleProviderIntent  `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
+	ProxyGroups      []OverlayProxyGroupIntent    `json:"proxy_groups,omitempty" yaml:"proxy_groups,omitempty"`
+	PolicyGroups     []OverlayPolicyGroupIntent   `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
 }
 
 type OverlayPackIntent struct {
@@ -120,6 +121,7 @@ type OverlayPolicyGroupIntent struct {
 }
 
 type OverlayCustomRuleIntent = localconfig.CustomRule
+type OverlayTransportRuleIntent = localconfig.TransportRule
 type OverlayRulePackIntent = localconfig.RulePackSelection
 type OverlayRuleProviderIntent = localconfig.ExternalRuleProvider
 
@@ -188,12 +190,13 @@ type MihomoTestResult struct {
 }
 
 type OverlaySummary struct {
-	Packs            []OverlayPackSummary         `json:"packs"`
-	CustomRules      []OverlayCustomRuleSummary   `json:"custom_rules"`
-	EnabledRulePacks []OverlayRulePackSummary     `json:"enabled_rule_packs"`
-	RuleProviders    []OverlayRuleProviderSummary `json:"rule_providers"`
-	ProxyGroups      []OverlayProxyGroupSummary   `json:"proxy_groups"`
-	PolicyGroups     []OverlayPolicyGroupSummary  `json:"policy_groups"`
+	Packs            []OverlayPackSummary          `json:"packs"`
+	TransportRules   []OverlayTransportRuleSummary `json:"transport_rules"`
+	CustomRules      []OverlayCustomRuleSummary    `json:"custom_rules"`
+	EnabledRulePacks []OverlayRulePackSummary      `json:"enabled_rule_packs"`
+	RuleProviders    []OverlayRuleProviderSummary  `json:"rule_providers"`
+	ProxyGroups      []OverlayProxyGroupSummary    `json:"proxy_groups"`
+	PolicyGroups     []OverlayPolicyGroupSummary   `json:"policy_groups"`
 }
 
 type OverlayPackSummary struct {
@@ -232,6 +235,14 @@ type OverlayCustomRuleSummary struct {
 	Rules     []localconfig.CustomRuleLine `json:"rules,omitempty"`
 }
 
+type OverlayTransportRuleSummary struct {
+	ID      string `json:"id"`
+	Target  string `json:"target"`
+	Network string `json:"network"`
+	DstPort int    `json:"dst_port"`
+	Reason  string `json:"reason,omitempty"`
+}
+
 type OverlayRulePackSummary struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
@@ -253,17 +264,18 @@ type OverlayRuleProviderSummary struct {
 }
 
 type ChangesSummary struct {
-	RuleProvidersAdded int `json:"rule_providers_added"`
-	RulePacksAdded     int `json:"rule_packs_added"`
-	ProxyGroupsAdded   int `json:"proxy_groups_added"`
-	PolicyGroupsAdded  int `json:"policy_groups_added"`
-	RulesAdded         int `json:"rules_added"`
+	RuleProvidersAdded  int `json:"rule_providers_added"`
+	RulePacksAdded      int `json:"rule_packs_added"`
+	ProxyGroupsAdded    int `json:"proxy_groups_added"`
+	PolicyGroupsAdded   int `json:"policy_groups_added"`
+	TransportRulesAdded int `json:"transport_rules_added"`
+	RulesAdded          int `json:"rules_added"`
 }
 
 func Render(ctx context.Context, opts Options) (Result, error) {
 	opts = normalizeOptions(opts)
-	if len(opts.Overlay.Packs) == 0 && len(opts.Overlay.CustomRules) == 0 && len(opts.Overlay.EnabledRulePacks) == 0 && len(opts.Overlay.RuleProviders) == 0 {
-		return Result{}, fmt.Errorf("overlay.packs, overlay.custom_rules, overlay.enabled_rule_packs, or overlay.rule_providers is required")
+	if len(opts.Overlay.Packs) == 0 && len(opts.Overlay.TransportRules) == 0 && len(opts.Overlay.CustomRules) == 0 && len(opts.Overlay.EnabledRulePacks) == 0 && len(opts.Overlay.RuleProviders) == 0 {
+		return Result{}, fmt.Errorf("overlay.packs, overlay.transport_rules, overlay.custom_rules, overlay.enabled_rule_packs, or overlay.rule_providers is required")
 	}
 	stage := configPlanStageEmitter(opts.OnStage)
 
@@ -290,6 +302,7 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 	finish(nil, map[string]any{
 		"proxy_groups":       len(resolved.ProxyGroups),
 		"policy_groups":      len(resolved.PolicyGroups),
+		"transport_rules":    len(resolved.TransportRules),
 		"packs":              len(resolved.Packs),
 		"custom_rules":       len(resolved.CustomRules),
 		"enabled_rule_packs": len(resolved.RulePacks),
@@ -437,6 +450,7 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 	finish(nil, map[string]any{
 		"proxy_groups":       len(resolved.ProxyGroups),
 		"policy_groups":      len(resolved.PolicyGroups),
+		"transport_rules":    len(resolved.TransportRules),
 		"packs":              len(resolved.Packs),
 		"custom_rules":       len(resolved.CustomRules),
 		"enabled_rule_packs": len(resolved.RulePacks),
@@ -737,6 +751,7 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 		ProxyGroups:      map[string]localconfig.ProxyGroup{},
 		PolicyGroups:     map[string]localconfig.PolicyGroup{},
 		Packs:            make([]localconfig.Pack, 0, len(overlay.Packs)),
+		TransportRules:   make([]localconfig.TransportRule, 0, len(overlay.TransportRules)),
 		CustomRules:      make([]localconfig.CustomRule, 0, len(overlay.CustomRules)),
 		EnabledRulePacks: make([]localconfig.RulePackSelection, 0, len(overlay.EnabledRulePacks)),
 		RuleProviders:    make([]localconfig.ExternalRuleProvider, 0, len(overlay.RuleProviders)),
@@ -763,6 +778,9 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 	}
 	for _, pack := range overlay.Packs {
 		config.Packs = append(config.Packs, localconfig.Pack{Source: pack.Source, Pack: pack.Pack, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
+	}
+	for _, rule := range overlay.TransportRules {
+		config.TransportRules = append(config.TransportRules, rule)
 	}
 	for _, custom := range overlay.CustomRules {
 		config.CustomRules = append(config.CustomRules, custom)
@@ -810,6 +828,7 @@ func mergeOverlayConfig(base localconfig.Config, overlay localconfig.Config) loc
 		base.FallbackTarget = overlay.FallbackTarget
 	}
 	base.Packs = mergePacks(base.Packs, overlay.Packs)
+	base.TransportRules = mergeTransportRules(base.TransportRules, overlay.TransportRules)
 	base.CustomRules = mergeCustomRules(base.CustomRules, overlay.CustomRules)
 	base.EnabledRulePacks = mergeRulePacks(base.EnabledRulePacks, overlay.EnabledRulePacks)
 	base.RuleProviders = mergeRuleProviders(base.RuleProviders, overlay.RuleProviders)
@@ -853,6 +872,24 @@ func mergePacks(base []localconfig.Pack, overlay []localconfig.Pack) []localconf
 			continue
 		}
 		index[key] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func mergeTransportRules(base []localconfig.TransportRule, overlay []localconfig.TransportRule) []localconfig.TransportRule {
+	merged := append([]localconfig.TransportRule{}, base...)
+	index := map[string]int{}
+	for i, item := range merged {
+		index[strings.TrimSpace(item.ID)] = i
+	}
+	for _, item := range overlay {
+		id := strings.TrimSpace(item.ID)
+		if i, ok := index[id]; ok {
+			merged[i] = item
+			continue
+		}
+		index[id] = len(merged)
 		merged = append(merged, item)
 	}
 	return merged
@@ -909,6 +946,7 @@ func preserveExistingPolicyTemplate(path string, config localconfig.Config) loca
 func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 	summary := OverlaySummary{
 		Packs:            make([]OverlayPackSummary, 0, len(resolved.Packs)),
+		TransportRules:   make([]OverlayTransportRuleSummary, 0, len(resolved.TransportRules)),
 		CustomRules:      make([]OverlayCustomRuleSummary, 0, len(resolved.CustomRules)),
 		EnabledRulePacks: make([]OverlayRulePackSummary, 0, len(resolved.RulePacks)),
 		RuleProviders:    make([]OverlayRuleProviderSummary, 0, len(resolved.RuleProviders)),
@@ -917,6 +955,15 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 	}
 	for _, pack := range resolved.Packs {
 		summary.Packs = append(summary.Packs, OverlayPackSummary{Source: pack.Source, Pack: pack.Pack, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
+	}
+	for _, rule := range resolved.TransportRules {
+		summary.TransportRules = append(summary.TransportRules, OverlayTransportRuleSummary{
+			ID:      rule.ID,
+			Target:  rule.Target,
+			Network: rule.Network,
+			DstPort: rule.DstPort,
+			Reason:  rule.Reason,
+		})
 	}
 	for _, custom := range resolved.CustomRules {
 		summary.CustomRules = append(summary.CustomRules, OverlayCustomRuleSummary{
@@ -979,6 +1026,7 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 	full := overlaySummaryFromResolved(resolved)
 	summary := OverlaySummary{
 		Packs:            make([]OverlayPackSummary, 0, len(overlay.Packs)),
+		TransportRules:   make([]OverlayTransportRuleSummary, 0, len(overlay.TransportRules)),
 		CustomRules:      make([]OverlayCustomRuleSummary, 0, len(overlay.CustomRules)),
 		EnabledRulePacks: make([]OverlayRulePackSummary, 0, len(overlay.EnabledRulePacks)),
 		RuleProviders:    make([]OverlayRuleProviderSummary, 0, len(overlay.RuleProviders)),
@@ -1007,6 +1055,17 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 			}
 		}
 		summary.Packs = append(summary.Packs, OverlayPackSummary{Source: item.Source, Pack: item.Pack, Type: item.Type, Target: item.Target, Reason: item.Reason})
+	}
+
+	transportRulesByID := map[string]OverlayTransportRuleSummary{}
+	for _, item := range full.TransportRules {
+		transportRulesByID[item.ID] = item
+	}
+	for _, item := range overlay.TransportRules {
+		id := strings.TrimSpace(item.ID)
+		if found, ok := transportRulesByID[id]; ok {
+			summary.TransportRules = append(summary.TransportRules, found)
+		}
 	}
 
 	customRulesByID := map[string]OverlayCustomRuleSummary{}
@@ -1068,11 +1127,12 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 
 func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) ChangesSummary {
 	changes := ChangesSummary{
-		ProxyGroupsAdded:   len(overlay.ProxyGroups),
-		PolicyGroupsAdded:  len(overlay.PolicyGroups),
-		RuleProvidersAdded: len(overlay.RuleProviders),
-		RulePacksAdded:     len(overlay.EnabledRulePacks),
-		RulesAdded:         len(summary.Packs) + len(summary.RuleProviders),
+		ProxyGroupsAdded:    len(overlay.ProxyGroups),
+		PolicyGroupsAdded:   len(overlay.PolicyGroups),
+		TransportRulesAdded: len(overlay.TransportRules),
+		RuleProvidersAdded:  len(overlay.RuleProviders),
+		RulePacksAdded:      len(overlay.EnabledRulePacks),
+		RulesAdded:          len(summary.Packs) + len(summary.RuleProviders) + len(summary.TransportRules),
 	}
 	for _, pack := range summary.Packs {
 		if pack.Type == rules.PackTypeRuleProvider {
@@ -1366,6 +1426,7 @@ func resolveSummaryPath(opts ApplyOptions) (string, error) {
 func intentFromSummary(summary OverlaySummary) OverlayIntent {
 	intent := OverlayIntent{
 		Packs:            make([]OverlayPackIntent, 0, len(summary.Packs)),
+		TransportRules:   make([]OverlayTransportRuleIntent, 0, len(summary.TransportRules)),
 		CustomRules:      make([]OverlayCustomRuleIntent, 0, len(summary.CustomRules)),
 		EnabledRulePacks: make([]OverlayRulePackIntent, 0, len(summary.EnabledRulePacks)),
 		RuleProviders:    make([]OverlayRuleProviderIntent, 0, len(summary.RuleProviders)),
@@ -1374,6 +1435,15 @@ func intentFromSummary(summary OverlaySummary) OverlayIntent {
 	}
 	for _, pack := range summary.Packs {
 		intent.Packs = append(intent.Packs, OverlayPackIntent{Source: pack.Source, Pack: pack.Pack, Type: pack.Type, Target: pack.Target, Reason: pack.Reason})
+	}
+	for _, rule := range summary.TransportRules {
+		intent.TransportRules = append(intent.TransportRules, localconfig.TransportRule{
+			ID:      rule.ID,
+			Target:  rule.Target,
+			Reason:  rule.Reason,
+			Network: rule.Network,
+			DstPort: rule.DstPort,
+		})
 	}
 	for _, custom := range summary.CustomRules {
 		intent.CustomRules = append(intent.CustomRules, localconfig.CustomRule{

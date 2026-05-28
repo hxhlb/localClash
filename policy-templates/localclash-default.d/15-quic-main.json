@@ -1,0 +1,31 @@
+{
+  "id": "default.quic-main.v1",
+  "description": "Add Dashboard-switchable UDP/443 QUIC policy before business GEOSITE rules.",
+  "config": {
+    "version": 4,
+    "policy_groups": {
+      "🚦 QUIC": {
+        "mode": "manual",
+        "exits": [
+          "REJECT",
+          "🎯 手动选择",
+          "⚡ 自动选择",
+          "🇭🇰 香港节点",
+          "🇯🇵 日本节点",
+          "🇺🇸 美国节点",
+          "DIRECT"
+        ],
+        "reason": "Default-reject UDP/443 so HTTP/3/QUIC can fall back while still allowing Dashboard policy switching."
+      }
+    },
+    "transport_rules": [
+      {
+        "id": "quic-udp-443-main",
+        "network": "UDP",
+        "dst_port": 443,
+        "target": "🚦 QUIC",
+        "reason": "Route UDP destination port 443 to the QUIC main strategy group before business/domain rules."
+      }
+    ]
+  }
+}
