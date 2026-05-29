@@ -41,10 +41,15 @@ strategy layer. `DNSProxy` exits through `⚡ 自动选择`, so router DNS `#DNS
 references have a concrete target even without loading the default patch set.
 
 `localclash-default` adds direct and regional exits plus business routing groups.
-Region exits are optional so subscriptions without a given region can still
-initialize. Patch files intentionally keep emoji identifiers as YAML `\U...`
-escapes so OpenWrt/BusyBox display locale quirks do not change on-disk template
-bytes.
+Ordinary proxy-oriented business groups default to `⚡ 自动选择` and keep
+`🎯 手动选择` as the first manual override. Groups with explicit safety or product
+semantics can still choose a different first exit, such as `🤖 ChatGPT` defaulting
+to United States, then Japan, then Singapore while excluding the Hong Kong region
+exit; `🚦 QUIC` defaulting to `REJECT`; game platform/Apple/Microsoft/speed-test
+defaulting to direct; or Bahamut defaulting to Taiwan. Region exits are optional
+so subscriptions without a given region can still initialize. Patch files
+intentionally keep emoji identifiers as YAML `\U...` escapes so OpenWrt/BusyBox
+display locale quirks do not change on-disk template bytes.
 
 MCP `config_status` exposes the active template through `intent.packs`,
 `intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. For compact

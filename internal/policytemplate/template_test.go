@@ -211,10 +211,10 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 		t.Fatalf("transport rule = %+v, want QUIC UDP/443 target", got)
 	}
 	wantExitsByGroup := map[string][]string{
-		"🎮 Steam":   {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🎮 Steam":   {"⚡ 自动选择", "🎯 手动选择", "🌐 全球直连", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
 		"🎮 游戏平台":    {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
 		"🕹 Bahamut": {"🇹🇼 台湾节点", "🎯 手动选择", "🌐 全球直连"},
-		"🤖 ChatGPT": {"🎯 手动选择", "⚡ 自动选择", "🇸🇬 新加坡节点", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🤖 ChatGPT": {"🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🎯 手动选择", "⚡ 自动选择", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
 		"🍎 Apple":   {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
 	}
 	for id, wantExits := range wantExitsByGroup {
@@ -224,6 +224,19 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 		}
 		if !reflect.DeepEqual(group.Exits, wantExits) {
 			t.Fatalf("policy group %q exits = %#v, want %#v", id, group.Exits, wantExits)
+		}
+	}
+	autoFirstGroups := []string{
+		"💬 通信服务", "👥 社交媒体",
+		"🎮 Steam", "🧠 AI", "💻 GitHub",
+		"📺 YouTube", "📺 Apple TV", "📬 Google FCM", "🔎 Google", "🎵 TikTok",
+		"🎬 Netflix", "🏰 Disney", "🎞 HBO", "🎥 Prime Video", "📺 Emby", "🎧 Spotify",
+		"🎞 媒体", "🛒 电商", "🧭 漏网之鱼",
+	}
+	for _, id := range autoFirstGroups {
+		group := config.PolicyGroups[id]
+		if len(group.Exits) < 2 || group.Exits[0] != "⚡ 自动选择" || group.Exits[1] != "🎯 手动选择" {
+			t.Fatalf("policy group %q exits = %#v, want auto then manual defaults", id, group.Exits)
 		}
 	}
 	if config.Packs[0].Source != "v2fly-dlc" || config.Packs[0].Pack != "category-ads-all" || config.Packs[0].Target != "REJECT" {
