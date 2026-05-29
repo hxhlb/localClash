@@ -64,7 +64,7 @@ func Registry() []Tool {
 		{Name: "subscription_nodes_search", SafetyLevel: SafeRead, Description: "Search subscription proxy names and return safe name/type summaries; does not verify network egress location."},
 		{Name: "runtime_profile_status", SafetyLevel: SafeRead, Description: "Inspect the active Mihomo runtime profile and its safe summary without exposing proxy credentials."},
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
-		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect Mihomo runtime status from the local PID file and matching orphan runtime processes without changing runtime state."},
+		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned Mihomo runtime processes by managed core process name without changing runtime state."},
 		{Name: "router_takeover_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned OpenWrt router takeover runtime state: runtime profile, Mihomo runtime, fw4/nft chains, DNS hijack, fwmark route, and TUN device."},
 		{Name: "routing_explain", SafetyLevel: SafeRead, Description: "Explain active durable routing intent for a service, domain, pack, policy group, or exit query. Reads localclash-intent.json, active packs, policy groups, proxy groups, custom rules, and cached rule matches; does not modify config or start runtime."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
@@ -80,11 +80,11 @@ func Registry() []Tool {
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.gob."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start the Mihomo runtime from generated config, assuming generated/mihomo.yaml has already been validated by config_patch_apply or doctor. Requires external Agent/MCP client confirmation; starting the proxy runtime may temporarily interrupt network connectivity, and the Agent itself may be disconnected if it depends on the current network/proxy path."},
-		{Name: "restart_runtime", SafetyLevel: ConfirmRequired, Description: "Stop the current Mihomo runtime if needed, then start it again in one confirmed call, assuming generated/mihomo.yaml has already been validated by config_patch_apply or doctor. Use this instead of stop_runtime then run_runtime when the Agent may depend on the proxy path."},
+		{Name: "restart_runtime", SafetyLevel: ConfirmRequired, Description: "Stop localClash-owned Mihomo processes by managed core process name, then start the selected managed core again in one confirmed call, assuming generated/mihomo.yaml has already been validated by config_patch_apply or doctor. Use this instead of stop_runtime then run_runtime when the Agent may depend on the proxy path."},
 		{Name: "router_takeover_apply", SafetyLevel: ConfirmRequired, Description: "Apply localClash-owned OpenWrt router takeover runtime rules for router profile mode. Uses localClash router redir-host-mix behavior: TCP redir-host, DNS hijack, fwmark route, and TUN forwarding. Does not persist firewall config; call only after run_runtime or restart_runtime and user confirmation."},
 		{Name: "router_takeover_stop", SafetyLevel: ConfirmRequired, Description: "Remove localClash-owned OpenWrt router takeover runtime rules without stopping Mihomo. This changes firewall, DNS, and policy-routing runtime state and requires user confirmation."},
 		{Name: "sed_file", SafetyLevel: SafeWrite, Description: "Apply sed-style repository-local text edits with dry-run diff output. Defaults to dry_run=true."},
-		{Name: "stop_runtime", SafetyLevel: ConfirmRequired, Description: "Stop the Mihomo runtime recorded by the local PID file, plus matching orphan runtime processes. Refuses by default when router takeover is effective because router traffic still depends on Mihomo; call router_takeover_stop first or pass force=true only after explicit user confirmation."},
+		{Name: "stop_runtime", SafetyLevel: ConfirmRequired, Description: "Stop localClash-owned Mihomo runtime processes identified by managed core process names. Refuses by default when router takeover is effective because router traffic still depends on Mihomo; call router_takeover_stop first or pass force=true only after explicit user confirmation."},
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools
@@ -458,7 +458,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"config":            map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to generated/mihomo.yaml."},
 				"runtime_dir":       map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Defaults to the active runtime profile core path."},
+				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Background runtime requires a localClash managed basename: lc-mihomo-meta or lc-mihomo-smart. Defaults to the active runtime profile core path."},
 				"foreground":        map[string]any{"type": "boolean", "description": "Foreground mode is not supported by MCP run_runtime; use CLI run for foreground execution."},
 				"log_file":          map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"force_config_test": map[string]any{"type": "boolean", "description": "Bypass the Mihomo config validation cache and run a fresh mihomo -t before starting."},
@@ -473,7 +473,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"config":            map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to generated/mihomo.yaml."},
 				"runtime_dir":       map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Defaults to the active runtime profile core path."},
+				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Background restart requires a localClash managed basename: lc-mihomo-meta or lc-mihomo-smart. Defaults to the active runtime profile core path."},
 				"log_file":          map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"timeout_ms":        map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
 				"force":             map[string]any{"type": "boolean", "description": "Send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
@@ -497,7 +497,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"config":      map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to generated/mihomo.yaml."},
 				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path. Defaults to the active runtime profile core path."},
+				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path used for output context. Runtime identity is based on localClash managed core process names."},
 				"log_file":    map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 			},
 		}
@@ -526,7 +526,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"properties": map[string]any{
 				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path used to detect router takeover. Defaults to localclash-runtime.json."},
 				"config":          map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to generated/mihomo.yaml."},
-				"core":            map[string]any{"type": "string", "description": "Mihomo core binary path used to detect and stop orphan runtime processes. Defaults to the active runtime profile core path."},
+				"core":            map[string]any{"type": "string", "description": "Mihomo core binary path used for startup context. Runtime stop identity is based on localClash managed core process names."},
 				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
 				"log_file":        map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"state_dir":       map[string]any{"type": "string", "description": "localClash router takeover runtime state directory used for takeover detection. Defaults to /tmp/localclash/router-takeover."},

@@ -3133,7 +3133,6 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 				WasRunning: status.Running,
 				PID:        status.PID,
 				RuntimeDir: status.RuntimeDir,
-				PIDFile:    status.PIDFile,
 				Error:      "router takeover is effective; stopping Mihomo would break the router traffic path",
 				Warnings: []string{
 					"router takeover is currently effective and depends on the Mihomo runtime.",

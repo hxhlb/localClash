@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"localclash/internal/runtimeprofile"
 )
 
 type Options struct {
@@ -257,11 +259,20 @@ func outputPath(opts Options, flavor string) string {
 	if opts.OutputPath != "" && opts.Flavor != FlavorAll {
 		return opts.OutputPath
 	}
-	name := "mihomo-" + flavor
+	name := managedCoreName(flavor)
 	if opts.TargetOS == "windows" {
 		name += ".exe"
 	}
 	return filepath.Join(opts.OutputDir, opts.TargetOS+"-"+opts.TargetArch, name)
+}
+
+func managedCoreName(flavor string) string {
+	switch flavor {
+	case FlavorSmart:
+		return runtimeprofile.ManagedSmartCoreName
+	default:
+		return runtimeprofile.ManagedMetaCoreName
+	}
 }
 
 func effectiveFlavors(opts Options) []string {

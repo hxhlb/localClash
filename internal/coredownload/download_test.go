@@ -74,7 +74,7 @@ func TestNormalizeOptionsUsesCurrentPlatformDefaults(t *testing.T) {
 
 func TestNormalizeOptionsUsesWindowsExeDefault(t *testing.T) {
 	got := normalizeOptions(Options{TargetOS: "Windows", TargetArch: "amd64", Flavor: FlavorMeta})
-	want := filepath.Join("bin", "windows-amd64", "mihomo-meta.exe")
+	want := filepath.Join("bin", "windows-amd64", "lc-mihomo-meta.exe")
 	if path := outputPath(got, FlavorMeta); path != want {
 		t.Fatalf("OutputPath = %q, want %q", path, want)
 	}
@@ -82,10 +82,10 @@ func TestNormalizeOptionsUsesWindowsExeDefault(t *testing.T) {
 
 func TestOutputPathUsesPlatformFlavorNames(t *testing.T) {
 	opts := normalizeOptions(Options{TargetOS: "linux", TargetArch: "arm64"})
-	if got := outputPath(opts, FlavorMeta); got != filepath.Join("bin", "linux-arm64", "mihomo-meta") {
+	if got := outputPath(opts, FlavorMeta); got != filepath.Join("bin", "linux-arm64", "lc-mihomo-meta") {
 		t.Fatalf("meta output path = %q", got)
 	}
-	if got := outputPath(opts, FlavorSmart); got != filepath.Join("bin", "linux-arm64", "mihomo-smart") {
+	if got := outputPath(opts, FlavorSmart); got != filepath.Join("bin", "linux-arm64", "lc-mihomo-smart") {
 		t.Fatalf("smart output path = %q", got)
 	}
 }
@@ -134,7 +134,7 @@ func TestValidateRejectsHostSmartOnNonLinux(t *testing.T) {
 
 func TestDefaultHostOutputPathIncludesCurrentPlatform(t *testing.T) {
 	opts := normalizeOptions(Options{})
-	want := filepath.Join("bin", runtime.GOOS+"-"+runtime.GOARCH, "mihomo-meta")
+	want := filepath.Join("bin", runtime.GOOS+"-"+runtime.GOARCH, "lc-mihomo-meta")
 	if runtime.GOOS == "windows" {
 		want += ".exe"
 	}

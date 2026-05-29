@@ -203,7 +203,6 @@ func looksLikeWorkDir(dir string) bool {
 		"localclash-intent.json",
 		"subscription.gob",
 		filepath.Join("generated", "mihomo.yaml"),
-		filepath.Join(".runtime", "mihomo", "mihomo.pid"),
 		"policy-templates",
 		"rule-sources",
 	} {

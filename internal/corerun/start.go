@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -74,6 +73,10 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 		WorkDir:    opts.WorkDir,
 		LogPath:    opts.LogPath,
 	})
+	if err := validateManagedCorePath(runOpts.CorePath); err != nil {
+		finish(err, 0)
+		return StartResult{}, err
+	}
 	if err := runOpts.validate(); err != nil {
 		finish(err, 0)
 		return StartResult{}, err
@@ -98,22 +101,12 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	baseResult.ExternalUIURL = externalUIURL(baseResult.ExternalController, endpoints.ExternalUI)
 
 	finish = stage("status_check", nil)
-	pidPath := runtimePIDPath(runOpts.WorkDir)
-	if pid, ok := readRunningPID(pidPath); ok {
-		if match, _ := processMatchesRuntime(pid, StartOptions{
-			CorePath:   runOpts.CorePath,
-			ConfigPath: runOpts.ConfigPath,
-			WorkDir:    runOpts.WorkDir,
-			LogPath:    runOpts.LogPath,
-		}); !match {
-			_ = os.Remove(pidPath)
-		} else {
-			baseResult.AlreadyRunning = true
-			baseResult.PID = pid
-			baseResult.Warnings = append(baseResult.Warnings, "Runtime is already running; run_runtime did not start a second process.")
-			finish(nil, pid)
-			return baseResult, nil
-		}
+	if processes := findManagedRuntimeProcesses(); len(processes) > 0 {
+		baseResult.AlreadyRunning = true
+		baseResult.PID = processes[0].PID
+		baseResult.Warnings = append(baseResult.Warnings, "Runtime is already running; run_runtime did not start a second process.")
+		finish(nil, processes[0].PID)
+		return baseResult, nil
 	}
 	finish(nil, 0)
 	if opts.SkipConfigTest {
@@ -150,19 +143,9 @@ func Start(ctx context.Context, opts StartOptions) (StartResult, error) {
 	afterProcessStart(cmd)
 	finish(nil, cmd.Process.Pid)
 
-	finish = stage("write_pid_file", map[string]any{"pid_file": pidPath})
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		_ = logFile.Close()
-		finish(err, cmd.Process.Pid)
-		return StartResult{}, err
-	}
-	finish(nil, cmd.Process.Pid)
 	_ = logFile.Close()
 	go func() {
 		_ = cmd.Wait()
-		_ = os.Remove(pidPath)
 	}()
 	baseResult.Started = true
 	baseResult.PID = cmd.Process.Pid
@@ -210,25 +193,6 @@ func normalizeStartOptions(opts StartOptions) StartOptions {
 		opts.LogPath = filepath.Join(opts.WorkDir, "mihomo.log")
 	}
 	return opts
-}
-
-func runtimePIDPath(workDir string) string {
-	return filepath.Join(workDir, "mihomo.pid")
-}
-
-func readRunningPID(path string) (int, bool) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0, false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0, false
-	}
-	if processRunning(pid) && !processZombie(pid) {
-		return pid, true
-	}
-	return 0, false
 }
 
 func processRunning(pid int) bool {
