@@ -1,81 +1,108 @@
-# geox-url 單點故障：建議方案
+# geox-url 與 GEO data 自動更新計劃
 
 ## Context
 
-`geox-url` 是 Mihomo 運行時下載 geo 數據文件（geoip.dat, geosite.dat, Country.mmdb, ASN.mmdb）的 URL 配置。目前所有 4 個 URL 都指向 **同一個 CDN**：`testingcf.jsdelivr.net`。這是一個脆弱的單點故障位置，原因如下：
+`geox-url` 是 Mihomo 下載 GEO data 文件（geoip.dat, geosite.dat, Country.mmdb, ASN.mmdb）的 URL 配置。目前 localClash default profile 的 4 個 URL 都指向 `testingcf.jsdelivr.net`。這是一個可接受但需要記錄的短期風險，原因如下：
 
 - **jsDelivr 在中國大陸的可用性不穩定**（GFW 干擾、DNS 污染、速度慢）
 - **Mihomo 本身只接受每個類型一個 URL**，無法配置備用鏡像
 - **localClash 沒有運行時 geodata 下載/刷新機制**——只有構建腳本 `build-release-assets.sh` 有多鏡像回退鏈，但這僅在發佈時使用
 - **影響面廣**：geodata 缺失會導致 GEOIP/GEOSITE 規則失效、DNS fallback-filter 損壞、路由器模式下幾乎所有分流邏輯癱瘓
 
+### Mihomo 行為邊界
+
+- 缺檔或壞檔時，Mihomo 會在 GEO 規則初始化期間同步下載對應文件。
+- `geo-auto-update: true` 開啟後，Mihomo 會在背景 ticker 中按 `geo-update-interval` 下載、驗證並覆蓋 GEO data。
+- GEO auto update 不會重啟 Mihomo process，也不會重新套用整份 config。更新成功後只會清除 GeoIP/GeoSite matcher cache，或 reset MMDB/ASN reader。
+- 既有連線通常不會被重新判路由；新連線或後續規則匹配會在 cache 重建後使用新資料。
+
 ### 當前數據流
 
 ```
-構建時: build-release-assets.sh → 多鏡像下載 → base-assets.tar.gz → GitHub Releases
-安裝時: baseassets.Install() → 下載 base-assets.tar.gz → 解壓到 .runtime/mihomo/
-運行時: Mihomo 讀取 geox-url → 從 testingcf.jsdelivr.net 重新下載 → 可能覆蓋已有文件
+構建時: build-release-assets.sh -> 多鏡像下載 -> base-assets.tar.gz -> GitHub Releases
+安裝時: baseassets.Install() -> 下載 base-assets.tar.gz -> 解壓到 .runtime/mihomo/
+啟動時: Mihomo 使用本地 GEO data；缺檔或壞檔時才從 geox-url 補下載
+運行時: geo-auto-update=true 時，Mihomo 按 geo-update-interval 從 geox-url 背景刷新
 ```
-
-關鍵矛盾：**base assets 已經預置了 geodata 文件，但 Mihomo 的 geox-url 配置仍會在啟動時嘗試從單一 CDN 重新下載。**
-
----
 
 ## 建議方案
 
-### 短期（低工作量，高影響）：新增 `localclash geodata update` 命令
+### 短期：接受 Mihomo 原生 auto update
 
-復用 `build-release-assets.sh` 中已有的多鏡像回退邏輯，在 Go 代碼中實現一個 geodata 更新命令：
+短期先在 default runtime profiles 中顯式開啟 Mihomo 的 GEO auto update：
 
-- **鏡像鏈**：每個文件嘗試多個 URL
-  - `v1.ax/` + `ghp.xptvhelper.link/` + GitHub Releases 原始地址 + `testingcf.jsdelivr.net` 作為最後回退
-- **目標目錄**：`.runtime/mihomo/`
-- **使用方式**：`localclash geodata update`（手動觸發或 cron 定時任務）
+```yaml
+geodata-mode: true
+geodata-loader: memconservative
+geo-auto-update: true
+geo-update-interval: 24
+etag-support: true
+geox-url:
+  geoip: "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+  geosite: "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
+  mmdb: "https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb"
+  asn: "https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb"
+```
 
-這樣用戶可以可靠地刷新 geodata，而不依賴 Mihomo 的單 CDN 下載。
+這個階段的取捨：
 
-### 中期：增強 doctor 檢查 + geox-url 降級為可選
+- 優點：實作小，立即讓 GEO data 可以背景更新。
+- 優點：不重啟 Mihomo，對既有流量基本無感。
+- 風險：仍然依賴單一 `geox-url`，鏡像不可用時只會更新失敗並記錄錯誤。
+- 風險：更新時會有短暫下載、驗證、IO、matcher cache 重建成本。
 
-1. **doctor 增加 geodata 完整性檢查**：在 `internal/doctor/doctor.go` 中檢查 4 個 geodata 文件是否存在且有效，啟動 Mihomo 前發出警告
-2. **`geox-url` 改為可選**：在 runtime profile 中增加開關，允許用戶禁用 Mihomo 自動下載（因為文件已由 localClash 管理）
-3. **渲染時根據文件是否存在決定是否寫入 geox-url**：如果 localClash 確認文件已存在，則跳過 geox-url 配置，讓 Mihomo 直接使用本地文件
+### 中期：本地 mini HTTP 鏡像轉發
 
-### 長期（可選）：考慮 geox-url 欄位改為列表
+更穩妥的方向是在 localClash 側提供一個 mini HTTP 本地轉發程序。Mihomo 仍然只看到單一 URL，但 localClash 在本地負責鏡像選擇和回退：
 
-向 Mihomo 上游提交 feature request，讓 geox-url 支援多 URL 列表（如 `"geoip": ["url1", "url2"]`），實現 Mihomo 層面的原生回退。這是從根本上解決問題的方式，但需要上游支持。
+```yaml
+geox-url:
+  geoip: "http://127.0.0.1:8787/geodata/geoip.dat"
+  geosite: "http://127.0.0.1:8787/geodata/geosite.dat"
+  mmdb: "http://127.0.0.1:8787/geodata/Country.mmdb"
+  asn: "http://127.0.0.1:8787/geodata/ASN.mmdb"
+```
+
+mini HTTP 程序需要負責：
+
+- 維護每個 GEO data 文件的一組 GitHub / CDN 鏡像候選。
+- 啟動時探測可用鏡像，按可用性和延遲選擇。
+- 支援 timeout、fallback、重試和錯誤分類。
+- 支援本地 cache，避免每次 Mihomo 請求都重新打遠端。
+- 盡量保留 ETag / Last-Modified 語義，讓 Mihomo 的更新檢查保持便宜。
+- 比 Mihomo 先啟動，或確保 base assets 已經存在，避免 Mihomo 缺檔同步下載時打不到本地轉發服務。
 
 ---
 
 ## 實施計劃
 
-### 步驟 1：新增 `internal/geodata/` 包
+### 步驟 1：開啟 default profile auto update
 
-- 創建 `internal/geodata/download.go`
-- 實現 `UpdateGeodata(runtimeDir string) error`
-- 復用 `scripts/build-release-assets.sh` 的多鏡像邏輯：
-  - `raw_github_mirrors()` → 用於 raw.githubusercontent.com 文件（Country.mmdb）
-  - `github_release_mirrors()` → 用於 GitHub Releases 文件（geoip.dat, geosite.dat, ASN.mmdb）
-- 每個文件依次嘗試所有鏡像，全部失敗才報錯
+- `internal/runtimeprofile/profiles/normal.default.json`
+- `internal/runtimeprofile/profiles/router.default.json`
+- 保留 `geodata-mode: true` 和 `geodata-loader: memconservative`
+- 新增 `geo-auto-update: true`
+- 新增 `geo-update-interval: 24`
+- 顯式保留 `etag-support: true`
 
-### 步驟 2：新增 CLI 子命令
+### 步驟 2：增強 doctor 檢查
 
-- 修改 `main.go`，增加 `localclash geodata update` 命令
-- 調用 `geodata.UpdateGeodata()`
-- 支持 `--runtime-dir` flag（默認 `.runtime/mihomo`）
+- 檢查 `.runtime/mihomo/` 下 4 個 GEO data 文件是否存在、非空、可讀。
+- 缺失時提示 base assets 安裝或未來的 geodata repair/update 命令。
+- 對 router 模式，把 GEO data 缺失視為高風險 warning。
 
-### 步驟 3：增強 doctor 檢查
+### 步驟 3：新增 mini HTTP geodata proxy
 
-- 修改 `internal/doctor/doctor.go`
-- 增加 geodata 文件存在性檢查
-- 增加文件基本有效性檢查（非空、可讀）
-- 缺失時給出明確的修復指引：`localclash geodata update`
+- 新增本地 HTTP handler，例如 `/geodata/{asset}`。
+- 實作每個 asset 的鏡像候選列表。
+- 復用 `scripts/build-release-assets.sh` 中已經驗證過的鏡像順序作為初版策略。
+- 支援 cache metadata，包含來源 URL、hash、ETag、Last-Modified、更新時間。
+- 將 runtime profile 的 `geox-url` 切換到 `127.0.0.1` 本地 URL。
 
-### 步驟 4（可選）：調整 geox-url 渲染行為
+### 步驟 4：可選 CLI repair/update
 
-- 修改 `internal/configrender/render.go`
-- 在渲染時檢查 `.runtime/mihomo/` 下 geodata 文件是否完整
-- 如果完整，跳過 geox-url 輸出（Mihomo 直接使用本地文件）
-- 增加 runtime profile 開關控制這一行為
+- 可以保留一個 `localclash geodata update` 或 `localclash geodata repair` 命令。
+- 這個命令直接使用 mini HTTP proxy 的鏡像選擇邏輯，讓手動修復和背景轉發共用同一套下載策略。
 
 ---
 
@@ -83,16 +110,15 @@
 
 | 文件 | 改動 |
 |------|------|
-| `internal/geodata/download.go` | **新增**：多鏡像 geodata 下載邏輯 |
-| `internal/geodata/download_test.go` | **新增**：測試 |
-| `main.go` | **修改**：增加 `geodata update` 子命令 |
-| `internal/doctor/doctor.go` | **修改**：增加 geodata 完整性檢查 |
-| `internal/configrender/render.go` | **可選修改**：條件性跳過 geox-url |
-| `internal/runtimeprofile/profiles/*.default.json` | **可選修改**：增加 geox-url 開關 |
+| `internal/runtimeprofile/profiles/*.default.json` | 開啟 `geo-auto-update` 並設定 interval |
+| `internal/runtimeprofile/profile_test.go` | 鎖定 default profile 的 GEO update contract |
+| `internal/doctor/doctor.go` | 後續增加 GEO data 完整性檢查 |
+| `internal/geodata/` | 後續新增 mini HTTP proxy 和共用下載策略 |
+| `scripts/build-release-assets.sh` | 作為鏡像候選順序的既有參考 |
 
 ## 驗證方式
 
-1. `go test ./internal/geodata/...` — 單元測試
-2. `go build . && ./localclash geodata update` — 手動驗證下載功能
-3. `./localclash doctor` — 確認 geodata 檢查通過
-4. 模擬 CDN 不可用場景：手動刪除 geodata 文件，屏蔽 jsdelivr，確認更新命令仍可通過鏡像成功
+1. `go test ./internal/runtimeprofile/...`：確認 default profiles 帶有 auto update 欄位。
+2. `go run . config render --force`：確認 `generated/mihomo.yaml` 會輸出 `geo-auto-update` 與 `geo-update-interval`。
+3. `go run . doctor --json`：確認現有 runtime validation 不受影響。
+4. 未來 mini HTTP proxy 完成後，模擬 CDN 不可用場景，確認 Mihomo 的單一本地 URL 仍能透過可用鏡像完成更新。

@@ -84,8 +84,9 @@ func TestDefaultNormalProfileCanResolveV2FlyGeoSitePacks(t *testing.T) {
 	file := DefaultFile()
 	mihomo := file.Profiles[ModeNormal].Mihomo
 
-	if mihomo["geodata-mode"] != true || mihomo["geodata-loader"] != "memconservative" {
-		t.Fatalf("normal geodata = mode %v loader %v, want enabled memconservative", mihomo["geodata-mode"], mihomo["geodata-loader"])
+	if mihomo["geodata-mode"] != true || mihomo["geodata-loader"] != "memconservative" || mihomo["geo-auto-update"] != true || mihomo["geo-update-interval"] != 24 || mihomo["etag-support"] != true {
+		t.Fatalf("normal geodata = mode %v loader %v auto %v interval %v etag %v, want enabled memconservative auto update",
+			mihomo["geodata-mode"], mihomo["geodata-loader"], mihomo["geo-auto-update"], mihomo["geo-update-interval"], mihomo["etag-support"])
 	}
 	geoxURL := mihomo["geox-url"].(map[string]any)
 	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
@@ -108,6 +109,9 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		"ipv6":                true,
 		"geodata-mode":        true,
 		"geodata-loader":      "memconservative",
+		"geo-auto-update":     true,
+		"geo-update-interval": 24,
+		"etag-support":        true,
 		"tcp-concurrent":      true,
 		"unified-delay":       true,
 		"find-process-mode":   "off",
