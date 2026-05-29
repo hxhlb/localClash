@@ -27,11 +27,14 @@ const (
 
 	RuntimeSourceBuiltin = "builtin"
 	RuntimeSourceUser    = "user"
+
+	ManagedMetaCoreName  = "lc-mihomo-meta"
+	ManagedSmartCoreName = "lc-mihomo-smart"
 )
 
 var (
-	MetaCorePath  = filepath.Join("bin", runtime.GOOS+"-"+runtime.GOARCH, "mihomo-meta")
-	SmartCorePath = filepath.Join("bin", "linux-"+runtime.GOARCH, "mihomo-smart")
+	MetaCorePath  = filepath.Join("bin", runtime.GOOS+"-"+runtime.GOARCH, ManagedMetaCoreName)
+	SmartCorePath = filepath.Join("bin", "linux-"+runtime.GOARCH, ManagedSmartCoreName)
 )
 
 var dynamicConfigKeys = map[string]bool{

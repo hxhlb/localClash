@@ -21,7 +21,7 @@ intentionally not recorded here.
   memory pressure, process sampling, and OOM behavior.
 - Both recovered test environments are `x86_64`. They are not equivalent to the
   ARM64 real router for Smart-core cache issues. Do not use them as proof that
-  `bin/linux-arm64/mihomo-smart` works or fails on the real router.
+  `bin/linux-arm64/lc-mihomo-smart` works or fails on the real router.
 
 ## Docker OpenWrt
 

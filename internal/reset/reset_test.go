@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -234,25 +233,23 @@ func TestRunRequiresConfirmation(t *testing.T) {
 }
 
 func TestRunRefusesWhileRuntimeIsRunning(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime process-name discovery requires procfs")
+	}
 	dir := t.TempDir()
 	t.Chdir(dir)
-	cmd := startResetFakeRuntime(t, dir)
-	writeResetFile(t, filepath.Join(".runtime", "mihomo", "mihomo.pid"), strconv.Itoa(cmd.Process.Pid)+"\n")
+	_ = startResetFakeRuntime(t, dir)
 
 	_, err := Run(Options{Yes: true, Out: &bytes.Buffer{}})
 	if err == nil || !strings.Contains(err.Error(), "runtime is running") {
 		t.Fatalf("error = %v, want running runtime refusal", err)
-	}
-	if _, err := os.Stat(filepath.Join(".runtime", "mihomo", "mihomo.pid")); err != nil {
-		t.Fatalf("pid file should remain after refused reset: %v", err)
 	}
 }
 
 func TestRunDryRunAllowsRunningRuntime(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	cmd := startResetFakeRuntime(t, dir)
-	writeResetFile(t, filepath.Join(".runtime", "mihomo", "mihomo.pid"), strconv.Itoa(cmd.Process.Pid)+"\n")
+	_ = startResetFakeRuntime(t, dir)
 
 	result, err := Run(Options{DryRun: true, Out: &bytes.Buffer{}})
 	if err != nil {
@@ -260,9 +257,6 @@ func TestRunDryRunAllowsRunningRuntime(t *testing.T) {
 	}
 	if !result.DryRun || len(result.Deleted) != 2 {
 		t.Fatalf("result = %+v, want dry-run plan for runtime dir", result)
-	}
-	if _, err := os.Stat(filepath.Join(".runtime", "mihomo", "mihomo.pid")); err != nil {
-		t.Fatalf("pid file should remain after dry-run: %v", err)
 	}
 }
 
@@ -284,7 +278,10 @@ func startResetFakeRuntime(t *testing.T, dir string) *exec.Cmd {
 	t.Helper()
 	workDir := filepath.Join(".runtime", "mihomo")
 	config := filepath.Join("generated", "mihomo.yaml")
-	core := filepath.Join("bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	core := filepath.Join("bin", "linux-"+runtime.GOARCH, "lc-mihomo-meta")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeResetFile(t, config, "external-controller: 127.0.0.1:9090\n")
 	writeResetFile(t, core, "#!/bin/sh\ntrap 'exit 0' TERM INT\nwhile :; do sleep 1; done\n")
 	if err := os.Chmod(core, 0o755); err != nil {

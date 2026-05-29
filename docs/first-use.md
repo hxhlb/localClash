@@ -25,7 +25,7 @@ Download it:
 go run . core download --force
 ```
 
-On macOS arm64 this writes `bin/darwin-arm64/mihomo-meta`. The default host
+On macOS arm64 this writes `bin/darwin-arm64/lc-mihomo-meta`. The default host
 target downloads only the host `meta` core; it does not download Linux Smart
 cores.
 
@@ -89,8 +89,8 @@ Router deployment must be explicit:
 go run . core download --target router --arch arm64 --force
 ```
 
-This downloads Linux router cores to `bin/linux-arm64/mihomo-meta` and
-`bin/linux-arm64/mihomo-smart`. Use MCP `environment_inspect` before router
+This downloads Linux router cores to `bin/linux-arm64/lc-mihomo-meta` and
+`bin/linux-arm64/lc-mihomo-smart`. Use MCP `environment_inspect` before router
 changes, then `config_configure` with `runtime_profile: router` and
 `core: smart` when that is the intended runtime.
 
