@@ -34,6 +34,9 @@ func TestRunResetDoesNotBootstrapRuntimeFirst(t *testing.T) {
 }
 
 func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime process-name discovery requires procfs")
+	}
 	dir := t.TempDir()
 	t.Chdir(dir)
 
@@ -48,11 +51,8 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	core := filepath.Join("bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	core := filepath.Join("bin", "linux-"+runtime.GOARCH, "lc-mihomo-meta")
 	cmd := startFakeRuntime(t, core, workDir, config)
-	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	output := captureStdout(t, func() error {
 		return run([]string{"runtime", "status", "--json"})
@@ -74,6 +74,9 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 }
 
 func TestRunRuntimeStatusUsesDetectedWorkDir(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime process-name discovery requires procfs")
+	}
 	installDir := t.TempDir()
 	wrongDir := t.TempDir()
 	t.Setenv("LOCALCLASH_WORKDIR", installDir)
@@ -90,11 +93,8 @@ func TestRunRuntimeStatusUsesDetectedWorkDir(t *testing.T) {
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	core := filepath.Join(installDir, "bin", "linux-"+runtime.GOARCH, "mihomo-meta")
+	core := filepath.Join(installDir, "bin", "linux-"+runtime.GOARCH, "lc-mihomo-meta")
 	cmd := startFakeRuntime(t, core, workDir, config)
-	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	output := captureStdout(t, func() error {
 		return run([]string{"runtime", "status", "--json"})
@@ -624,38 +624,6 @@ func readMainCount(t *testing.T, path string) int {
 		t.Fatal(err)
 	}
 	return count
-}
-
-func TestRunStopRemovesStalePIDFile(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-
-	workDir := filepath.Join(dir, "runtime")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	pidFile := filepath.Join(workDir, "mihomo.pid")
-	if err := os.WriteFile(pidFile, []byte("not-a-pid\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	output := captureStdout(t, func() error {
-		return run([]string{"stop", "--workdir", workDir, "--json"})
-	})
-	var result struct {
-		Stopped        bool `json:"stopped"`
-		StalePIDFile   bool `json:"stale_pid_file"`
-		RemovedPIDFile bool `json:"removed_pid_file"`
-	}
-	if err := json.Unmarshal([]byte(output), &result); err != nil {
-		t.Fatalf("stop JSON = %q, error = %v", output, err)
-	}
-	if result.Stopped || !result.StalePIDFile || !result.RemovedPIDFile {
-		t.Fatalf("stop result = %+v, want stale pid file removed", result)
-	}
-	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
-		t.Fatalf("pid file should be removed, err=%v", err)
-	}
 }
 
 func captureStdout(t *testing.T, fn func() error) string {

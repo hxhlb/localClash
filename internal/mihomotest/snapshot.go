@@ -9,7 +9,6 @@ import (
 var skippedRuntimeNames = map[string]bool{
 	"logs":       true,
 	"mihomo.log": true,
-	"mihomo.pid": true,
 	"ui":         true,
 }
 

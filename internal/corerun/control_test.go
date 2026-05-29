@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,23 +17,21 @@ func TestStatusReportsRunningRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := writeStartConfig(t, dir)
+	table := stubProcessTable(t)
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer killProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
+	table.add(cmd.Process.Pid, "lc-mihomo-smart", []string{"lc-mihomo-smart", "-d", ".runtime/mihomo", "-f", "generated/mihomo.yaml"})
 
 	result := Status(StatusOptions{
 		ConfigPath: config,
 		WorkDir:    workDir,
 		LogPath:    filepath.Join(workDir, "mihomo.log"),
 	})
-	if !result.Running || result.PID != cmd.Process.Pid || result.StalePIDFile {
+	if !result.Running || result.PID != cmd.Process.Pid {
 		t.Fatalf("status = %+v, want running pid %d", result, cmd.Process.Pid)
 	}
 	if result.ExternalUIURL != "http://127.0.0.1:9090/ui" {
@@ -42,96 +39,50 @@ func TestStatusReportsRunningRuntime(t *testing.T) {
 	}
 }
 
-func TestStatusReportsStalePIDWhenProcessDoesNotMatchRuntime(t *testing.T) {
+func TestStatusIgnoresUnmanagedProcessName(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	config := writeStartConfig(t, dir)
+	table := stubProcessTable(t)
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer killProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{"sleep", "30"})
+	table.add(cmd.Process.Pid, "sleep", []string{"sleep", "30"})
 
 	result := Status(StatusOptions{
 		ConfigPath: config,
 		WorkDir:    workDir,
 		LogPath:    filepath.Join(workDir, "mihomo.log"),
 	})
-	if result.Running || !result.ProcessAlive || !result.StalePIDFile || !strings.Contains(result.StalePIDFileReason, "not the configured Mihomo core") {
-		t.Fatalf("status = %+v, want live non-runtime pid reported stale", result)
+	if result.Running || result.PID != 0 {
+		t.Fatalf("status = %+v, want unmanaged process ignored", result)
 	}
 }
 
-func TestStatusReportsStalePIDFile(t *testing.T) {
+func TestStatusSkipsConfigTestProcess(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte("99999999\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	result := Status(StatusOptions{WorkDir: workDir})
-	if result.Running || !result.StalePIDFile || result.PID != 99999999 {
-		t.Fatalf("status = %+v, want stale pid file", result)
-	}
-}
-
-func TestStatusReportsStalePIDForZombieProcess(t *testing.T) {
-	dir := t.TempDir()
-	workDir := filepath.Join(dir, "runtime")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	table := stubProcessTable(t)
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer killProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stubProcessZombie(t, cmd.Process.Pid, true)
+	table.add(cmd.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", "generated/mihomo.yaml", "-t"})
 
 	result := Status(StatusOptions{WorkDir: workDir})
-	if result.Running || result.ProcessAlive || !result.ProcessZombie || !result.StalePIDFile || !strings.Contains(result.StalePIDFileReason, "zombie") {
-		t.Fatalf("status = %+v, want zombie pid reported stale", result)
-	}
-}
-
-func TestStatusReportsOrphanRuntimeWithoutPIDFile(t *testing.T) {
-	dir := t.TempDir()
-	workDir := filepath.Join(dir, "runtime")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := writeStartConfig(t, dir)
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer killProcess(cmd.Process.Pid)
-	go func() { _ = cmd.Wait() }()
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
-	stubProcessList(t, cmd.Process.Pid)
-
-	result := Status(StatusOptions{
-		CorePath:   "mihomo",
-		ConfigPath: config,
-		WorkDir:    workDir,
-	})
-	if !result.Running || !result.OrphanRuntime || result.PID != cmd.Process.Pid || len(result.OrphanPIDs) != 1 {
-		t.Fatalf("status = %+v, want orphan runtime pid %d", result, cmd.Process.Pid)
+	if result.Running || result.PID != 0 {
+		t.Fatalf("status = %+v, want config-test process skipped", result)
 	}
 }
 
@@ -142,6 +93,7 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := writeStartConfig(t, dir)
+	table := stubProcessTable(t)
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -151,16 +103,13 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 		_ = cmd.Wait()
 		close(done)
 	}()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
+	table.add(cmd.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", ".runtime/mihomo", "-f", "generated/mihomo.yaml"})
 
 	result, err := Stop(StopOptions{CorePath: "mihomo", ConfigPath: config, WorkDir: workDir, Timeout: 2 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Stopped || !result.WasRunning || result.PID != cmd.Process.Pid || !result.RemovedPIDFile {
+	if !result.Stopped || !result.WasRunning || result.PID != cmd.Process.Pid || result.ProcessNames[0] != "lc-mihomo-meta" {
 		t.Fatalf("stop = %+v, want stopped pid %d", result, cmd.Process.Pid)
 	}
 	select {
@@ -168,29 +117,35 @@ func TestStopTerminatesRunningRuntime(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("process pid %d was not reaped", cmd.Process.Pid)
 	}
-	if _, err := os.Stat(runtimePIDPath(workDir)); !os.IsNotExist(err) {
-		t.Fatalf("pid file should be removed, err=%v", err)
-	}
 }
 
-func TestStopTerminatesOrphanRuntimeWithoutPIDFile(t *testing.T) {
+func TestStopTerminatesAllManagedCores(t *testing.T) {
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	config := writeStartConfig(t, dir)
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
+	table := stubProcessTable(t)
+	meta := exec.Command("sleep", "30")
+	if err := meta.Start(); err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan struct{})
+	smart := exec.Command("sleep", "30")
+	if err := smart.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 2)
 	go func() {
-		_ = cmd.Wait()
-		close(done)
+		_ = meta.Wait()
+		done <- meta.Process.Pid
 	}()
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{"mihomo", "-d", workDir, "-f", config})
-	stubProcessList(t, cmd.Process.Pid)
+	go func() {
+		_ = smart.Wait()
+		done <- smart.Process.Pid
+	}()
+	table.add(meta.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", config})
+	table.add(smart.Process.Pid, "lc-mihomo-smart", []string{"lc-mihomo-smart", "-d", workDir, "-f", config})
 
 	result, err := Stop(StopOptions{
 		CorePath:   "mihomo",
@@ -201,65 +156,10 @@ func TestStopTerminatesOrphanRuntimeWithoutPIDFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Stopped || !result.WasRunning || !result.OrphanRuntime || len(result.StoppedPIDs) != 1 || result.StoppedPIDs[0] != cmd.Process.Pid {
-		t.Fatalf("stop = %+v, want stopped orphan pid %d", result, cmd.Process.Pid)
+	if !result.Stopped || !result.WasRunning || len(result.StoppedPIDs) != 2 {
+		t.Fatalf("stop = %+v, want both managed core pids stopped", result)
 	}
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("orphan process pid %d was not reaped", cmd.Process.Pid)
-	}
-}
-
-func TestStopRemovesZombiePIDFile(t *testing.T) {
-	dir := t.TempDir()
-	workDir := filepath.Join(dir, "runtime")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer killProcess(cmd.Process.Pid)
-	go func() { _ = cmd.Wait() }()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	stubProcessZombie(t, cmd.Process.Pid, true)
-
-	result, err := Stop(StopOptions{WorkDir: workDir, Timeout: 2 * time.Second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Stopped || result.WasRunning || !result.ProcessZombie || !result.StalePIDFile || !result.RemovedPIDFile {
-		t.Fatalf("stop = %+v, want zombie pid cleanup without stop timeout", result)
-	}
-	if _, err := os.Stat(runtimePIDPath(workDir)); !os.IsNotExist(err) {
-		t.Fatalf("pid file should be removed, err=%v", err)
-	}
-}
-
-func TestStopRemovesStalePIDFile(t *testing.T) {
-	dir := t.TempDir()
-	workDir := filepath.Join(dir, "runtime")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte("not-a-pid\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := Stop(StopOptions{WorkDir: workDir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Stopped || result.WasRunning || !result.StalePIDFile || !result.RemovedPIDFile {
-		t.Fatalf("stop = %+v, want stale pid cleanup", result)
-	}
-	if _, err := os.Stat(runtimePIDPath(workDir)); !os.IsNotExist(err) {
-		t.Fatalf("pid file should be removed, err=%v", err)
-	}
+	waitForStoppedPIDs(t, done, meta.Process.Pid, smart.Process.Pid)
 }
 
 func TestRestartValidatesConfigBeforeRestartingRuntime(t *testing.T) {
@@ -268,16 +168,14 @@ func TestRestartValidatesConfigBeforeRestartingRuntime(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	table := stubProcessTable(t)
 	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer killProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	writeStartExecutable(t, core, `#!/bin/sh
 if [ "$1" = "-v" ]; then
   echo Mihomo Meta test
@@ -292,7 +190,10 @@ done
 sleep 30
 `)
 	config := writeStartConfig(t, dir)
-	stubProcessCommandLine(t, cmd.Process.Pid, []string{core, "-d", workDir, "-f", config})
+	table.add(cmd.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", config})
+	stubAfterProcessStart(t, func(started *exec.Cmd) {
+		table.add(started.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", config})
+	})
 
 	result, err := Restart(context.Background(), RestartOptions{
 		CorePath:   core,
@@ -314,7 +215,7 @@ sleep 30
 
 func TestRestartReusesCachedValidationForUnchangedConfigAndCore(t *testing.T) {
 	dir := t.TempDir()
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	counter := filepath.Join(dir, "count")
 	writeStartExecutable(t, core, `#!/bin/sh
 if [ "$1" = "-v" ]; then
@@ -336,6 +237,10 @@ sleep 30
 	config := writeStartConfig(t, dir)
 	workDir := filepath.Join(dir, "runtime")
 	cache := filepath.Join(dir, "validation-cache.json")
+	table := stubProcessTable(t)
+	stubAfterProcessStart(t, func(started *exec.Cmd) {
+		table.add(started.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", config})
+	})
 
 	first, err := Restart(context.Background(), RestartOptions{
 		CorePath:            core,
@@ -389,20 +294,6 @@ func TestParseProcStatState(t *testing.T) {
 	}
 }
 
-func stubProcessCommandLine(t *testing.T, pid int, args []string) {
-	t.Helper()
-	original := readProcessCommandLine
-	readProcessCommandLine = func(candidate int) ([]string, bool, error) {
-		if candidate == pid {
-			return args, true, nil
-		}
-		return original(candidate)
-	}
-	t.Cleanup(func() {
-		readProcessCommandLine = original
-	})
-}
-
 func stubProcessZombie(t *testing.T, pid int, zombie bool) {
 	t.Helper()
 	original := processZombie
@@ -417,15 +308,73 @@ func stubProcessZombie(t *testing.T, pid int, zombie bool) {
 	})
 }
 
-func stubProcessList(t *testing.T, pids ...int) {
+type processTable struct {
+	names map[int]string
+	args  map[int][]string
+}
+
+func stubProcessTable(t *testing.T) *processTable {
 	t.Helper()
-	original := listProcessIDs
+	table := &processTable{names: map[int]string{}, args: map[int][]string{}}
+	originalList := listProcessIDs
+	originalComm := readProcessComm
+	originalCommandLine := readProcessCommandLine
 	listProcessIDs = func() []int {
-		return append([]int(nil), pids...)
+		pids := make([]int, 0, len(table.names))
+		for pid := range table.names {
+			pids = append(pids, pid)
+		}
+		return pids
+	}
+	readProcessComm = func(candidate int) (string, bool, error) {
+		if name, ok := table.names[candidate]; ok {
+			return name, true, nil
+		}
+		return originalComm(candidate)
+	}
+	readProcessCommandLine = func(candidate int) ([]string, bool, error) {
+		if args, ok := table.args[candidate]; ok {
+			return append([]string(nil), args...), true, nil
+		}
+		return originalCommandLine(candidate)
 	}
 	t.Cleanup(func() {
-		listProcessIDs = original
+		listProcessIDs = originalList
+		readProcessComm = originalComm
+		readProcessCommandLine = originalCommandLine
 	})
+	return table
+}
+
+func (table *processTable) add(pid int, name string, args []string) {
+	table.names[pid] = name
+	table.args[pid] = append([]string(nil), args...)
+}
+
+func stubAfterProcessStart(t *testing.T, hook func(*exec.Cmd)) {
+	t.Helper()
+	original := afterProcessStart
+	afterProcessStart = hook
+	t.Cleanup(func() {
+		afterProcessStart = original
+	})
+}
+
+func waitForStoppedPIDs(t *testing.T, done <-chan int, pids ...int) {
+	t.Helper()
+	want := map[int]bool{}
+	for _, pid := range pids {
+		want[pid] = true
+	}
+	deadline := time.After(2 * time.Second)
+	for len(want) > 0 {
+		select {
+		case pid := <-done:
+			delete(want, pid)
+		case <-deadline:
+			t.Fatalf("processes were not reaped: %+v", want)
+		}
+	}
 }
 
 func readControlTestFile(t *testing.T, path string) string {
@@ -443,6 +392,7 @@ func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	table := stubProcessTable(t)
 	old := exec.Command("sleep", "30")
 	if err := old.Start(); err != nil {
 		t.Fatal(err)
@@ -452,10 +402,7 @@ func TestRestartStopsExistingRuntimeAndStartsNewRuntime(t *testing.T) {
 		_ = old.Wait()
 		close(oldDone)
 	}()
-	if err := os.WriteFile(runtimePIDPath(workDir), []byte(strconv.Itoa(old.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	writeStartExecutable(t, core, `#!/bin/sh
 if [ "$1" = "-v" ]; then
   echo Mihomo Meta test
@@ -470,7 +417,10 @@ done
 sleep 30
 `)
 	config := writeStartConfig(t, dir)
-	stubProcessCommandLine(t, old.Process.Pid, []string{core, "-d", workDir, "-f", config})
+	table.add(old.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", config})
+	stubAfterProcessStart(t, func(started *exec.Cmd) {
+		table.add(started.Process.Pid, "lc-mihomo-meta", []string{"lc-mihomo-meta", "-d", workDir, "-f", config})
+	})
 	var stages []RestartStageEvent
 
 	result, err := Restart(context.Background(), RestartOptions{

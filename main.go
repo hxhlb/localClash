@@ -699,9 +699,11 @@ func printRuntimeStatus(result corerun.StatusResult) {
 		fmt.Println("mihomo runtime not running")
 	}
 	fmt.Printf("runtime dir: %s\n", result.RuntimeDir)
-	fmt.Printf("pid file: %s\n", result.PIDFile)
-	if result.PID != 0 {
-		fmt.Printf("pid alive: %t\n", result.ProcessAlive)
+	if len(result.PIDs) > 0 {
+		fmt.Printf("managed pids: %v\n", result.PIDs)
+	}
+	if len(result.ProcessNames) > 0 {
+		fmt.Printf("process names: %v\n", result.ProcessNames)
 	}
 	fmt.Printf("config: %s\n", result.Config)
 	fmt.Printf("log: %s\n", result.LogFile)
@@ -711,9 +713,6 @@ func printRuntimeStatus(result corerun.StatusResult) {
 	if result.ExternalUIURL != "" {
 		fmt.Printf("external ui: %s\n", result.ExternalUIURL)
 	}
-	if result.StalePIDFile {
-		fmt.Printf("stale pid file: %s\n", result.StalePIDFileReason)
-	}
 }
 
 func printRuntimeStop(result corerun.StopResult) {
@@ -722,15 +721,15 @@ func printRuntimeStop(result corerun.StopResult) {
 		fmt.Printf("stopped mihomo runtime pid %d with %s\n", result.PID, result.Signal)
 	case result.WasRunning:
 		fmt.Printf("mihomo runtime pid %d did not stop\n", result.PID)
-	case result.StalePIDFile:
-		fmt.Printf("removed stale mihomo pid file: %s\n", result.StalePIDFileReason)
 	default:
 		fmt.Println("mihomo runtime was not running")
 	}
 	fmt.Printf("runtime dir: %s\n", result.RuntimeDir)
-	fmt.Printf("pid file: %s\n", result.PIDFile)
-	if result.RemovedPIDFile {
-		fmt.Println("pid file removed")
+	if len(result.PIDs) > 0 {
+		fmt.Printf("managed pids: %v\n", result.PIDs)
+	}
+	if len(result.ProcessNames) > 0 {
+		fmt.Printf("process names: %v\n", result.ProcessNames)
 	}
 	if result.Forced {
 		fmt.Println("forced: true")
