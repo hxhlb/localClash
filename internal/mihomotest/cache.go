@@ -287,7 +287,7 @@ func normalizeValidationOptions(opts ValidationOptions) ValidationOptions {
 		opts.CachePath = DefaultCachePath(opts.WorkDir)
 	}
 	if opts.Timeout == 0 {
-		opts.Timeout = 90 * time.Second
+		opts.Timeout = 180 * time.Second
 	}
 	if opts.Now == nil {
 		opts.Now = time.Now

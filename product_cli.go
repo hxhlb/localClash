@@ -333,7 +333,7 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 	if err := parseJSONOnly("runtime "+args[0], args[1:]); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	switch args[0] {
 	case "status":
@@ -659,7 +659,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 	}
 	changes := []string{}
 	warnings := []string{}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	service := emptyAsLeave(input.Service)
 	switch service {

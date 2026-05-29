@@ -2360,7 +2360,7 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 	result, err := corerun.Start(ctx, corerun.StartOptions{
 		CorePath:            in.Core,
@@ -2418,7 +2418,7 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 			}
 		}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
 	result, err := corerun.Restart(ctx, corerun.RestartOptions{
 		CorePath:            in.Core,
