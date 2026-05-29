@@ -4,6 +4,10 @@
 
 `localClash` is a Go module for managing a local Mihomo runtime through CLI and MCP surfaces. The root `main.go` owns command routing. Feature code lives under `internal/`, grouped by responsibility: `mcp/` for MCP registry/server behavior, `appinit/` for shared bootstrap state, `configrender/` and `configplan/` for generated configs, `rules/` for rule-source adapters and packs, `doctor/` for diagnostics, and download/runtime helpers in `coredownload/`, `subdownload/`, `dashboard/`, and `corerun/`. Repository docs live in `docs/`; static policy-template inputs are in `policy-templates/` and static rule-source inputs are in `rule-sources/`. Treat `.runtime/`, `generated/`, `bin/`, `subscription*.gob`, and `localclash-subscriptions.json` as local artifacts or secrets, not source.
 
+## LuCI Project Relationship
+
+`/Volumes/Data/Github/localclash-luci` is the sibling OpenWrt LuCI surface for this core project. Keep ownership explicit: this repository owns the Go runtime, product-level CLI/MCP API, subscriptions, config rendering, runtime lifecycle, release manifests, and router-safe diagnostics; the LuCI repository owns UI, package, ACL, menu, and helper files that call those product surfaces. Start future LuCI maintenance tasks from this core project so agents first verify the current core contract, release/manifest state, and runtime behavior before changing the LuCI UI/package layer. When edits must land in `../localclash-luci`, keep them scoped there and do not move runtime logic, generated runtime artifacts, or Mihomo/dashboard assets into the LuCI package.
+
 ## Build, Test, and Development Commands
 
 - `rtk go test ./...`: run the full Go test suite.
