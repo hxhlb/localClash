@@ -13,7 +13,6 @@ func TestSnapshotRuntimeDirCopiesValidationArtifactsWithoutLiveCache(t *testing.
 	mustWrite(t, filepath.Join(source, "cache.db"), "live cache")
 	mustWrite(t, filepath.Join(source, "cache.db-shm"), "live cache shm")
 	mustWrite(t, filepath.Join(source, "cache.db-wal"), "live cache wal")
-	mustWrite(t, filepath.Join(source, "mihomo.pid"), "1234\n")
 	mustWrite(t, filepath.Join(source, "mihomo.log"), "log")
 	mustWrite(t, filepath.Join(source, "rule-packs", "pack.yaml"), "payload")
 	mustWrite(t, filepath.Join(source, "rule-packs", "cache.db"), "nested cache")
@@ -35,7 +34,6 @@ func TestSnapshotRuntimeDirCopiesValidationArtifactsWithoutLiveCache(t *testing.
 		"cache.db",
 		"cache.db-shm",
 		"cache.db-wal",
-		"mihomo.pid",
 		"mihomo.log",
 		filepath.Join("rule-packs", "cache.db"),
 		filepath.Join("ui", "index.html"),

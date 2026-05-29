@@ -382,20 +382,18 @@ MCP runtime tool:
 - `run_runtime`: starts Mihomo from `generated/mihomo.yaml` in the background.
   If the effective subscription exists but the generated config is missing,
   localClash renders `generated/mihomo.yaml` before starting runtime.
-- `restart_runtime`: validates/renders config, stops the recorded Mihomo
-  process if needed, and starts it again in one confirmed call. Use this when
-  Mihomo is already running and the agent may lose connectivity between a
-  separate `stop_runtime` and `run_runtime`.
+- `restart_runtime`: validates/renders config, stops localClash-owned Mihomo
+  processes by managed core process name, and starts the selected core again in
+  one confirmed call. Use this when Mihomo is already running and the agent may
+  lose connectivity between a separate `stop_runtime` and `run_runtime`.
 - `stop_runtime`: stops Mihomo only when it is not still required by active
   router takeover. If `router_takeover_status.effective` is true, call
   `router_takeover_stop` first, or pass `force: true` only after explicit user
   confirmation.
 
-`runtime_status` and `stop_runtime` do not trust the pid file alone. They also
-scan for matching orphan Mihomo processes that use the configured core, runtime
-directory, and generated config. When an orphan is found, `runtime_status`
-reports `orphan_runtime` and `orphan_pids`, and `stop_runtime` stops the
-matching orphan processes together with the recorded pid-file runtime.
+localClash-owned Mihomo cores are downloaded with managed process names
+(`lc-mihomo-meta` and `lc-mihomo-smart`), and lifecycle tools scan those exact
+names while skipping temporary `-t` config-test processes.
 
 `run_runtime` and `restart_runtime` are `confirm_required`. localClash does not
 implement an interactive yes/no prompt inside the tool; the Agent SDK or MCP
@@ -506,7 +504,7 @@ go run . core download
 
 By default the command targets the current host and downloads only the host
 `meta` core from `MetaCubeX/mihomo`, for example
-`bin/darwin-arm64/mihomo-meta` on macOS arm64. It does not silently download a
+`bin/darwin-arm64/lc-mihomo-meta` on macOS arm64. It does not silently download a
 Linux Smart core on macOS.
 
 To inspect the selected release asset without downloading:
@@ -525,7 +523,7 @@ go run . core download --target router --arch arm64 --force
 To download one exact flavor or custom output path:
 
 ```bash
-go run . core download --target router --flavor smart --arch arm64 --output bin/linux-arm64/mihomo-smart
+go run . core download --target router --flavor smart --arch arm64 --output bin/linux-arm64/lc-mihomo-smart
 ```
 
 ## Subscription Download
@@ -583,7 +581,7 @@ packs, selected policy-template patches, and finally fallback.
 Test the generated config:
 
 ```bash
-./bin/darwin-arm64/mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml -t
+./bin/darwin-arm64/lc-mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml -t
 ```
 
 Run the generated config:
@@ -595,7 +593,7 @@ go run . run
 By default this is equivalent to:
 
 ```bash
-./bin/darwin-arm64/mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml
+./bin/darwin-arm64/lc-mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml
 ```
 
 Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
@@ -608,12 +606,13 @@ go run . stop
 go run . restart
 ```
 
-`status` reads `.runtime/mihomo/mihomo.pid` and reports the generated config,
-log file, external controller, and dashboard URL when available. Use
-`go run . status --json` for scripts. `stop` sends SIGTERM to the recorded
-process and removes stale PID files; use `--force` to send SIGKILL if the
-runtime does not stop before `--timeout`. `restart` validates the generated
-config before stopping the old process, then starts a new background runtime.
+`status` scans for localClash-owned Mihomo process names and reports the
+generated config, log file, external controller, and dashboard URL when
+available. Use `go run . status --json` for scripts. `stop` sends SIGTERM to
+managed `lc-mihomo-meta` / `lc-mihomo-smart` processes and removes the legacy
+PID file if present; use `--force` to send SIGKILL if the runtime does not stop
+before `--timeout`. `restart` validates the generated config before stopping
+the old managed process, then starts a new background runtime.
 The MCP `stop_runtime` tool adds an Agent safety guard: it refuses to stop
 Mihomo while localClash router takeover is effective unless `force: true` is
 explicitly supplied.

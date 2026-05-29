@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"localclash/internal/mihomotest"
+	"localclash/internal/runtimeprofile"
 )
 
 type StatusOptions struct {
@@ -22,21 +23,15 @@ type StatusOptions struct {
 }
 
 type StatusResult struct {
-	Running            bool   `json:"running"`
-	PID                int    `json:"pid,omitempty"`
-	PIDs               []int  `json:"pids,omitempty"`
-	ProcessAlive       bool   `json:"process_alive,omitempty"`
-	ProcessZombie      bool   `json:"process_zombie,omitempty"`
-	PIDFile            string `json:"pid_file"`
-	StalePIDFile       bool   `json:"stale_pid_file,omitempty"`
-	StalePIDFileReason string `json:"stale_pid_file_reason,omitempty"`
-	OrphanRuntime      bool   `json:"orphan_runtime,omitempty"`
-	OrphanPIDs         []int  `json:"orphan_pids,omitempty"`
-	RuntimeDir         string `json:"runtime_dir"`
-	Config             string `json:"config"`
-	LogFile            string `json:"log_file"`
-	ExternalController string `json:"external_controller,omitempty"`
-	ExternalUIURL      string `json:"external_ui_url,omitempty"`
+	Running            bool     `json:"running"`
+	PID                int      `json:"pid,omitempty"`
+	PIDs               []int    `json:"pids,omitempty"`
+	ProcessNames       []string `json:"process_names,omitempty"`
+	RuntimeDir         string   `json:"runtime_dir"`
+	Config             string   `json:"config"`
+	LogFile            string   `json:"log_file"`
+	ExternalController string   `json:"external_controller,omitempty"`
+	ExternalUIURL      string   `json:"external_ui_url,omitempty"`
 }
 
 type StopOptions struct {
@@ -76,25 +71,19 @@ type RestartTimings struct {
 }
 
 type StopResult struct {
-	Stopped            bool     `json:"stopped"`
-	WasRunning         bool     `json:"was_running"`
-	Refused            bool     `json:"refused,omitempty"`
-	PID                int      `json:"pid,omitempty"`
-	PIDs               []int    `json:"pids,omitempty"`
-	Signal             string   `json:"signal,omitempty"`
-	Forced             bool     `json:"forced,omitempty"`
-	ProcessZombie      bool     `json:"process_zombie,omitempty"`
-	OrphanRuntime      bool     `json:"orphan_runtime,omitempty"`
-	OrphanPIDs         []int    `json:"orphan_pids,omitempty"`
-	StoppedPIDs        []int    `json:"stopped_pids,omitempty"`
-	RuntimeDir         string   `json:"runtime_dir"`
-	PIDFile            string   `json:"pid_file"`
-	RemovedPIDFile     bool     `json:"removed_pid_file,omitempty"`
-	StalePIDFile       bool     `json:"stale_pid_file,omitempty"`
-	StalePIDFileReason string   `json:"stale_pid_file_reason,omitempty"`
-	Error              string   `json:"error,omitempty"`
-	Warnings           []string `json:"warnings,omitempty"`
-	NextActions        []string `json:"next_actions,omitempty"`
+	Stopped      bool     `json:"stopped"`
+	WasRunning   bool     `json:"was_running"`
+	Refused      bool     `json:"refused,omitempty"`
+	PID          int      `json:"pid,omitempty"`
+	PIDs         []int    `json:"pids,omitempty"`
+	ProcessNames []string `json:"process_names,omitempty"`
+	Signal       string   `json:"signal,omitempty"`
+	Forced       bool     `json:"forced,omitempty"`
+	StoppedPIDs  []int    `json:"stopped_pids,omitempty"`
+	RuntimeDir   string   `json:"runtime_dir"`
+	Error        string   `json:"error,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
+	NextActions  []string `json:"next_actions,omitempty"`
 }
 
 type RestartResult struct {
@@ -116,9 +105,7 @@ func Status(opts StatusOptions) StatusResult {
 		WorkDir:    opts.WorkDir,
 		LogPath:    opts.LogPath,
 	})
-	pidPath := runtimePIDPath(normalized.WorkDir)
 	result := StatusResult{
-		PIDFile:    pidPath,
 		RuntimeDir: normalized.WorkDir,
 		Config:     normalized.ConfigPath,
 		LogFile:    normalized.LogPath,
@@ -126,54 +113,17 @@ func Status(opts StatusOptions) StatusResult {
 	endpoints := readRuntimeConfigEndpoints(normalized.ConfigPath)
 	result.ExternalController = endpoints.ExternalController
 	result.ExternalUIURL = externalUIURL(result.ExternalController, endpoints.ExternalUI)
-	applyOrphanRuntimeStatus := func(exclude map[int]bool) {
-		orphanPIDs := findRuntimeProcessPIDs(normalized, exclude)
-		if len(orphanPIDs) == 0 {
-			return
-		}
-		result.Running = true
-		result.OrphanRuntime = true
-		result.OrphanPIDs = orphanPIDs
-		result.PIDs = appendUniquePIDs(result.PIDs, orphanPIDs...)
-		if result.PID == 0 {
-			result.PID = orphanPIDs[0]
-		}
-	}
 
-	pid, exists, err := readPIDFile(pidPath)
-	if !exists {
-		applyOrphanRuntimeStatus(nil)
-		return result
-	}
-	if err != nil {
-		result.StalePIDFile = true
-		result.StalePIDFileReason = err.Error()
-		applyOrphanRuntimeStatus(nil)
-		return result
-	}
-	result.PID = pid
-	result.PIDs = appendUniquePIDs(result.PIDs, pid)
-	if !processRunning(pid) {
-		result.StalePIDFile = true
-		result.StalePIDFileReason = "pid file points to a process that is not running"
-		applyOrphanRuntimeStatus(map[int]bool{pid: true})
-		return result
-	}
-	if processZombie(pid) {
-		result.ProcessZombie = true
-		result.StalePIDFile = true
-		result.StalePIDFileReason = "pid file points to a zombie process"
-		applyOrphanRuntimeStatus(map[int]bool{pid: true})
-		return result
-	}
-	result.ProcessAlive = true
-	if ok, reason := processMatchesRuntime(pid, normalized); !ok {
-		result.StalePIDFile = true
-		result.StalePIDFileReason = reason
-		applyOrphanRuntimeStatus(map[int]bool{pid: true})
+	processes := findManagedRuntimeProcesses()
+	if len(processes) == 0 {
 		return result
 	}
 	result.Running = true
+	for _, process := range processes {
+		result.PIDs = appendUniquePIDs(result.PIDs, process.PID)
+		result.ProcessNames = appendUniqueStrings(result.ProcessNames, process.Name)
+	}
+	result.PID = processes[0].PID
 	return result
 }
 
@@ -204,6 +154,9 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 		NextActions: []string{
 			"call runtime_status to verify the restarted Mihomo process",
 		},
+	}
+	if err := validateManagedCorePath(runOpts.CorePath); err != nil {
+		return result, err
 	}
 	if err := runOpts.validate(); err != nil {
 		return result, err
@@ -301,77 +254,23 @@ func Stop(opts StopOptions) (StopResult, error) {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	pidPath := runtimePIDPath(normalized.WorkDir)
 	result := StopResult{
 		RuntimeDir: normalized.WorkDir,
-		PIDFile:    pidPath,
 	}
 
-	pid, exists, err := readPIDFile(pidPath)
-	if !exists {
-		orphanPIDs := findRuntimeProcessPIDs(normalized, nil)
-		if len(orphanPIDs) == 0 {
-			return result, nil
-		}
-		result.OrphanRuntime = true
-		result.OrphanPIDs = orphanPIDs
-		return stopRuntimePIDs(orphanPIDs, result, pidPath, timeout, opts.ForceKill)
+	processes := findManagedRuntimeProcesses()
+	if len(processes) == 0 {
+		return result, nil
 	}
-	if err != nil {
-		result.StalePIDFile = true
-		result.StalePIDFileReason = err.Error()
-		result.RemovedPIDFile = removePIDFile(pidPath)
-		orphanPIDs := findRuntimeProcessPIDs(normalized, nil)
-		if len(orphanPIDs) == 0 {
-			return result, nil
-		}
-		result.OrphanRuntime = true
-		result.OrphanPIDs = orphanPIDs
-		return stopRuntimePIDs(orphanPIDs, result, pidPath, timeout, opts.ForceKill)
+	result.PID = processes[0].PID
+	for _, process := range processes {
+		result.PIDs = appendUniquePIDs(result.PIDs, process.PID)
+		result.ProcessNames = appendUniqueStrings(result.ProcessNames, process.Name)
 	}
-	result.PID = pid
-	result.PIDs = appendUniquePIDs(result.PIDs, pid)
-	if !processRunning(pid) {
-		result.StalePIDFile = true
-		result.StalePIDFileReason = "pid file points to a process that is not running"
-		result.RemovedPIDFile = removePIDFile(pidPath)
-		orphanPIDs := findRuntimeProcessPIDs(normalized, map[int]bool{pid: true})
-		if len(orphanPIDs) == 0 {
-			return result, nil
-		}
-		result.OrphanRuntime = true
-		result.OrphanPIDs = orphanPIDs
-		return stopRuntimePIDs(orphanPIDs, result, pidPath, timeout, opts.ForceKill)
-	}
-	if processZombie(pid) {
-		result.ProcessZombie = true
-		result.StalePIDFile = true
-		result.StalePIDFileReason = "pid file points to a zombie process"
-		result.RemovedPIDFile = removePIDFile(pidPath)
-		orphanPIDs := findRuntimeProcessPIDs(normalized, map[int]bool{pid: true})
-		if len(orphanPIDs) == 0 {
-			return result, nil
-		}
-		result.OrphanRuntime = true
-		result.OrphanPIDs = orphanPIDs
-		return stopRuntimePIDs(orphanPIDs, result, pidPath, timeout, opts.ForceKill)
-	}
-	if ok, reason := processMatchesRuntime(pid, normalized); !ok {
-		result.StalePIDFile = true
-		result.StalePIDFileReason = reason
-		result.RemovedPIDFile = removePIDFile(pidPath)
-		orphanPIDs := findRuntimeProcessPIDs(normalized, map[int]bool{pid: true})
-		if len(orphanPIDs) == 0 {
-			return result, nil
-		}
-		result.OrphanRuntime = true
-		result.OrphanPIDs = orphanPIDs
-		return stopRuntimePIDs(orphanPIDs, result, pidPath, timeout, opts.ForceKill)
-	}
-	return stopRuntimePIDs([]int{pid}, result, pidPath, timeout, opts.ForceKill)
+	return stopRuntimePIDs(result.PIDs, result, timeout, opts.ForceKill)
 }
 
-func stopRuntimePIDs(pids []int, result StopResult, pidPath string, timeout time.Duration, forceKill bool) (StopResult, error) {
+func stopRuntimePIDs(pids []int, result StopResult, timeout time.Duration, forceKill bool) (StopResult, error) {
 	result.PIDs = appendUniquePIDs(result.PIDs, pids...)
 	if len(pids) == 0 {
 		return result, nil
@@ -390,7 +289,6 @@ func stopRuntimePIDs(pids []int, result StopResult, pidPath string, timeout time
 	if waitForAllExit(pids, timeout) {
 		result.Stopped = true
 		result.StoppedPIDs = appendUniquePIDs(result.StoppedPIDs, pids...)
-		result.RemovedPIDFile = removePIDFile(pidPath)
 		return result, nil
 	}
 	if !forceKill {
@@ -414,37 +312,17 @@ func stopRuntimePIDs(pids []int, result StopResult, pidPath string, timeout time
 	if waitForAllExit(pids, timeout) {
 		result.Stopped = true
 		result.StoppedPIDs = appendUniquePIDs(result.StoppedPIDs, pids...)
-		result.RemovedPIDFile = removePIDFile(pidPath)
 		return result, nil
 	}
 	result.Error = "runtime did not stop after SIGKILL"
 	return result, nil
 }
 
-func readPIDFile(path string) (int, bool, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, false, nil
-		}
-		return 0, true, err
+func validateManagedCorePath(corePath string) error {
+	if managedProcessNames[filepath.Base(corePath)] {
+		return nil
 	}
-	text := strings.TrimSpace(string(data))
-	if text == "" {
-		return 0, true, fmt.Errorf("pid file is empty")
-	}
-	pid, err := strconv.Atoi(text)
-	if err != nil || pid <= 0 {
-		return 0, true, fmt.Errorf("pid file contains invalid pid %q", text)
-	}
-	return pid, true, nil
-}
-
-func removePIDFile(path string) bool {
-	if err := os.Remove(path); err == nil || os.IsNotExist(err) {
-		return true
-	}
-	return false
+	return fmt.Errorf("background runtime core %q is not a localClash managed core name; use %s or %s", corePath, runtimeprofile.ManagedMetaCoreName, runtimeprofile.ManagedSmartCoreName)
 }
 
 func waitForExit(pid int, timeout time.Duration) bool {
@@ -480,6 +358,75 @@ func waitForAllExit(pids []int, timeout time.Duration) bool {
 	}
 }
 
+type runtimeProcess struct {
+	PID  int
+	Name string
+}
+
+var managedProcessNames = map[string]bool{
+	runtimeprofile.ManagedMetaCoreName:  true,
+	runtimeprofile.ManagedSmartCoreName: true,
+}
+
+func findManagedRuntimeProcesses() []runtimeProcess {
+	return findRuntimeProcessesByName(managedProcessNames)
+}
+
+func findRuntimeProcessesByName(names map[string]bool) []runtimeProcess {
+	var processes []runtimeProcess
+	for _, pid := range listProcessIDs() {
+		if pid <= 0 || pid == os.Getpid() {
+			continue
+		}
+		if !processRunning(pid) || processZombie(pid) {
+			continue
+		}
+		name, ok, err := readProcessComm(pid)
+		if err != nil || !ok || !names[name] {
+			continue
+		}
+		if processCommandHasExactArg(pid, "-t") {
+			continue
+		}
+		processes = append(processes, runtimeProcess{PID: pid, Name: name})
+	}
+	sort.Slice(processes, func(i, j int) bool {
+		if processes[i].PID == processes[j].PID {
+			return processes[i].Name < processes[j].Name
+		}
+		return processes[i].PID < processes[j].PID
+	})
+	return processes
+}
+
+func processCommandHasExactArg(pid int, arg string) bool {
+	args, ok, err := readProcessCommandLine(pid)
+	if err != nil || !ok {
+		return false
+	}
+	for _, value := range args {
+		if value == arg {
+			return true
+		}
+	}
+	return false
+}
+
+var readProcessComm = func(pid int) (string, bool, error) {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "comm"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "" {
+		return "", true, nil
+	}
+	return name, true, nil
+}
+
 var processZombie = defaultProcessZombie
 
 func defaultProcessZombie(pid int) bool {
@@ -505,48 +452,6 @@ func parseProcStatState(stat string) (byte, bool) {
 		return 0, false
 	}
 	return fields[0][0], true
-}
-
-func processMatchesRuntime(pid int, opts StartOptions) (bool, string) {
-	args, ok, err := readProcessCommandLine(pid)
-	if err != nil || !ok || len(args) == 0 {
-		return true, ""
-	}
-	return processCommandMatchesRuntime(args, opts, "pid file points to a live process")
-}
-
-func processCommandMatchesRuntime(args []string, opts StartOptions, subject string) (bool, string) {
-	if !processCommandArgsLookLikeCore(args, opts.CorePath) {
-		return false, subject + ", but it is not the configured Mihomo core"
-	}
-	if !processCommandHasArg(args, "-d", opts.WorkDir) {
-		return false, subject + ", but it is not using the configured runtime directory"
-	}
-	if !processCommandHasArg(args, "-f", opts.ConfigPath) {
-		return false, subject + ", but it is not using the configured config"
-	}
-	return true, ""
-}
-
-func findRuntimeProcessPIDs(opts StartOptions, exclude map[int]bool) []int {
-	var pids []int
-	for _, pid := range listProcessIDs() {
-		if pid <= 0 || pid == os.Getpid() || exclude[pid] {
-			continue
-		}
-		if !processRunning(pid) || processZombie(pid) {
-			continue
-		}
-		args, ok, err := readProcessCommandLine(pid)
-		if err != nil || !ok || len(args) == 0 {
-			continue
-		}
-		if matched, _ := processCommandMatchesRuntime(args, opts, "process"); matched {
-			pids = append(pids, pid)
-		}
-	}
-	sort.Ints(pids)
-	return pids
 }
 
 var listProcessIDs = defaultListProcessIDs
@@ -586,6 +491,23 @@ func appendUniquePIDs(existing []int, pids ...int) []int {
 	return existing
 }
 
+func appendUniqueStrings(existing []string, values ...string) []string {
+	seen := map[string]bool{}
+	for _, value := range existing {
+		if value != "" {
+			seen[value] = true
+		}
+	}
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		existing = append(existing, value)
+		seen[value] = true
+	}
+	return existing
+}
+
 var readProcessCommandLine = func(pid int) ([]string, bool, error) {
 	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
 	if err != nil {
@@ -599,37 +521,4 @@ var readProcessCommandLine = func(pid int) ([]string, bool, error) {
 		return nil, true, nil
 	}
 	return fields, true, nil
-}
-
-func processCommandLooksLikeCore(command, corePath string) bool {
-	commandBase := filepath.Base(command)
-	coreBase := filepath.Base(corePath)
-	if command == corePath || commandBase == coreBase {
-		return true
-	}
-	lower := strings.ToLower(commandBase)
-	return strings.Contains(lower, "mihomo")
-}
-
-func processCommandArgsLookLikeCore(args []string, corePath string) bool {
-	limit := len(args)
-	if limit > 2 {
-		limit = 2
-	}
-	for i := 0; i < limit; i++ {
-		if processCommandLooksLikeCore(args[i], corePath) {
-			return true
-		}
-	}
-	return false
-}
-
-func processCommandHasArg(args []string, flag, expected string) bool {
-	expected = filepath.Clean(expected)
-	for i := 0; i < len(args)-1; i++ {
-		if args[i] == flag && filepath.Clean(args[i+1]) == expected {
-			return true
-		}
-	}
-	return false
 }

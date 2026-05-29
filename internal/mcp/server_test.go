@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -2316,7 +2316,7 @@ func TestToolsCallEnvironmentInspectReturnsSerializableResult(t *testing.T) {
 
 func TestRunRuntimeToolReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	writeTestExecutable(t, core, `#!/bin/sh
 if [ "$1" = "-v" ]; then
   echo Mihomo Meta test
@@ -2393,7 +2393,7 @@ func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
 
 func TestRestartRuntimeToolHonorsForceConfigTest(t *testing.T) {
 	dir := t.TempDir()
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	counter := filepath.Join(dir, "test-count")
 	writeTestExecutable(t, core, fmt.Sprintf(`#!/bin/sh
 if [ "$1" = "-v" ]; then
@@ -2544,6 +2544,9 @@ func TestServerShutdownCancelsQueuedAsyncTasks(t *testing.T) {
 }
 
 func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime process-name discovery requires procfs")
+	}
 	dir := t.TempDir()
 	workDir := filepath.Join(dir, "runtime")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -2553,7 +2556,7 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 	if err := os.WriteFile(config, []byte("external-controller: 127.0.0.1:9090\nexternal-ui: ui/zashboard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	writeTestExecutable(t, core, "#!/bin/sh\nsleep 30\n")
 	cmd := exec.Command(core, "-d", workDir, "-f", config)
 	if err := cmd.Start(); err != nil {
@@ -2561,9 +2564,6 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 	}
 	defer killMCPProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -2595,8 +2595,11 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 }
 
 func TestStopRuntimeToolStopsStartedRuntime(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("runtime process-name discovery requires procfs")
+	}
 	dir := t.TempDir()
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	writeTestExecutable(t, core, `#!/bin/sh
 if [ "$1" = "-v" ]; then
   echo Mihomo Meta test
@@ -2684,9 +2687,6 @@ func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(workDir, "mihomo.pid"), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -2766,7 +2766,7 @@ func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 		Paths: appinit.RuntimePaths{
 			GeneratedConfig:  "generated/mihomo.yaml",
 			MihomoRuntimeDir: ".runtime/mihomo",
-			CorePath:         "bin/mihomo-meta",
+			CorePath:         "bin/lc-mihomo-meta",
 		},
 		Config: appinit.ConfigState{
 			Available:  false,
@@ -2799,7 +2799,7 @@ func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 func TestRunRuntimeToolRefusesMissingGeneratedConfigWithoutAutoRender(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	dir := filepath.Dir(paths.subscription)
-	core := filepath.Join(dir, "mihomo")
+	core := filepath.Join(dir, "lc-mihomo-meta")
 	writeTestExecutable(t, core, `#!/bin/sh
 if [ "$1" = "-v" ]; then
   echo Mihomo Meta test

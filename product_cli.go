@@ -360,7 +360,7 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 		if err != nil {
 			return err
 		}
-		return printProductOK(productEnvelope{OK: true, Changed: result.Stopped || result.RemovedPIDFile, Summary: "Runtime stop completed.", Status: result, Changes: changedIf(result.Stopped || result.RemovedPIDFile, "runtime_stopped"), Warnings: result.Warnings, NextActions: result.NextActions})
+		return printProductOK(productEnvelope{OK: true, Changed: result.Stopped, Summary: "Runtime stop completed.", Status: result, Changes: changedIf(result.Stopped, "runtime_stopped"), Warnings: result.Warnings, NextActions: result.NextActions})
 	default:
 		return fmt.Errorf("unknown runtime subcommand %q", args[0])
 	}
@@ -712,7 +712,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 			return changes, warnings, err
 		}
 		warnings = append(warnings, result.Warnings...)
-		if result.Stopped || result.RemovedPIDFile {
+		if result.Stopped {
 			changes = append(changes, "runtime_stopped")
 		}
 	}
