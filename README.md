@@ -321,6 +321,12 @@ When `core: smart` is active, rendered proxy groups with localClash `auto`
 intent are materialized as Mihomo `type: smart` groups. With `core: meta`, the
 same `auto` intent remains `url-test`.
 
+Known limitation: Smart runtime defaults are injected after
+`localclash-user.json` is selected, and there is currently no switch to disable
+that injection as a whole. Because `proxy-groups` is localClash-owned and
+rejected from `localclash-user.json`, user profiles cannot author Smart group
+boolean switches such as `uselightgbm`, `prefer-asn`, or `collectdata` there.
+
 MCP patch-building tools:
 
 - `proxy_group_build`: build and validate a reusable proxy group target from a

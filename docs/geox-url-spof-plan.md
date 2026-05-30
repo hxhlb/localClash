@@ -2,9 +2,10 @@
 
 ## Context
 
-`geox-url` 是 Mihomo 下載 GEO data 文件（geoip.dat, geosite.dat, Country.mmdb, ASN.mmdb）的 URL 配置。目前 localClash default profile 的 4 個 URL 都指向 `testingcf.jsdelivr.net`。這是一個可接受但需要記錄的短期風險，原因如下：
+`geox-url` 是 Mihomo 下載 GEO data 文件（geoip.dat, geosite.dat, Country.mmdb, ASN.mmdb）的 URL 配置。目前 localClash default profile 的 4 個 URL 統一指向 `gh-proxy.com` 包裝後的 GitHub raw/release URL。這是一個短期收斂決策，原因如下：
 
-- **jsDelivr 在中國大陸的可用性不穩定**（GFW 干擾、DNS 污染、速度慢）
+- **路由器無代理探測顯示 `gh-proxy.com` 是當前候選中唯一同時支援 TLS 且返回 200 的 GitHub mirror**
+- **避免 YAML 同時依賴 `testingcf.jsdelivr.net` 和 `gh-proxy.com`，把首次啟動失敗面收斂到單一 mirror**
 - **Mihomo 本身只接受每個類型一個 URL**，無法配置備用鏡像
 - **localClash 沒有運行時 geodata 下載/刷新機制**——只有構建腳本 `build-release-assets.sh` 有多鏡像回退鏈，但這僅在發佈時使用
 - **影響面廣**：geodata 缺失會導致 GEOIP/GEOSITE 規則失效、DNS fallback-filter 損壞、路由器模式下幾乎所有分流邏輯癱瘓
@@ -27,9 +28,9 @@
 
 ## 建議方案
 
-### 短期：接受 Mihomo 原生 auto update
+### 短期：統一到 gh-proxy.com 並接受 Mihomo 原生 auto update
 
-短期先在 default runtime profiles 中顯式開啟 Mihomo 的 GEO auto update：
+短期先在 default runtime profiles 中顯式開啟 Mihomo 的 GEO auto update，並讓 GEO data 與 Smart `lgbm-url` 使用同一個 GitHub mirror 域名：
 
 ```yaml
 geodata-mode: true
@@ -38,17 +39,18 @@ geo-auto-update: true
 geo-update-interval: 24
 etag-support: true
 geox-url:
-  geoip: "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
-  geosite: "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"
-  mmdb: "https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb"
-  asn: "https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb"
+  geoip: "https://gh-proxy.com/https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+  geosite: "https://gh-proxy.com/https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+  mmdb: "https://gh-proxy.com/https://raw.githubusercontent.com/alecthw/mmdb_china_ip_list/release/Country.mmdb"
+  asn: "https://gh-proxy.com/https://github.com/xishang0128/geoip/releases/latest/download/GeoLite2-ASN.mmdb"
 ```
 
 這個階段的取捨：
 
 - 優點：實作小，立即讓 GEO data 可以背景更新。
+- 優點：router 無代理首次啟動只依賴一個 GitHub mirror 域名，失敗模式更少。
 - 優點：不重啟 Mihomo，對既有流量基本無感。
-- 風險：仍然依賴單一 `geox-url`，鏡像不可用時只會更新失敗並記錄錯誤。
+- 風險：仍然依賴單一 mirror，鏡像不可用時只會更新失敗並記錄錯誤。
 - 風險：更新時會有短暫下載、驗證、IO、matcher cache 重建成本。
 
 ### 中期：本地 mini HTTP 鏡像轉發
@@ -76,7 +78,7 @@ mini HTTP 程序需要負責：
 
 ## 實施計劃
 
-### 步驟 1：開啟 default profile auto update
+### 步驟 1：開啟 default profile auto update 並統一 mirror
 
 - `internal/runtimeprofile/profiles/normal.default.json`
 - `internal/runtimeprofile/profiles/router.default.json`
@@ -84,6 +86,7 @@ mini HTTP 程序需要負責：
 - 新增 `geo-auto-update: true`
 - 新增 `geo-update-interval: 24`
 - 顯式保留 `etag-support: true`
+- 將 default `geox-url` 統一為 `gh-proxy.com` 包裝後的 GitHub raw/release URL
 
 ### 步驟 2：增強 doctor 檢查
 
