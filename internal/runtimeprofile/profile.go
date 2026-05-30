@@ -77,6 +77,8 @@ type SmartOptions struct {
 	CollectData    bool    `yaml:"collectdata,omitempty" json:"collectdata,omitempty"`
 	SampleRate     float64 `yaml:"sample-rate,omitempty" json:"sample_rate,omitempty"`
 	PolicyPriority string  `yaml:"policy-priority,omitempty" json:"policy_priority,omitempty"`
+	URL            string  `yaml:"url,omitempty" json:"url,omitempty"`
+	Interval       int     `yaml:"interval,omitempty" json:"interval,omitempty"`
 }
 
 type Status struct {
@@ -344,7 +346,12 @@ func defaultCores() map[string]Core {
 }
 
 func defaultSmartOptions() SmartOptions {
-	return SmartOptions{UseLightGBM: true, PreferASN: true}
+	return SmartOptions{
+		UseLightGBM: true,
+		PreferASN:   true,
+		URL:         "https://cp.cloudflare.com/generate_204",
+		Interval:    600,
+	}
 }
 
 func defaultProfileBytes(mode string) []byte {

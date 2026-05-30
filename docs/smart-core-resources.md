@@ -53,7 +53,13 @@ YAML lgbm-url  →  lightgbm.SetLgbmUrl()  →  downloadModel()
                                           → GitHub Releases
 ```
 
-Default URL: `https://github.com/vernesong/mihomo/releases/download/LightGBM-Model/Model.bin`
+localClash should render a mainland-reachable mirror URL instead of the GitHub
+release direct URL. Current default:
+
+`https://gh-proxy.com/https://github.com/vernesong/mihomo/releases/download/LightGBM-Model/Model-middle.bin`
+
+The upstream direct URL remains:
+`https://github.com/vernesong/mihomo/releases/download/LightGBM-Model/Model.bin`
 
 ### Auto-update
 
@@ -87,7 +93,7 @@ proxy-groups:
 
 ### Size cap
 
-`smart-collector-size` (global, MB, default 100). When the file exceeds this
+`profile.smart-collector-size` (MB, default 100). When the file exceeds this
 limit, the collector stops writing. No rotation is performed. If the file is
 deleted externally, the collector detects it within 5 s and recreates it.
 
@@ -266,10 +272,12 @@ Timed goroutines running within each Smart group and globally:
 ### localClash-global
 
 ```yaml
-lgbm-url: "https://..."        # custom Model.bin URL
+lgbm-url: "https://gh-proxy.com/https://github.com/vernesong/mihomo/releases/download/LightGBM-Model/Model-middle.bin"
 lgbm-auto-update: true         # enable periodic update (default false)
 lgbm-update-interval: 48       # update check interval hours (default 72)
-smart-collector-size: 200      # CSV size cap MB (default 100)
+
+profile:
+  smart-collector-size: 200    # CSV size cap MB (default 100)
 ```
 
 ### Per-group Smart options
@@ -281,9 +289,26 @@ proxy-groups:
     collectdata: true
     sample-rate: 0.5
     prefer-asn: true
-    policy-priority:
-      - ".*netflix.*:1.5"
+    policy-priority: ".*netflix.*:1.5"
 ```
+
+### Known issue: `localclash-user.json` Smart injection
+
+When `core: smart` is active, localClash injects Smart runtime defaults after the
+user-authored `localclash-user.json` fragment is selected as the runtime base.
+There is currently no user-facing switch to disable this injection as a whole.
+
+This means `localclash-user.json` is not a reliable place to author Smart group
+boolean switches such as `uselightgbm`, `prefer-asn`, or `collectdata`:
+`proxy-groups` is a localClash-owned dynamic key and is rejected from
+`localclash-user.json`, while renderer-owned Smart group defaults are applied to
+the generated dynamic proxy groups.
+
+Top-level Smart runtime keys such as `lgbm-auto-update`, `lgbm-update-interval`,
+and `lgbm-url` can still be supplied in `localclash-user.json`; current default
+injection uses missing-key defaults and does not overwrite values already
+present in the final rendered config. The missing product feature is an explicit
+switch for whether localClash should inject Smart defaults at all.
 
 ## Relevant Mihomo Source Files
 

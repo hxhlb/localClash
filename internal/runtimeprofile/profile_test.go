@@ -70,6 +70,9 @@ func TestConfigureWritesModeAndCore(t *testing.T) {
 	if !status.RouterTakeoverRequired {
 		t.Fatal("router profile should require router takeover after run_runtime")
 	}
+	if status.SmartGroupDefault.URL != "https://cp.cloudflare.com/generate_204" || status.SmartGroupDefault.Interval != 600 {
+		t.Fatalf("smart defaults = %+v, want OpenClash-style health check defaults", status.SmartGroupDefault)
+	}
 
 	file, exists, err := Load(path)
 	if err != nil {
@@ -89,9 +92,7 @@ func TestDefaultNormalProfileCanResolveV2FlyGeoSitePacks(t *testing.T) {
 			mihomo["geodata-mode"], mihomo["geodata-loader"], mihomo["geo-auto-update"], mihomo["geo-update-interval"], mihomo["etag-support"])
 	}
 	geoxURL := mihomo["geox-url"].(map[string]any)
-	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
-		t.Fatalf("normal geox-url = %+v, want Loyalsoldier geosite.dat", geoxURL)
-	}
+	assertGitHubProxyGeoxURL(t, geoxURL, "normal")
 }
 
 func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
@@ -123,9 +124,7 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 		}
 	}
 	geoxURL := mihomo["geox-url"].(map[string]any)
-	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
-		t.Fatalf("router geox-url = %+v, want Loyalsoldier geosite.dat", geoxURL)
-	}
+	assertGitHubProxyGeoxURL(t, geoxURL, "router")
 
 	assertMainlandReachableDNS(t, mihomo, "0.0.0.0:7874", "router")
 	if _, ok := mihomo["interface-name"]; ok {
@@ -144,6 +143,22 @@ func TestDefaultRouterProfileMatchesRouterReferencePreferences(t *testing.T) {
 	}
 	if _, ok := profile.Deploy["wan-interface"]; ok {
 		t.Fatalf("router deploy must not pin Ronnie's WAN interface: %+v", profile.Deploy)
+	}
+}
+
+func assertGitHubProxyGeoxURL(t *testing.T, geoxURL map[string]any, profile string) {
+	t.Helper()
+	for _, key := range []string{"geoip", "geosite", "mmdb", "asn"} {
+		value := fmt.Sprint(geoxURL[key])
+		if !strings.HasPrefix(value, "https://gh-proxy.com/https://") {
+			t.Fatalf("%s geox-url[%s] = %q, want gh-proxy.com HTTPS mirror", profile, key, value)
+		}
+		if strings.Contains(value, "testingcf.jsdelivr.net") {
+			t.Fatalf("%s geox-url[%s] = %q, should not use testingcf mirror", profile, key, value)
+		}
+	}
+	if !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "Loyalsoldier/v2ray-rules-dat") || !strings.Contains(fmt.Sprint(geoxURL["geosite"]), "geosite.dat") {
+		t.Fatalf("%s geox-url = %+v, want Loyalsoldier geosite.dat", profile, geoxURL)
 	}
 }
 

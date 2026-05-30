@@ -3,6 +3,7 @@ package configrender
 import (
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -580,10 +581,16 @@ proxy_groups:
   AI:
     nodes: ["🇯🇵日本01 | JP"]
     auto: true
+  SmartOnly:
+    nodes: ["🇯🇵日本01 | JP"]
+    smart: true
 enabled_packs:
   - source: sukkaw
     pack: ai
     target: AI
+  - source: sukkaw
+    pack: ai
+    target: SmartOnly
 `)
 
 	result, err := Render(Options{
@@ -601,17 +608,36 @@ enabled_packs:
 		t.Fatalf("core = %q, want smart", result.Core)
 	}
 	config := readTestYAML(t, result.OutputPath)
-	for _, name := range []string{"AI"} {
+	for _, name := range []string{"AI", "SmartOnly"} {
 		group := proxyGroupFromConfig(t, config, name)
 		if group["type"] != "smart" {
 			t.Fatalf("%s type = %v, want smart", name, group["type"])
 		}
-		if group["url"] != nil || group["interval"] != nil {
-			t.Fatalf("%s kept url-test fields: %+v", name, group)
+		wantURL := "http://www.gstatic.com/generate_204"
+		wantInterval := 300
+		if name == "SmartOnly" {
+			wantURL = "https://cp.cloudflare.com/generate_204"
+			wantInterval = 600
+		}
+		if group["url"] != wantURL || group["interval"] != wantInterval {
+			t.Fatalf("%s smart health-check fields = %+v, want %s/%d", name, group, wantURL, wantInterval)
+		}
+		if group["tolerance"] != nil {
+			t.Fatalf("%s kept url-test tolerance: %+v", name, group)
 		}
 		if group["uselightgbm"] != true || group["prefer-asn"] != true {
 			t.Fatalf("%s smart options = %+v, want defaults", name, group)
 		}
+	}
+	if config["lgbm-auto-update"] != true || config["lgbm-update-interval"] != 72 {
+		t.Fatalf("smart lgbm update = auto %v interval %v, want enabled 72h", config["lgbm-auto-update"], config["lgbm-update-interval"])
+	}
+	if got := fmt.Sprint(config["lgbm-url"]); got != "https://gh-proxy.com/https://github.com/vernesong/mihomo/releases/download/LightGBM-Model/Model-middle.bin" {
+		t.Fatalf("lgbm-url = %q, want mirrored Model-middle.bin URL", got)
+	}
+	profile := config["profile"].(map[string]any)
+	if profile["smart-collector-size"] != 100 {
+		t.Fatalf("profile.smart-collector-size = %v, want 100", profile["smart-collector-size"])
 	}
 	metadata := config["x-localclash"].(map[string]any)
 	overlay := metadata["overlay"].(map[string]any)

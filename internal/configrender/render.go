@@ -57,6 +57,12 @@ type ruleSpec struct {
 	NoResolve    bool   `json:"no_resolve,omitempty"`
 }
 
+const (
+	defaultSmartLGBMURL            = "https://gh-proxy.com/https://github.com/vernesong/mihomo/releases/download/LightGBM-Model/Model-middle.bin"
+	defaultSmartLGBMUpdateInterval = 72
+	defaultSmartCollectorSizeMB    = 100
+)
+
 var localBaselineRules = []ruleSpec{
 	{Domain: "localhost", Target: rulespkg.TerminalDirect},
 	{DomainSuffix: "localhost", Target: rulespkg.TerminalDirect},
@@ -173,6 +179,9 @@ func Render(opts Options) (Result, error) {
 	}
 	finish = stage("apply_runtime_profile", map[string]any{"runtime_mode": runtimeFile.Mode, "core": runtimeFile.Core})
 	rendered := runtimeprofile.BuildConfig(profile, dynamic)
+	if runtimeFile.Core == runtimeprofile.CoreSmart {
+		applySmartRuntimeDefaults(rendered)
+	}
 	finish(nil, nil)
 
 	finish = stage("validate_dns_proxy_groups", map[string]any{"required_targets": len(requiredTargets)})
@@ -725,8 +734,6 @@ func applySmartCoreProxyGroups(config map[string]any, opts runtimeprofile.SmartO
 		groupType := strings.ToLower(strings.TrimSpace(stringValue(group["type"])))
 		if groupType == "url-test" {
 			group["type"] = "smart"
-			delete(group, "url")
-			delete(group, "interval")
 			delete(group, "tolerance")
 			groupType = "smart"
 		}
@@ -752,6 +759,28 @@ func applySmartGroupOptions(group map[string]any, opts runtimeprofile.SmartOptio
 	if strings.TrimSpace(opts.PolicyPriority) != "" {
 		setDefaultAny(group, "policy-priority", opts.PolicyPriority)
 	}
+	if strings.TrimSpace(opts.URL) != "" {
+		setDefaultAny(group, "url", opts.URL)
+	}
+	if opts.Interval != 0 {
+		setDefaultAny(group, "interval", opts.Interval)
+	}
+}
+
+func applySmartRuntimeDefaults(config map[string]any) {
+	setDefaultAny(config, "lgbm-auto-update", true)
+	setDefaultAny(config, "lgbm-update-interval", defaultSmartLGBMUpdateInterval)
+	setDefaultAny(config, "lgbm-url", defaultSmartLGBMURL)
+
+	profile, ok := config["profile"].(map[string]any)
+	if !ok {
+		if _, exists := config["profile"]; exists {
+			return
+		}
+		profile = map[string]any{}
+		config["profile"] = profile
+	}
+	setDefaultAny(profile, "smart-collector-size", defaultSmartCollectorSizeMB)
 }
 
 func setDefaultAny(values map[string]any, key string, value any) {

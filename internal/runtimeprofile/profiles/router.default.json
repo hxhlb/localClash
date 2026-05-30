@@ -24,10 +24,10 @@
     "keep-alive-interval": 15,
     "keep-alive-idle": 600,
     "geox-url": {
-      "mmdb": "https://testingcf.jsdelivr.net/gh/alecthw/mmdb_china_ip_list@release/Country.mmdb",
-      "geoip": "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat",
-      "geosite": "https://testingcf.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat",
-      "asn": "https://testingcf.jsdelivr.net/gh/xishang0128/geoip@release/GeoLite2-ASN.mmdb"
+      "mmdb": "https://gh-proxy.com/https://raw.githubusercontent.com/alecthw/mmdb_china_ip_list/release/Country.mmdb",
+      "geoip": "https://gh-proxy.com/https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+      "geosite": "https://gh-proxy.com/https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+      "asn": "https://gh-proxy.com/https://github.com/xishang0128/geoip/releases/latest/download/GeoLite2-ASN.mmdb"
     },
     "dns": {
       "enable": true,
