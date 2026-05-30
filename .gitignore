@@ -22,6 +22,9 @@ generated/
 .runtime/subscriptions/
 .localtest/
 
+# Reference files (WIP).
+docs/reff/
+
 # Downloaded/reference packages.
 mihomo-cli-*/
 
