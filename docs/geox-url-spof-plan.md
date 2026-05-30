@@ -10,6 +10,18 @@
 - **localClash 沒有運行時 geodata 下載/刷新機制**——只有構建腳本 `build-release-assets.sh` 有多鏡像回退鏈，但這僅在發佈時使用
 - **影響面廣**：geodata 缺失會導致 GEOIP/GEOSITE 規則失效、DNS fallback-filter 損壞、路由器模式下幾乎所有分流邏輯癱瘓
 
+### Core 已確定答案
+
+localClash Core 已確定不採用 HTTP 改寫或本地轉發服務來解決 Mihomo 外部資源 URL 問題。`generated/mihomo.yaml` 是 localClash 的管理對象，因此 Core 應在 render 階段決定最終寫入 YAML 的 URL 或本地文件路徑。
+
+這個邊界只適用於 Core 已安裝、可以執行 config render 的階段。LuCI bootstrap 下載 localClash Core 屬於另一個問題，不能依賴本節的 render 決策解決。
+
+Core render 階段應保留三層語義：
+
+- 原始上游意圖：例如 GitHub release/raw、GEO data、Smart model、外部 rule-provider 的 upstream URL。
+- 可用性決策輸入：例如路由器網絡下的 probe/cache 結果、候選 mirror 健康度、資源類型。
+- 最終 YAML 輸出：Mihomo 只接收普通 URL 或本地路徑，不感知 localClash 的鏡像選擇策略。
+
 ### Mihomo 行為邊界
 
 - 缺檔或壞檔時，Mihomo 會在 GEO 規則初始化期間同步下載對應文件。
@@ -53,26 +65,11 @@ geox-url:
 - 風險：仍然依賴單一 mirror，鏡像不可用時只會更新失敗並記錄錯誤。
 - 風險：更新時會有短暫下載、驗證、IO、matcher cache 重建成本。
 
-### 中期：本地 mini HTTP 鏡像轉發
+### 已拒絕：本地 mini HTTP 鏡像轉發
 
-更穩妥的方向是在 localClash 側提供一個 mini HTTP 本地轉發程序。Mihomo 仍然只看到單一 URL，但 localClash 在本地負責鏡像選擇和回退：
+本地 mini HTTP 轉發不再作為 Core 方向。它會把外部資源下載變成 `Mihomo -> localClash HTTP 服務 -> 外網` 的常駐依賴，讓服務啟動順序、端口、DNS、路由與本地代理可用性都變成新的故障面。
 
-```yaml
-geox-url:
-  geoip: "http://127.0.0.1:8787/geodata/geoip.dat"
-  geosite: "http://127.0.0.1:8787/geodata/geosite.dat"
-  mmdb: "http://127.0.0.1:8787/geodata/Country.mmdb"
-  asn: "http://127.0.0.1:8787/geodata/ASN.mmdb"
-```
-
-mini HTTP 程序需要負責：
-
-- 維護每個 GEO data 文件的一組 GitHub / CDN 鏡像候選。
-- 啟動時探測可用鏡像，按可用性和延遲選擇。
-- 支援 timeout、fallback、重試和錯誤分類。
-- 支援本地 cache，避免每次 Mihomo 請求都重新打遠端。
-- 盡量保留 ETag / Last-Modified 語義，讓 Mihomo 的更新檢查保持便宜。
-- 比 Mihomo 先啟動，或確保 base assets 已經存在，避免 Mihomo 缺檔同步下載時打不到本地轉發服務。
+替代方向是：localClash 在 render 階段根據資源類型和 probe/cache 結果，直接把可用 URL 或本地路徑寫入 `generated/mihomo.yaml`。如果 Mihomo 原生欄位只能接受單一 URL，那個單一 URL 也應在 render 前被選定，而不是在運行時由本地 HTTP 服務再改寫。
 
 ---
 
@@ -94,18 +91,18 @@ mini HTTP 程序需要負責：
 - 缺失時提示 base assets 安裝或未來的 geodata repair/update 命令。
 - 對 router 模式，把 GEO data 缺失視為高風險 warning。
 
-### 步驟 3：新增 mini HTTP geodata proxy
+### 步驟 3：render 階段 URL 決策
 
-- 新增本地 HTTP handler，例如 `/geodata/{asset}`。
-- 實作每個 asset 的鏡像候選列表。
-- 復用 `scripts/build-release-assets.sh` 中已經驗證過的鏡像順序作為初版策略。
-- 支援 cache metadata，包含來源 URL、hash、ETag、Last-Modified、更新時間。
-- 將 runtime profile 的 `geox-url` 切換到 `127.0.0.1` 本地 URL。
+- 盤點 Core 管理的所有 Mihomo 外部資源 URL：`geox-url`、Smart `lgbm-url`、外部 rule-provider URL。
+- 按資源類型保存 upstream URL 與候選 mirror，不把候選列表直接等同於可靠性。
+- 使用路由器網絡下的 probe/cache 結果作為 render 決策輸入。
+- 在 `generated/mihomo.yaml` 中只輸出已選定的普通 URL 或本地文件路徑。
+- 在 plan/doctor 類輸出中展示 upstream、選中 URL、probe/cache 時間與失敗原因，避免黑盒替換。
 
 ### 步驟 4：可選 CLI repair/update
 
 - 可以保留一個 `localclash geodata update` 或 `localclash geodata repair` 命令。
-- 這個命令直接使用 mini HTTP proxy 的鏡像選擇邏輯，讓手動修復和背景轉發共用同一套下載策略。
+- 這個命令應復用 Core 的資源 URL 決策與下載策略，讓手動修復、doctor 建議和 render 輸出使用同一份來源健康資料。
 
 ---
 
@@ -116,12 +113,12 @@ mini HTTP 程序需要負責：
 | `internal/runtimeprofile/profiles/*.default.json` | 開啟 `geo-auto-update` 並設定 interval |
 | `internal/runtimeprofile/profile_test.go` | 鎖定 default profile 的 GEO update contract |
 | `internal/doctor/doctor.go` | 後續增加 GEO data 完整性檢查 |
-| `internal/geodata/` | 後續新增 mini HTTP proxy 和共用下載策略 |
-| `scripts/build-release-assets.sh` | 作為鏡像候選順序的既有參考 |
+| `internal/configrender/` | 在 render 階段輸出已決策的外部資源 URL 或本地路徑 |
+| `scripts/build-release-assets.sh` | 作為既有多鏡像下載與資源分類參考，不作為 runtime 代理方案 |
 
 ## 驗證方式
 
 1. `go test ./internal/runtimeprofile/...`：確認 default profiles 帶有 auto update 欄位。
 2. `go run . config render --force`：確認 `generated/mihomo.yaml` 會輸出 `geo-auto-update` 與 `geo-update-interval`。
 3. `go run . doctor --json`：確認現有 runtime validation 不受影響。
-4. 未來 mini HTTP proxy 完成後，模擬 CDN 不可用場景，確認 Mihomo 的單一本地 URL 仍能透過可用鏡像完成更新。
+4. 後續 render 階段 URL 決策完成後，模擬候選 mirror 失敗場景，確認 `generated/mihomo.yaml` 只輸出當前 probe/cache 選中的普通 URL 或本地路徑。
