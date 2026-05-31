@@ -32,10 +32,10 @@ type PackRef struct {
 }
 
 type PackToolArgs struct {
-	PacksGet              PackRefArgs        `json:"packs_get"`
-	PackRulesRead         PackRefArgs        `json:"pack_rules_read"`
-	PackRulesPrefetch     PackPrefetchArgs   `json:"pack_rules_prefetch"`
-	ConfigPatchCreatePack *PackPatchPackArgs `json:"config_patch_create_pack,omitempty"`
+	PacksGet             PackRefArgs        `json:"packs_get"`
+	PackRulesRead        PackRefArgs        `json:"pack_rules_read"`
+	PackRulesPrefetch    PackPrefetchArgs   `json:"pack_rules_prefetch"`
+	ConfigPatchDraftPack *PackPatchPackArgs `json:"config_patch_draft_pack,omitempty"`
 }
 
 type PackRefArgs struct {
@@ -226,8 +226,8 @@ func PackListGuidance() []string {
 func PackListNextActions() []string {
 	return []string{
 		"Use the exact source/pack fields or tool_args from packs_list when calling packs_get, pack_rules_read, or pack_rules_prefetch.",
-		"To change routing, call config_status first, then config_patch_create with the full desired retained config plus new pack targets.",
-		"Apply only the exact patch_id returned by config_patch_create, then call config_status to verify.",
+		"To change routing, call config_status with patches=true first, then config_patch_draft with op=upsert_patch and the full desired patch overlay.",
+		"Apply only the reviewed config_patch_draft generation with config_patch_apply, then call config_status to verify.",
 	}
 }
 
@@ -364,7 +364,7 @@ func packToolArgs(source, pack, target string) PackToolArgs {
 		PackRulesPrefetch: PackPrefetchArgs{Packs: []PackRefArgs{ref}},
 	}
 	if strings.TrimSpace(target) != "" {
-		args.ConfigPatchCreatePack = &PackPatchPackArgs{Source: source, Pack: pack, Target: target}
+		args.ConfigPatchDraftPack = &PackPatchPackArgs{Source: source, Pack: pack, Target: target}
 	}
 	return args
 }
@@ -377,7 +377,7 @@ func packBackend(source string, pack Pack, target string) PackBackend {
 			RenderStrategy:     RenderStrategyGeoSite,
 			RenderRuleTemplate: fmt.Sprintf("GEOSITE,%s,%s", pack.ID, target),
 			DataFile:           GeoSiteDataFileDLC,
-			Note:               "This pack renders as Mihomo GEOSITE. Keep using config_patch_create with this exact source and pack; localClash will render GEOSITE instead of RULE-SET.",
+			Note:               "This pack renders as Mihomo GEOSITE. Keep using config_patch_draft with this exact source and pack; localClash will render GEOSITE instead of RULE-SET.",
 		}
 	}
 	providerID := "<provider>"

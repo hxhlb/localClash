@@ -16,6 +16,7 @@ import (
 	"localclash/internal/appinit"
 	"localclash/internal/baseassets"
 	"localclash/internal/configinspect"
+	"localclash/internal/configpatch"
 	"localclash/internal/configrender"
 	"localclash/internal/coredownload"
 	"localclash/internal/corerun"
@@ -824,6 +825,7 @@ type configInput struct {
 	RuntimeProfile         string `json:"runtime_profile"`
 	Core                   string `json:"core"`
 	AllowOverwriteModified bool   `json:"allow_overwrite_modified"`
+	ResetPatches           bool   `json:"reset_patches"`
 }
 
 func parseSubscriptionInput(args []string) (subscriptionInput, error) {
@@ -999,8 +1001,9 @@ func componentStatus(state appinit.RuntimeState) map[string]any {
 
 func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 	warnings := []string{}
+	configPath := productWorkspacePath(state, "localclash-intent.json")
 	intent, err := configinspect.InspectIntent(configinspect.IntentOptions{
-		ConfigPath:          productWorkspacePath(state, "localclash-intent.json"),
+		ConfigPath:          configPath,
 		Subscription:        state.Paths.SubscriptionPath,
 		SubscriptionConfig:  state.Paths.SubscriptionConfig,
 		SubscriptionRuntime: state.Paths.SubscriptionRuntime,
@@ -1011,12 +1014,14 @@ func configStatus(state appinit.RuntimeState) (map[string]any, []string) {
 	if err != nil {
 		warnings = append(warnings, err.Error())
 	}
+	patchInventory := configpatch.InventoryFor(productWorkspacePath(state, configpatch.RegistryDirName), intent.PolicyTemplate, configPath, productWorkspacePath(state, "localclash-packs.gob"), state.Paths.GeneratedConfig, 8)
 	profile, err := runtimeprofile.StatusFor(state.Paths.RuntimeProfilePath)
 	if err != nil {
 		warnings = append(warnings, err.Error())
 	}
 	return map[string]any{
-		"intent":          intent,
+		"patch_registry":  patchInventory,
+		"compiled_intent": intent,
 		"runtime_profile": profile,
 		"generated": map[string]any{
 			"path":   state.Paths.GeneratedConfig,
@@ -1044,19 +1049,32 @@ func applyTemplateInput(ctx context.Context, input configInput, state appinit.Ru
 			return nil, nil, err
 		}
 	}
-	config, template, err := policytemplate.Build(productWorkspacePath(state, policytemplate.DefaultDir), input.Template)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := localconfig.Write(configPath, config); err != nil {
-		return nil, nil, err
-	}
 	profile, err := runtimeprofile.Configure(state.Paths.RuntimeProfilePath, input.RuntimeProfile, input.Core)
 	if err != nil {
 		return nil, nil, err
 	}
+	patchResult, err := configpatch.ImportPolicyTemplate(ctx, configpatch.ImportTemplateOptions{
+		RegistryDir:         productWorkspacePath(state, configpatch.RegistryDirName),
+		PolicyTemplatesDir:  productWorkspacePath(state, policytemplate.DefaultDir),
+		PolicyTemplate:      input.Template,
+		ResetPatches:        input.ResetPatches,
+		ConfigPath:          configPath,
+		SelectionPath:       productWorkspacePath(state, "localclash-packs.gob"),
+		OutputPath:          state.Paths.GeneratedConfig,
+		Subscription:        state.Paths.SubscriptionPath,
+		SubscriptionConfig:  state.Paths.SubscriptionConfig,
+		SubscriptionRuntime: state.Paths.SubscriptionRuntime,
+		RulesCache:          state.Paths.RulesCacheDir,
+		RuntimeProfilePath:  state.Paths.RuntimeProfilePath,
+		CorePath:            normalizeCorePathForState(state, profile.CorePath),
+		WorkDir:             state.Paths.MihomoRuntimeDir,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
 	warnings := refreshCoreVersionCacheWarnings(ctx, state, profile.CorePath)
-	return map[string]any{"template": template, "runtime_profile": profile}, warnings, nil
+	warnings = append(warnings, patchResult.Warnings...)
+	return map[string]any{"template": patchResult.Template, "patch_registry": patchResult, "runtime_profile": profile}, warnings, nil
 }
 
 func subscriptionStatusOptions(state appinit.RuntimeState) subscriptions.StatusOptions {
@@ -1085,6 +1103,21 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 	source := "base"
 	warnings := []string{}
 
+	registryDir := productWorkspacePath(state, configpatch.RegistryDirName)
+	if productRegistryHasPatches(registryDir) {
+		policyTemplate := ""
+		if current, err := localconfig.Load(configPath); err == nil {
+			policyTemplate = current.PolicyTemplate
+		}
+		config, _, err := configpatch.Compile(registryDir, policyTemplate, time.Now())
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := localconfig.Write(configPath, config); err != nil {
+			return nil, nil, err
+		}
+		source = "patch_registry"
+	}
 	if pathExists(configPath) {
 		config, err := localconfig.Load(configPath)
 		if err != nil {
@@ -1108,7 +1141,9 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 			return nil, nil, err
 		}
 		opts.PacksSelectionPath = selectionPath
-		source = "durable_state"
+		if source != "patch_registry" {
+			source = "compiled_intent"
+		}
 		warnings = append(warnings, resolved.Warnings...)
 	}
 
@@ -1119,7 +1154,8 @@ func renderProductConfig(state appinit.RuntimeState) (map[string]any, []string, 
 	return map[string]any{
 		"render":          result,
 		"source":          source,
-		"source_of_truth": configPath,
+		"source_of_truth": registryDir,
+		"compiled_intent": configPath,
 		"selection":       selectionPath,
 		"output":          state.Paths.GeneratedConfig,
 	}, warnings, nil
@@ -1241,6 +1277,19 @@ func diagnosticsToWarnings(diagnostics []appinit.Diagnostic) []string {
 func pathExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
+}
+
+func productRegistryHasPatches(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+			return true
+		}
+	}
+	return false
 }
 
 func pathExistsAny(path string) bool {

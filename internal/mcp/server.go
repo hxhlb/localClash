@@ -20,6 +20,7 @@ import (
 
 	"localclash/internal/appinit"
 	"localclash/internal/configinspect"
+	"localclash/internal/configpatch"
 	"localclash/internal/configplan"
 	"localclash/internal/configrender"
 	"localclash/internal/corerun"
@@ -37,14 +38,28 @@ import (
 )
 
 type Server struct {
-	state      *appinit.RuntimeState
-	startedAt  time.Time
-	taskCtx    context.Context
-	taskCancel context.CancelFunc
-	taskWG     sync.WaitGroup
+	state                *appinit.RuntimeState
+	startedAt            time.Time
+	taskCtx              context.Context
+	taskCancel           context.CancelFunc
+	taskWG               sync.WaitGroup
+	configPatchDraftMu   sync.Mutex
+	configPatchDraftGen  int64
+	configPatchDraftSlot *configPatchDraftSlot
 }
 
 var routerTakeoverStatus = routertakeover.Status
+
+type configPatchDraftSlot struct {
+	Key              string
+	Generation       int64
+	Operations       []configpatch.Operation
+	BaseHashes       map[string]string
+	BaseRegistryHash string
+	PolicyTemplate   string
+	RegistryDir      string
+	Stale            bool
+}
 
 func NewServer() *Server {
 	return newServer(nil)
@@ -499,10 +514,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callConfigConfigure(args)
 	case "config_render":
 		return s.callMaybeAsyncTool(ctx, "config_render", args, s.callConfigRender)
+	case "config_patch_get":
+		return s.callConfigPatchGet(args)
+	case "config_patch_draft":
+		return s.callMaybeAsyncTool(ctx, "config_patch_draft", args, s.callConfigPatchDraft)
 	case "config_patch_apply":
 		return s.callMaybeAsyncTool(ctx, "config_patch_apply", args, s.callConfigPatchApply)
-	case "config_patch_create":
-		return s.callMaybeAsyncTool(ctx, "config_patch_create", args, s.callConfigPatchCreate)
 	case "doctor":
 		return s.callDoctor(ctx, args)
 	case "environment_inspect":
@@ -1120,7 +1137,9 @@ type configToolInput struct {
 	Selection           string `json:"selection"`
 	Output              string `json:"output"`
 	PatchesDir          string `json:"patches_dir"`
+	PolicyTemplate      string `json:"policy_template"`
 	Limit               int    `json:"limit"`
+	Patches             bool   `json:"patches"`
 	Detail              bool   `json:"detail"`
 	Resolve             *bool  `json:"resolve"`
 	Force               *bool  `json:"force"`
@@ -1177,13 +1196,16 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	if !in.Detail && !resolve {
 		trimConfigStatusIntent(&intent)
 	}
+	policyTemplate := firstNonEmpty(in.PolicyTemplate, intent.PolicyTemplate)
+	patchInventory := configpatch.InventoryFor(in.PatchesDir, policyTemplate, in.Config, in.Selection, in.Output, limit)
 	generated := inspectConfigFile(in.Output)
 	if _, err := runtimeprofile.ValidateUserProfileForRuntime(in.RuntimeProfile); err != nil {
 		return toolResult{}, err
 	}
 	status := map[string]any{
-		"model":           "localclash-intent.json is source_of_truth; generated/mihomo.yaml is build_artifact; .runtime/patches contains review_artifacts",
-		"source_of_truth": inspectConfigFile(in.Config),
+		"model":           "patches/*.json is source_of_truth; localclash-intent.json, localclash-packs.gob, and generated/mihomo.yaml are build_artifacts",
+		"source_of_truth": inspectConfigFile(in.PatchesDir),
+		"compiled_intent": inspectConfigFile(in.Config),
 		"generated":       generated,
 		"subscription":    inspectConfigFile(in.Subscription),
 		"runtime_profile": inspectConfigFile(in.RuntimeProfile),
@@ -1199,17 +1221,22 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 			"output":               in.Output,
 			"patches_dir":          in.PatchesDir,
 		},
-		"intent":     intent,
-		"render":     s.configRenderState(in, intent, generated.Present),
-		"validation": s.configValidationState(in, generated.Present),
-		"patches":    listConfigPatches(in.PatchesDir, limit),
+		"intent":         intent,
+		"patch_registry": patchInventory,
+		"render":         s.configRenderState(in, intent, generated.Present),
+		"validation":     s.configValidationState(in, generated.Present),
 		"usage_guidance": []string{
-			"config_status is the preferred tool for checking durable localClash routing intent and generated overlay state.",
+			"config_status is the preferred tool for checking durable localClash patch registry state and generated overlay state.",
 			"By default config_status is lightweight and does not resolve subscription-node matches or inspect generated overlay details; pass detail=true when a full audit is needed.",
 			"generated_summary omits raw Mihomo rule/provider identifiers; use nl_file only when explicit generated config line evidence is needed.",
 			"Use intent.packs and overlay pack metadata to verify localClash-managed pack routing.",
 			"runtime_status only reports whether Mihomo is running; it does not prove that a pending config change is loaded by a running process.",
 		},
+	}
+	if in.Patches || in.Detail {
+		status["patches"] = patchInventory.Patches
+		status["registry_hash"] = patchInventory.RegistryHash
+		status["artifacts"] = patchInventory.Artifacts
 	}
 	if in.Detail && generated.Present {
 		if base, err := configinspect.InspectBase(configinspect.Options{ConfigPath: in.Output, Limit: limit}); err == nil {
@@ -1291,7 +1318,7 @@ func configStatusNextActions(render configRenderState) []string {
 	if render.RecommendedTool != "" {
 		return []string{"call " + render.RecommendedTool + " to rebuild generated/mihomo.yaml from durable localClash state"}
 	}
-	return []string{"generated/mihomo.yaml is present; use config_patch_create for reviewed routing changes"}
+	return []string{"generated/mihomo.yaml is present; use config_patch_draft for reviewed routing changes"}
 }
 
 func (s *Server) callConfigRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
@@ -1326,6 +1353,17 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 	selectionPath := ""
 	source := "base"
 	warnings := []string{}
+	if registryHasPatches(in.PatchesDir) {
+		policyTemplate := firstNonEmpty(in.PolicyTemplate, policyTemplateFromConfig(in.Config))
+		config, _, err := configpatch.Compile(in.PatchesDir, policyTemplate, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if err := localconfig.Write(in.Config, config); err != nil {
+			return nil, err
+		}
+		source = "patch_registry"
+	}
 	if fileExists(in.Config) {
 		finish := startTaskStage(ctx, "resolve_localclash_config", map[string]any{"config": in.Config})
 		config, err := localconfig.Load(in.Config)
@@ -1350,7 +1388,9 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 			return nil, err
 		}
 		selectionPath = in.Selection
-		source = "durable_state"
+		if source != "patch_registry" {
+			source = "compiled_intent"
+		}
 		warnings = append(warnings, resolved.Warnings...)
 		finishTaskStage(finish, nil, map[string]any{
 			"selection":          in.Selection,
@@ -1379,36 +1419,57 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 	return map[string]any{
 		"rendered":        true,
 		"source":          source,
-		"source_of_truth": in.Config,
+		"source_of_truth": in.PatchesDir,
+		"compiled_intent": in.Config,
 		"selection":       selectionPath,
 		"output":          in.Output,
 		"render":          result,
-		"patches_ignored": true,
 		"warnings":        warnings,
 	}, nil
 }
 
-func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage) (toolResult, error) {
+func (s *Server) callConfigPatchGet(args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PatchName            string                   `json:"patch_name"`
-		Subscription         string                   `json:"subscription"`
-		RulesCache           string                   `json:"rules_cache"`
-		RuntimeProfileConfig string                   `json:"runtime_profile"`
-		OutputDir            string                   `json:"patches_dir"`
-		ConfigPath           string                   `json:"config"`
-		SubscriptionConfig   string                   `json:"subscription_config"`
-		SubscriptionRuntime  string                   `json:"subscription_runtime"`
-		Test                 *bool                    `json:"test"`
-		Core                 string                   `json:"core"`
-		RuntimeDir           string                   `json:"runtime_dir"`
-		Overlay              configplan.OverlayIntent `json:"overlay"`
+		PatchID        string `json:"patch_id"`
+		PatchesDir     string `json:"patches_dir"`
+		ConfigPath     string `json:"config"`
+		PolicyTemplate string `json:"policy_template"`
 	}
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
-	test := false
-	if in.Test != nil {
-		test = *in.Test
+	root := s.workspaceRoot()
+	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
+	setDefault(&in.ConfigPath, workspacePath(root, "localclash-intent.json"))
+	policyTemplate := firstNonEmpty(in.PolicyTemplate, policyTemplateFromConfig(in.ConfigPath))
+	result, err := configpatch.Get(in.PatchesDir, policyTemplate, in.PatchID)
+	if err != nil {
+		return toolResult{}, err
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callConfigPatchDraft(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		DraftName            string                  `json:"draft_name"`
+		Operations           []configpatch.Operation `json:"operations"`
+		PatchesDir           string                  `json:"patches_dir"`
+		PolicyTemplate       string                  `json:"policy_template"`
+		Subscription         string                  `json:"subscription"`
+		RulesCache           string                  `json:"rules_cache"`
+		RuntimeProfileConfig string                  `json:"runtime_profile"`
+		ConfigPath           string                  `json:"config"`
+		SubscriptionConfig   string                  `json:"subscription_config"`
+		SubscriptionRuntime  string                  `json:"subscription_runtime"`
+		Selection            string                  `json:"selection"`
+		Output               string                  `json:"output"`
+		ValidationCache      string                  `json:"validation_cache"`
+		Test                 *bool                   `json:"test"`
+		Core                 string                  `json:"core"`
+		RuntimeDir           string                  `json:"runtime_dir"`
+	}
+	if err := decodeToolInput(args, &in); err != nil {
+		return toolResult{}, err
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
@@ -1427,6 +1488,12 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 		if in.SubscriptionRuntime == "" {
 			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
 		}
+		if in.Selection == "" && s.state.Paths.PacksSelectionPath != "" {
+			in.Selection = s.state.Paths.PacksSelectionPath
+		}
+		if in.Output == "" {
+			in.Output = s.state.Paths.GeneratedConfig
+		}
 		if in.Core == "" {
 			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
 		}
@@ -1434,57 +1501,81 @@ func (s *Server) callConfigPatchCreate(ctx context.Context, args json.RawMessage
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
 	}
-	setDefault(&in.OutputDir, workspacePath(root, filepath.Join(".runtime", "patches")))
+	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
 	setDefault(&in.ConfigPath, workspacePath(root, "localclash-intent.json"))
 	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
 	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
 	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
 	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
 	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
+	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
+	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
 	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
+	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
 	if s.state != nil {
 		in.Core = normalizeMCPStateCorePath(s.state, in.Core)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
-	result, err := configplan.Render(ctx, configplan.Options{
-		PlanName:            in.PatchName,
-		Subscription:        in.Subscription,
-		RulesCache:          in.RulesCache,
-		RuntimeProfilePath:  in.RuntimeProfileConfig,
-		OutputDir:           in.OutputDir,
+	test := false
+	if in.Test != nil {
+		test = *in.Test
+	}
+	policyTemplate := firstNonEmpty(in.PolicyTemplate, policyTemplateFromConfig(in.ConfigPath))
+	generation := s.nextConfigPatchDraftGeneration()
+	result, err := configpatch.Draft(ctx, configpatch.DraftOptions{
+		RegistryDir:         in.PatchesDir,
+		PolicyTemplate:      policyTemplate,
 		ConfigPath:          in.ConfigPath,
+		SelectionPath:       in.Selection,
+		OutputPath:          in.Output,
+		Subscription:        in.Subscription,
 		SubscriptionConfig:  in.SubscriptionConfig,
 		SubscriptionRuntime: in.SubscriptionRuntime,
-		Test:                test,
+		RulesCache:          in.RulesCache,
+		RuntimeProfilePath:  in.RuntimeProfileConfig,
+		ValidationCache:     in.ValidationCache,
 		CorePath:            in.Core,
 		WorkDir:             in.RuntimeDir,
-		Overlay:             in.Overlay,
-		OnStage:             configPlanTaskLogger(ctx),
+		DraftName:           in.DraftName,
+		Operations:          in.Operations,
+		Test:                test,
+		Generation:          generation,
 	})
 	if err != nil {
 		return toolResult{}, err
 	}
+	s.storeConfigPatchDraft(configPatchDraftSlot{
+		Key:              configPatchDraftKey(in.PatchesDir, in.ConfigPath, policyTemplate),
+		Generation:       generation,
+		Operations:       result.Operations,
+		BaseHashes:       result.BaseHashes,
+		BaseRegistryHash: result.BaseRegistryHash,
+		PolicyTemplate:   policyTemplate,
+		RegistryDir:      in.PatchesDir,
+	})
 	return jsonToolResult(result)
 }
 
 func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PatchID              string `json:"patch_id"`
-		PatchesDir           string `json:"patches_dir"`
-		SummaryPath          string `json:"summary_path"`
-		Subscription         string `json:"subscription"`
-		RulesCache           string `json:"rules_cache"`
-		RuntimeProfileConfig string `json:"runtime_profile"`
-		ConfigPath           string `json:"config"`
-		SubscriptionConfig   string `json:"subscription_config"`
-		SubscriptionRuntime  string `json:"subscription_runtime"`
-		Selection            string `json:"selection"`
-		Output               string `json:"output"`
-		BackupDir            string `json:"backup_dir"`
-		Test                 *bool  `json:"test"`
-		Core                 string `json:"core"`
-		RuntimeDir           string `json:"runtime_dir"`
+		UseCurrentDraft      bool                    `json:"use_current_draft"`
+		Generation           int64                   `json:"generation"`
+		Operations           []configpatch.Operation `json:"operations"`
+		BaseHashes           map[string]string       `json:"base_hashes"`
+		BaseRegistryHash     string                  `json:"base_registry_hash"`
+		PatchesDir           string                  `json:"patches_dir"`
+		PolicyTemplate       string                  `json:"policy_template"`
+		Subscription         string                  `json:"subscription"`
+		RulesCache           string                  `json:"rules_cache"`
+		RuntimeProfileConfig string                  `json:"runtime_profile"`
+		ConfigPath           string                  `json:"config"`
+		SubscriptionConfig   string                  `json:"subscription_config"`
+		SubscriptionRuntime  string                  `json:"subscription_runtime"`
+		Selection            string                  `json:"selection"`
+		Output               string                  `json:"output"`
+		BackupDir            string                  `json:"backup_dir"`
+		Test                 *bool                   `json:"test"`
+		Core                 string                  `json:"core"`
+		RuntimeDir           string                  `json:"runtime_dir"`
 	}
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
@@ -1523,7 +1614,7 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
 	}
-	setDefault(&in.PatchesDir, workspacePath(root, filepath.Join(".runtime", "patches")))
+	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
 	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
 	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
 	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
@@ -1537,37 +1628,48 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 	if s.state != nil {
 		in.Core = normalizeMCPStateCorePath(s.state, in.Core)
 	}
+	policyTemplate := firstNonEmpty(in.PolicyTemplate, policyTemplateFromConfig(in.ConfigPath))
+	if in.UseCurrentDraft {
+		slot, err := s.currentConfigPatchDraft(configPatchDraftKey(in.PatchesDir, in.ConfigPath, policyTemplate), in.Generation)
+		if err != nil {
+			return toolResult{}, err
+		}
+		in.Operations = slot.Operations
+		in.BaseHashes = slot.BaseHashes
+		in.BaseRegistryHash = slot.BaseRegistryHash
+		policyTemplate = slot.PolicyTemplate
+	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	result, err := configplan.Apply(ctx, configplan.ApplyOptions{
-		PlanID:              in.PatchID,
-		PlansDir:            in.PatchesDir,
-		SummaryPath:         in.SummaryPath,
-		Subscription:        in.Subscription,
-		RulesCache:          in.RulesCache,
-		RuntimeProfilePath:  in.RuntimeProfileConfig,
+	result, err := configpatch.Apply(ctx, configpatch.ApplyOptions{
+		RegistryDir:         in.PatchesDir,
+		PolicyTemplate:      policyTemplate,
 		ConfigPath:          in.ConfigPath,
-		SubscriptionConfig:  in.SubscriptionConfig,
-		SubscriptionRuntime: in.SubscriptionRuntime,
 		SelectionPath:       in.Selection,
 		OutputPath:          in.Output,
+		Subscription:        in.Subscription,
+		SubscriptionConfig:  in.SubscriptionConfig,
+		SubscriptionRuntime: in.SubscriptionRuntime,
+		RulesCache:          in.RulesCache,
+		RuntimeProfilePath:  in.RuntimeProfileConfig,
+		ValidationCache:     validationCachePath("", in.RuntimeDir),
 		CorePath:            in.Core,
 		WorkDir:             in.RuntimeDir,
 		BackupDir:           in.BackupDir,
+		Operations:          in.Operations,
+		BaseHashes:          in.BaseHashes,
+		BaseRegistryHash:    in.BaseRegistryHash,
 		Test:                test,
-		TestExplicit:        in.Test != nil,
-		OnStage:             configPlanTaskLogger(ctx),
+		Generation:          in.Generation,
 	})
 	if err != nil {
-		if result.PlanID != "" {
-			tool, encodeErr := jsonToolResult(result)
-			if encodeErr != nil {
-				return toolResult{}, encodeErr
-			}
-			tool.IsError = true
-			return tool, nil
+		if in.UseCurrentDraft && strings.Contains(err.Error(), "stale") {
+			s.markConfigPatchDraftStale(in.Generation)
 		}
 		return toolResult{}, err
+	}
+	if in.UseCurrentDraft {
+		s.clearConfigPatchDraft(in.Generation)
 	}
 	return jsonToolResult(result)
 }
@@ -2139,13 +2241,13 @@ func (s *Server) evaluateLocalClashAfterRefresh(ctx context.Context, configPath,
 			impact.State = "stale_exact_nodes"
 			impact.Error = err.Error()
 			impact.MissingNodes = append([]string{}, missingNodes.Nodes...)
-			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
+			impact.NextActions = []string{"ask the user to choose replacement nodes or switch this group to a match selector", "call proxy_group_build", "call config_patch_draft", "call config_patch_apply after review"}
 			return impact
 		}
 		impact.State = "requires_agent_replan"
 		impact.RequiresAgentReplan = true
 		impact.Error = err.Error()
-		impact.NextActions = []string{"read localclash-intent.json", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_create", "call config_patch_apply after review"}
+		impact.NextActions = []string{"call config_status with patches=true", "call config_patch_get for the affected patch", "search replacement subscription nodes", "call proxy_group_build", "call config_patch_draft", "call config_patch_apply after review"}
 		return impact
 	}
 	finishTaskStage(finish, nil, map[string]any{
@@ -2591,7 +2693,7 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
 	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
 	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
-	setDefault(&in.PatchesDir, workspacePath(root, filepath.Join(".runtime", "patches")))
+	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
 }
 
 func missingRenderInputs(in configToolInput) []string {
@@ -2682,18 +2784,97 @@ func setDefault(value *string, fallback string) {
 	}
 }
 
+func registryHasPatches(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+			return true
+		}
+	}
+	return false
+}
+
+func policyTemplateFromConfig(path string) string {
+	config, err := localconfig.Load(path)
+	if err != nil {
+		return ""
+	}
+	return config.PolicyTemplate
+}
+
+func configPatchDraftKey(patchesDir, configPath, policyTemplate string) string {
+	return filepath.Clean(patchesDir) + "|" + filepath.Clean(configPath) + "|" + strings.TrimSpace(policyTemplate)
+}
+
+func (s *Server) nextConfigPatchDraftGeneration() int64 {
+	s.configPatchDraftMu.Lock()
+	defer s.configPatchDraftMu.Unlock()
+	s.configPatchDraftGen++
+	return s.configPatchDraftGen
+}
+
+func (s *Server) storeConfigPatchDraft(slot configPatchDraftSlot) {
+	s.configPatchDraftMu.Lock()
+	defer s.configPatchDraftMu.Unlock()
+	s.configPatchDraftSlot = &slot
+}
+
+func (s *Server) currentConfigPatchDraft(key string, generation int64) (configPatchDraftSlot, error) {
+	s.configPatchDraftMu.Lock()
+	defer s.configPatchDraftMu.Unlock()
+	if s.configPatchDraftSlot == nil {
+		return configPatchDraftSlot{}, fmt.Errorf("no current config patch draft; call config_patch_draft first")
+	}
+	slot := *s.configPatchDraftSlot
+	if slot.Key != key {
+		return configPatchDraftSlot{}, fmt.Errorf("current config patch draft targets a different workspace/config; call config_patch_draft again")
+	}
+	if slot.Stale {
+		return configPatchDraftSlot{}, fmt.Errorf("current config patch draft is stale; call config_patch_draft again")
+	}
+	if generation == 0 || generation != slot.Generation {
+		return configPatchDraftSlot{}, fmt.Errorf("config_patch_apply generation %d does not match current draft generation %d; call config_patch_draft again", generation, slot.Generation)
+	}
+	return slot, nil
+}
+
+func (s *Server) markConfigPatchDraftStale(generation int64) {
+	s.configPatchDraftMu.Lock()
+	defer s.configPatchDraftMu.Unlock()
+	if s.configPatchDraftSlot != nil && s.configPatchDraftSlot.Generation == generation {
+		s.configPatchDraftSlot.Stale = true
+	}
+}
+
+func (s *Server) clearConfigPatchDraft(generation int64) {
+	s.configPatchDraftMu.Lock()
+	defer s.configPatchDraftMu.Unlock()
+	if s.configPatchDraftSlot != nil && s.configPatchDraftSlot.Generation == generation {
+		s.configPatchDraftSlot = nil
+	}
+}
+
 func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Config               string `json:"config"`
+		PatchesDir           string `json:"patches_dir"`
 		RuntimeProfileConfig string `json:"runtime_profile_config"`
 		RuntimeProfile       string `json:"runtime_profile"`
 		Core                 string `json:"core"`
 		PolicyTemplate       string `json:"policy_template"`
 		PolicyTemplatesDir   string `json:"policy_templates_dir"`
+		ResetPatches         bool   `json:"reset_patches"`
+		Selection            string `json:"selection"`
+		Output               string `json:"output"`
+		ValidationCache      string `json:"validation_cache"`
 		RulesCache           string `json:"rules_cache"`
 		SubscriptionConfig   string `json:"subscription_config"`
 		Subscription         string `json:"subscription"`
 		SubscriptionRuntime  string `json:"subscription_runtime"`
+		RuntimeDir           string `json:"runtime_dir"`
 	}
 	if err := decodeToolInput(args, &in); err != nil {
 		return toolResult{}, err
@@ -2701,19 +2882,28 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 	root := s.workspaceRoot()
 	if s.state != nil {
 		setDefault(&in.Config, workspacePath(root, "localclash-intent.json"))
+		setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
 		setDefault(&in.RuntimeProfileConfig, s.state.Paths.RuntimeProfilePath)
 		setDefault(&in.RulesCache, s.state.Paths.RulesCacheDir)
 		setDefault(&in.SubscriptionConfig, s.state.Paths.SubscriptionConfig)
 		setDefault(&in.Subscription, s.state.Paths.SubscriptionPath)
 		setDefault(&in.SubscriptionRuntime, s.state.Paths.SubscriptionRuntime)
+		setDefault(&in.Selection, s.state.Paths.PacksSelectionPath)
+		setDefault(&in.Output, s.state.Paths.GeneratedConfig)
+		setDefault(&in.RuntimeDir, s.state.Paths.MihomoRuntimeDir)
 	}
 	setDefault(&in.Config, workspacePath(root, "localclash-intent.json"))
+	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
 	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
 	setDefault(&in.PolicyTemplatesDir, workspacePath(root, policytemplate.DefaultDir))
 	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
 	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
 	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
 	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
+	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
+	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
+	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
 
 	if strings.TrimSpace(in.RuntimeProfile) == "" && strings.TrimSpace(in.Core) == "" && strings.TrimSpace(in.PolicyTemplate) == "" {
 		return toolResult{}, fmt.Errorf("config_configure requires at least one of core, runtime_profile, or policy_template")
@@ -2721,23 +2911,8 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 
 	changed := []string{}
 	var templateSummary *policytemplate.Summary
+	var importResult *configpatch.ImportTemplateResult
 	configUpdated := false
-	if strings.TrimSpace(in.PolicyTemplate) != "" {
-		config, summary, err := policytemplate.Build(in.PolicyTemplatesDir, in.PolicyTemplate)
-		if err != nil {
-			return toolResult{}, err
-		}
-		if err := validatePolicyTemplateConfig(config, in.RulesCache); err != nil {
-			return toolResult{}, err
-		}
-		if err := localconfig.Write(in.Config, config); err != nil {
-			return toolResult{}, err
-		}
-		templateSummary = &summary
-		configUpdated = true
-		changed = append(changed, "policy_template")
-	}
-
 	var status runtimeprofile.Status
 	var err error
 	if strings.TrimSpace(in.RuntimeProfile) != "" || strings.TrimSpace(in.Core) != "" {
@@ -2756,6 +2931,32 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 		if err != nil {
 			return toolResult{}, err
 		}
+	}
+	if strings.TrimSpace(in.PolicyTemplate) != "" {
+		result, err := configpatch.ImportPolicyTemplate(context.Background(), configpatch.ImportTemplateOptions{
+			RegistryDir:         in.PatchesDir,
+			PolicyTemplatesDir:  in.PolicyTemplatesDir,
+			PolicyTemplate:      in.PolicyTemplate,
+			ResetPatches:        in.ResetPatches,
+			ConfigPath:          in.Config,
+			SelectionPath:       in.Selection,
+			OutputPath:          in.Output,
+			Subscription:        in.Subscription,
+			SubscriptionConfig:  in.SubscriptionConfig,
+			SubscriptionRuntime: in.SubscriptionRuntime,
+			RulesCache:          in.RulesCache,
+			RuntimeProfilePath:  in.RuntimeProfileConfig,
+			ValidationCache:     in.ValidationCache,
+			CorePath:            status.CorePath,
+			WorkDir:             in.RuntimeDir,
+		})
+		if err != nil {
+			return toolResult{}, err
+		}
+		importResult = &result
+		templateSummary = &result.Template
+		configUpdated = true
+		changed = append(changed, "policy_template")
 	}
 	cacheWarnings := []string{}
 	if s.state != nil {
@@ -2784,6 +2985,7 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 		ConfigUpdated:             configUpdated,
 		RuntimeProfile:            status,
 		PolicyTemplate:            templateSummary,
+		PatchRegistry:             importResult,
 		PolicyTemplatesDir:        in.PolicyTemplatesDir,
 		SubscriptionConfigured:    subStatus.Configured,
 		EffectiveSubscriptionPath: in.Subscription,
@@ -2882,18 +3084,19 @@ func workspaceRootFromRuntimeProfilePath(path string) string {
 }
 
 type configConfigureResult struct {
-	Changed                   []string                 `json:"changed"`
-	ConfigPath                string                   `json:"config"`
-	ConfigUpdated             bool                     `json:"config_updated"`
-	RuntimeProfile            runtimeprofile.Status    `json:"runtime_profile_status"`
-	PolicyTemplate            *policytemplate.Summary  `json:"policy_template,omitempty"`
-	AvailablePolicyTemplates  []policytemplate.Summary `json:"available_policy_templates"`
-	PolicyTemplatesDir        string                   `json:"policy_templates_dir"`
-	SubscriptionConfigured    bool                     `json:"subscription_configured"`
-	EffectiveSubscriptionPath string                   `json:"effective_subscription_path"`
-	EffectiveSubscription     bool                     `json:"effective_subscription"`
-	Warnings                  []string                 `json:"warnings,omitempty"`
-	NextActions               []string                 `json:"next_actions"`
+	Changed                   []string                          `json:"changed"`
+	ConfigPath                string                            `json:"config"`
+	ConfigUpdated             bool                              `json:"config_updated"`
+	RuntimeProfile            runtimeprofile.Status             `json:"runtime_profile_status"`
+	PolicyTemplate            *policytemplate.Summary           `json:"policy_template,omitempty"`
+	PatchRegistry             *configpatch.ImportTemplateResult `json:"patch_registry,omitempty"`
+	AvailablePolicyTemplates  []policytemplate.Summary          `json:"available_policy_templates"`
+	PolicyTemplatesDir        string                            `json:"policy_templates_dir"`
+	SubscriptionConfigured    bool                              `json:"subscription_configured"`
+	EffectiveSubscriptionPath string                            `json:"effective_subscription_path"`
+	EffectiveSubscription     bool                              `json:"effective_subscription"`
+	Warnings                  []string                          `json:"warnings,omitempty"`
+	NextActions               []string                          `json:"next_actions"`
 }
 
 func validatePolicyTemplateConfig(config localconfig.Config, rulesCache string) error {
@@ -3163,8 +3366,8 @@ func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) 
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
-		if value != "" {
-			return value
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
 		}
 	}
 	return ""

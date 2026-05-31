@@ -41,17 +41,18 @@ Related field report:
 
 **4. 配置狀態、構建與 Patch 工作流**
 
-- `config_status`：看 `localclash-intent.json`、`generated/mihomo.yaml`、render readiness、patch 狀態。預設輕量，`resolve=true/detail=true` 才做重查。
-- `config_configure`：改核心、runtime profile、policy template。
+- `config_status`：看 `patches/*.json` registry、compiled `localclash-intent.json`、`generated/mihomo.yaml`、render readiness。預設輕量，`patches=true/resolve=true/detail=true` 才做重查或列 patch。
+- `config_configure`：改核心、runtime profile、policy template；policy template 會 import 成 `patches/*.json`，再 build compiled intent。
 - `proxy_group_build`：建立出口組，例如 HK/JP/US/⚡ 自动选择。
 - `policy_group_build`：建立業務組，例如 Steam -> HK/JP/US。
 - `custom_rules_build`：建立自訂 domain/CIDR/GEOIP 規則。
 - `rule_provider_build`：建立外部 rule-provider intent。
-- `config_patch_create`：生成可審核 patch，不改 active config。
-- `config_patch_apply`：套用指定 `patch_id`，寫入 durable config 並重建 generated config。
-- `config_render`：從 durable state 重新渲染 `generated/mihomo.yaml`。
+- `config_patch_get`：讀取一個 durable patch 的完整 overlay 與 hash。
+- `config_patch_draft`：用 `upsert_patch/remove_patch/set_patch_status/reorder_patch` 預覽 patch registry 操作，只保留一個 in-memory draft。
+- `config_patch_apply`：套用 current draft 或顯式 operations，寫入 `patches/*.json` 並重建 compiled intent / generated config。
+- `config_render`：從 durable patch registry 或 compiled intent 重新渲染 `generated/mihomo.yaml`。
 
-服務場景：這是現在的「patch-first」模型。Agent 先構建候選變更，再生成 patch 給用戶/自己審核，最後 apply，不直接亂改 active config。
+服務場景：這是現在的「patch registry first」模型。Agent 先構建候選 overlay，再 draft patch operation 給用戶/自己審核，最後 apply，不直接亂改 compiled artifacts。
 
 **5. 路由解釋與可理解性**
 
@@ -78,7 +79,7 @@ Related field report:
 2. `subscriptions_status` / `config_status` / `runtime_status`
 3. 需要規則證據時走 `packs_list` / `pack_rules_prefetch` / `pack_rules_query`，pack 參數使用 `{source, pack}`
 4. 需要修改配置時走 `proxy_group_build` / `policy_group_build` / `custom_rules_build`
-5. 用 `config_patch_create` 產生 patch
+5. 用 `config_patch_draft` 產生 current draft
 6. 用 `config_patch_apply` 套用
 7. 用 `config_render` 或直接由 apply 產生 generated config
 8. 經用戶確認後 `restart_runtime`
