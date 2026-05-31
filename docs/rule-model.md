@@ -273,7 +273,8 @@ Current code still does not yet have:
 
 ## MCP Routing Discovery
 
-`config_status` exposes the factual source of truth for default routing:
+`config_status(patches=true)` exposes the patch registry and compiled intent
+used for default routing:
 
 - `intent.proxy_groups` lists reusable exit groups such as region selectors and
   direct exits
@@ -293,9 +294,10 @@ Agents should not infer active default rules from
 truncated and often dominated by the local safety baseline.
 
 Use the read-only MCP `routing_explain` tool for compact routing discovery.
-It reads durable `localclash-intent.json` intent and returns matching packs, policy
-groups, reusable exit groups, optional cached provider-rule evidence, and the
-safe reviewed patch path. Example queries:
+It reads compiled `localclash-intent.json` intent, generated patch provenance,
+and returns matching packs, policy groups, reusable exit groups, optional cached
+provider-rule evidence, and the safe reviewed patch-registry path. Example
+queries:
 
 - `routing_explain(query: "Steam")`: explains the active Steam pack, the
   Dashboard-facing Steam policy group, and its exits.
@@ -308,8 +310,8 @@ safe reviewed patch path. Example queries:
 
 `routing_explain` is not a mutation tool. For changes, follow its
 `patch_guidance`: `config_status` -> optional `proxy_group_build` /
-`policy_group_build` -> `config_patch_create` -> review -> `config_patch_apply`
--> verification.
+`policy_group_build` -> `config_patch_draft` -> review ->
+`config_patch_apply` -> verification.
 
 ## Development Sequence
 

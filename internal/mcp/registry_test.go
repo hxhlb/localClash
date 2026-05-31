@@ -60,8 +60,11 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if !strings.Contains(byName["config_patch_apply"].Description, "generated/mihomo.yaml") {
 		t.Fatalf("config_patch_apply description should mention generated config: %q", byName["config_patch_apply"].Description)
 	}
-	if byName["config_patch_create"].SafetyLevel != SafeWrite {
-		t.Fatalf("config_patch_create safety = %q, want %q", byName["config_patch_create"].SafetyLevel, SafeWrite)
+	if byName["config_patch_draft"].SafetyLevel != SafeWrite {
+		t.Fatalf("config_patch_draft safety = %q, want %q", byName["config_patch_draft"].SafetyLevel, SafeWrite)
+	}
+	if byName["config_patch_get"].SafetyLevel != SafeRead {
+		t.Fatalf("config_patch_get safety = %q, want %q", byName["config_patch_get"].SafetyLevel, SafeRead)
 	}
 	if byName["config_render"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_render safety = %q, want %q", byName["config_render"].SafetyLevel, SafeWrite)

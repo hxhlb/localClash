@@ -40,6 +40,14 @@ type PatchFile struct {
 	Path        string             `yaml:"-" json:"path,omitempty"`
 }
 
+type PatchSource struct {
+	ID          string             `json:"id"`
+	Description string             `json:"description,omitempty"`
+	Config      localconfig.Config `json:"config"`
+	Path        string             `json:"path,omitempty"`
+	Index       int                `json:"index"`
+}
+
 type Summary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -85,6 +93,44 @@ func Build(dir, id string) (localconfig.Config, Summary, error) {
 	return localconfig.Config{}, Summary{}, fmt.Errorf("unknown policy_template %q; supported templates: %s", id, strings.Join(idsFromTemplates(templates), ", "))
 }
 
+func PatchSources(dir, id string) ([]PatchSource, Summary, error) {
+	id = normalizeID(id)
+	templates, err := loadAll(dir)
+	if err != nil {
+		return nil, Summary{}, err
+	}
+	for _, template := range templates {
+		if template.ID != id {
+			continue
+		}
+		patches := []PatchSource{}
+		if configHasContent(template.Config) {
+			patches = append(patches, PatchSource{
+				ID:          "default." + template.ID + ".v1",
+				Description: template.Description,
+				Config:      template.Config,
+				Path:        filepath.ToSlash(template.Path),
+				Index:       0,
+			})
+		}
+		for _, patchRef := range template.Patches {
+			patch, err := loadPatchFile(template, patchRef)
+			if err != nil {
+				return nil, Summary{}, err
+			}
+			patches = append(patches, PatchSource{
+				ID:          patch.ID,
+				Description: firstNonEmpty(patch.Description, patchRef.Description),
+				Config:      patch.Config,
+				Path:        filepath.ToSlash(patch.Path),
+				Index:       len(patches),
+			})
+		}
+		return patches, summaryFor(template), nil
+	}
+	return nil, Summary{}, fmt.Errorf("unknown policy_template %q; supported templates: %s", id, strings.Join(idsFromTemplates(templates), ", "))
+}
+
 func buildTemplateConfig(template File) (localconfig.Config, error) {
 	config := template.Config
 	for _, patchRef := range template.Patches {
@@ -95,6 +141,28 @@ func buildTemplateConfig(template File) (localconfig.Config, error) {
 		config = mergeConfig(config, patch.Config)
 	}
 	return config, nil
+}
+
+func configHasContent(config localconfig.Config) bool {
+	return config.Version != 0 ||
+		strings.TrimSpace(config.PolicyTemplate) != "" ||
+		strings.TrimSpace(config.FallbackTarget) != "" ||
+		len(config.ProxyGroups) > 0 ||
+		len(config.PolicyGroups) > 0 ||
+		len(config.TransportRules) > 0 ||
+		len(config.Packs) > 0 ||
+		len(config.CustomRules) > 0 ||
+		len(config.EnabledRulePacks) > 0 ||
+		len(config.RuleProviders) > 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func loadPatchFile(template File, ref PatchRef) (PatchFile, error) {

@@ -52,8 +52,8 @@ type ToolsListResult struct {
 
 func Registry() []Tool {
 	tools := []Tool{
-		{Name: "config_configure", SafetyLevel: SafeWrite, Description: "Configure localClash base product state with optional core, runtime_profile, and policy_template. This writes localclash-runtime.json and/or localclash-intent.json, but does not configure subscriptions, render generated config, start runtime, or apply router takeover."},
-		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: source-of-truth localclash-intent.json, generated/mihomo.yaml build artifact, render readiness, and pending patches. Default output is lightweight; pass resolve=true for selected-node matches or detail=true for generated-summary/overlay audit."},
+		{Name: "config_configure", SafetyLevel: SafeWrite, Description: "Configure localClash base product state with optional core, runtime_profile, and policy_template. Policy templates are imported into patches/*.json and compiled into localclash-intent.json; reset_patches=true restores default template patches."},
+		{Name: "config_status", SafetyLevel: SafeRead, Description: "Inspect localClash config status: durable patches/*.json registry, compiled localclash-intent.json, generated/mihomo.yaml build artifact, and render readiness. Default output is lightweight; pass patches=true for patch inventory, resolve=true for selected-node matches, or detail=true for generated-summary/overlay audit."},
 		{Name: "doctor", SafetyLevel: SafeRead, Description: "Run read-only localClash diagnostics."},
 		{Name: "environment_inspect", SafetyLevel: SafeRead, Description: "Inspect host, network capability evidence, and localClash state without exposing credentials."},
 		{Name: "nl_file", SafetyLevel: SafeRead, Description: "Read a repository-local text file with nl-style stable line numbers for follow-up sed_file edits."},
@@ -66,17 +66,18 @@ func Registry() []Tool {
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned Mihomo runtime processes by managed core process name without changing runtime state."},
 		{Name: "router_takeover_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned OpenWrt router takeover runtime state: runtime profile, Mihomo runtime, fw4/nft chains, DNS hijack, fwmark route, and TUN device."},
-		{Name: "routing_explain", SafetyLevel: SafeRead, Description: "Explain active durable routing intent for a service, domain, pack, policy group, or exit query. Reads localclash-intent.json, active packs, policy groups, proxy groups, custom rules, and cached rule matches; does not modify config or start runtime."},
+		{Name: "routing_explain", SafetyLevel: SafeRead, Description: "Explain active compiled routing intent for a service, domain, pack, policy group, or exit query. Reads localclash-intent.json, patch provenance, active packs, policy groups, proxy groups, custom rules, and cached rule matches; does not modify config or start runtime."},
 		{Name: "tools_list", SafetyLevel: SafeRead, Description: "List localClash MCP tools as ordinary tool output for clients that do not expose MCP registry introspection to the model."},
-		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply a reviewed config patch by writing localclash-intent.json, deriving localclash-packs.gob, and regenerating generated/mihomo.yaml without starting the runtime. Use the exact patch_id returned by config_patch_create."},
-		{Name: "config_patch_create", SafetyLevel: SafeWrite, Description: "Create a reviewable config patch and candidate Mihomo config from proxy groups, packs, and custom rules. It does not modify active localclash-intent.json or generated/mihomo.yaml and does not run Mihomo config test by default; config_patch_apply is the validation boundary."},
-		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Render generated/mihomo.yaml from the current durable localclash-intent.json source of truth, subscription, policy template graph, and runtime profile. Does not read patches and does not start runtime."},
+		{Name: "config_patch_apply", SafetyLevel: SafeWrite, Description: "Apply reviewed patch-registry operations from the current config_patch_draft or explicit operations, then compile localclash-intent.json, derive localclash-packs.gob, and regenerate generated/mihomo.yaml without starting runtime."},
+		{Name: "config_patch_draft", SafetyLevel: SafeWrite, Description: "Preview patch-registry operations in one in-memory current draft slot. Supports upsert_patch, remove_patch, set_patch_status, and reorder_patch; writes no files until config_patch_apply."},
+		{Name: "config_patch_get", SafetyLevel: SafeRead, Description: "Read one durable patches/*.json patch by patch_id with full overlay, sha256, provides, and registry_hash for safe modification."},
+		{Name: "config_render", SafetyLevel: SafeWrite, Description: "Compile patches/*.json into localclash-intent.json when a patch registry exists, then render generated/mihomo.yaml from the compiled intent, subscription, policy template graph, and runtime profile. Does not start runtime."},
 		{Name: "custom_rules_build", SafetyLevel: SafeWrite, Description: "Build and validate user custom routing rules for domains, CIDRs, or GEOIP tags before adding them to a config patch."},
 		{Name: "pack_rules_prefetch", SafetyLevel: SafeWrite, Description: "Download provider rules for selected packs into local provider-cache so pack_rules_query can search them locally."},
 		{Name: "pack_rules_read", SafetyLevel: SafeWrite, Description: "Read rules for one exact source/pack pair, downloading missing provider-cache entries for that pack only, and return source/pack/type/render_strategy/component metadata."},
-		{Name: "policy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a business-layer policy group that routes one rule domain, app, or scenario to existing exits such as HK, JP, US, ⚡ 自动选择, or DIRECT. This does not persist state; copy the returned policy_group into config_patch_create.overlay.policy_groups."},
-		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_create.overlay.proxy_groups when a patch should use it."},
-		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_create.overlay.rule_providers."},
+		{Name: "policy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a business-layer policy group that routes one rule domain, app, or scenario to existing exits such as HK, JP, US, ⚡ 自动选择, or DIRECT. This does not persist state; copy the returned policy_group into config_patch_draft.operations[].overlay.policy_groups."},
+		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_draft.operations[].overlay.proxy_groups when a patch should use it."},
+		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_draft.operations[].overlay.rule_providers."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.gob."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start the Mihomo runtime from generated config, assuming generated/mihomo.yaml has already been validated by config_patch_apply or doctor. Requires external Agent/MCP client confirmation; starting the proxy runtime may temporarily interrupt network connectivity, and the Agent itself may be disconnected if it depends on the current network/proxy path."},
@@ -153,7 +154,11 @@ func inputSchemaForTool(name string) map[string]any {
 				"runtime_profile":        map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Optional runtime profile mode to activate."},
 				"policy_template":        map[string]any{"type": "string", "description": "Optional policy template id loaded from policy-templates/. Built-ins include minimal and localclash-default."},
 				"policy_templates_dir":   map[string]any{"type": "string", "description": "Directory containing policy template YAML files. Defaults to policy-templates."},
-				"config":                 map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash-intent.json."},
+				"reset_patches":          map[string]any{"type": "boolean", "description": "Replace patches/*.json with policy-template defaults before compiling. Use to restore default strategies."},
+				"patches_dir":            map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
+				"config":                 map[string]any{"type": "string", "description": "Compiled localClash intent path. Defaults to localclash-intent.json."},
+				"selection":              map[string]any{"type": "string", "description": "Compiled packs selection path. Defaults to localclash-packs.gob."},
+				"output":                 map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
 				"runtime_profile_config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
 				"rules_cache":            map[string]any{"type": "string", "description": "Pack cache directory used to validate policy_template pack references. Defaults to .runtime/rules/packs."},
 				"subscription":           map[string]any{"type": "string", "description": "Subscription gob path for readiness reporting. Defaults to subscription.gob."},
@@ -174,7 +179,9 @@ func inputSchemaForTool(name string) map[string]any {
 				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
 				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.gob."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
-				"patches_dir":          map[string]any{"type": "string", "description": "Review patch artifact root. Defaults to .runtime/patches."},
+				"patches_dir":          map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
+				"patches":              map[string]any{"type": "boolean", "description": "Include compact patch inventory, registry_hash, and artifact paths."},
+				"policy_template":      map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
 				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum summary entries per section. Defaults to 20."},
 			},
 		}
@@ -214,15 +221,30 @@ func inputSchemaForTool(name string) map[string]any {
 				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum matches per section. Defaults to 20."},
 			},
 		}
-	case "config_patch_apply":
+	case "config_patch_get":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
+			"required":             []string{"patch_id"},
 			"properties": map[string]any{
-				"patch_id":             map[string]any{"type": "string", "description": "Patch directory id returned by config_patch_create."},
-				"patches_dir":          map[string]any{"type": "string", "description": "Patch artifact root. Defaults to .runtime/patches."},
-				"summary_path":         map[string]any{"type": "string", "description": "Optional explicit summary.json path. Use patch_id for normal flows."},
-				"config":               map[string]any{"type": "string", "description": "Persistent localClash config path. Defaults to localclash-intent.json."},
+				"patch_id":        map[string]any{"type": "string", "description": "Durable patch registry id from config_status(patches=true)."},
+				"patches_dir":     map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
+				"config":          map[string]any{"type": "string", "description": "Compiled localClash intent path used to infer policy_template. Defaults to localclash-intent.json."},
+				"policy_template": map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
+			},
+		}
+	case "config_patch_draft":
+		operation := patchOperationSchema()
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []string{"operations"},
+			"properties": map[string]any{
+				"draft_name":           map[string]any{"type": "string", "description": "Optional display name for the single in-memory current draft. Not persisted and not used as an id."},
+				"operations":           map[string]any{"type": "array", "minItems": 1, "items": operation, "description": "Reviewed patch-registry operations. A new config_patch_draft call replaces the current in-memory draft slot."},
+				"patches_dir":          map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
+				"policy_template":      map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
+				"config":               map[string]any{"type": "string", "description": "Compiled localClash intent path. Defaults to localclash-intent.json."},
 				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
 				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
 				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
@@ -230,12 +252,43 @@ func inputSchemaForTool(name string) map[string]any {
 				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
 				"selection":            map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.gob."},
 				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
-				"backup_dir":           map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-patch-apply."},
-				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test before applying. Defaults to true. Setting false bypasses Mihomo validation and should only be used after explicit user confirmation."},
+				"test":                 map[string]any{"type": "boolean", "description": "Resolve and render the draft for validation. Defaults to false for lightweight preview."},
 				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
 				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
 				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
 				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+			},
+		}
+	case "config_patch_apply":
+		operation := patchOperationSchema()
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"use_current_draft":   map[string]any{"type": "boolean", "description": "Apply the current in-memory draft created by config_patch_draft. Requires generation."},
+				"generation":          map[string]any{"type": "integer", "minimum": 1, "description": "Reviewed in-memory draft generation returned by config_patch_draft."},
+				"operations":          map[string]any{"type": "array", "minItems": 1, "items": operation, "description": "Explicit patch-registry operations to apply instead of use_current_draft."},
+				"base_hashes":         map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optimistic patch-content hashes returned by config_patch_draft."},
+				"base_registry_hash":  map[string]any{"type": "string", "description": "Registry hash returned by config_patch_draft; required for explicit operations."},
+				"patches_dir":         map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
+				"policy_template":     map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
+				"config":              map[string]any{"type": "string", "description": "Compiled localClash intent path. Defaults to localclash-intent.json."},
+				"subscription":        map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
+				"subscription_config": map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
+				"subscription_runtime": map[string]any{
+					"type":        "string",
+					"description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions.",
+				},
+				"rules_cache":     map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
+				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
+				"selection":       map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.gob."},
+				"output":          map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to generated/mihomo.yaml."},
+				"backup_dir":      map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-patch-apply."},
+				"test":            map[string]any{"type": "boolean", "description": "Run Mihomo config test before committing. Defaults to true; test=false skips only the external core validation."},
+				"core":            map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
+				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
+				"background":      map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "nl_file":
@@ -333,124 +386,6 @@ func inputSchemaForTool(name string) map[string]any {
 		}
 	case "rule_provider_build":
 		return ruleProviderInputSchema("External rule-provider id, for example US-Proxy.")
-	case "config_patch_create":
-		matchIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"type":           map[string]any{"type": "string", "enum": []string{"name_regex"}, "description": "Selector type. name_regex matches subscription proxy names only."},
-				"pattern":        map[string]any{"type": "string", "description": "Regular expression matched against subscription proxy names."},
-				"source_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional subscription source ids to constrain matches."},
-				"min":            map[string]any{"type": "integer", "minimum": 0, "description": "Minimum required matches. Defaults to 1."},
-				"max":            map[string]any{"type": "integer", "minimum": 0, "description": "Maximum matches to materialize. 0 means unlimited."},
-				"case_sensitive": map[string]any{"type": "boolean", "description": "Whether pattern matching is case-sensitive. Defaults to false."},
-			},
-			"required": []string{"type", "pattern"},
-		}
-		packIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"source": map[string]any{"type": "string", "description": "Exact pack source from packs_list[].source or tool_args, for example blackmatrix7, sukkaw, or v2fly-dlc."},
-				"pack":   map[string]any{"type": "string", "description": "Exact upstream pack name from packs_list[].pack or tool_args, for example OpenAI, ai_non_ip, google, or geolocation-!cn."},
-				"type":   map[string]any{"type": "string", "enum": []string{"rule_provider", "geosite"}, "description": "Optional assertion for the catalog pack type. It validates the path but does not choose render behavior."},
-				"target": map[string]any{"type": "string", "description": "Desired rule target, for example DIRECT, REJECT, ⚡ 自动选择, or AI."},
-				"reason": map[string]any{"type": "string", "description": "Short durable reason for this pack routing choice."},
-			},
-			"required": []string{"source", "pack", "target"},
-		}
-		ruleIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"type":       map[string]any{"type": "string", "enum": []string{"domain", "domain_suffix", "ip_cidr", "ip_cidr6", "geoip"}, "description": "Mihomo rule type to generate."},
-				"value":      map[string]any{"type": "string", "description": "Domain, domain suffix, CIDR, or GEOIP tag value."},
-				"no_resolve": map[string]any{"type": "boolean", "description": "Append no-resolve for IP CIDR or GEOIP rules when needed."},
-			},
-			"required": []string{"type", "value"},
-		}
-		transportRuleIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"id":       map[string]any{"type": "string", "description": "Stable transport rule id, for example quic-udp-443-main."},
-				"target":   map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id, or a policy group id."},
-				"reason":   map[string]any{"type": "string", "description": "Short durable reason for this transport rule."},
-				"network":  map[string]any{"type": "string", "enum": []string{"UDP"}, "description": "Transport network. First supported value is UDP."},
-				"dst_port": map[string]any{"type": "integer", "minimum": 1, "maximum": 65535, "description": "Destination port matched by the transport rule."},
-			},
-			"required": []string{"id", "target", "network", "dst_port"},
-		}
-		customRuleIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"id":     map[string]any{"type": "string", "description": "Stable custom rule id, for example huggingface_temp."},
-				"target": map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id, or a policy group id."},
-				"reason": map[string]any{"type": "string", "description": "Short durable reason for this user rule."},
-				"rules":  map[string]any{"type": "array", "items": ruleIntent, "description": "Rules that share the same target."},
-			},
-			"required": []string{"id", "target", "rules"},
-		}
-		localRulePackIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"id":     map[string]any{"type": "string", "description": "Local rule pack id from rule-packs/*.json."},
-				"target": map[string]any{"type": "string", "description": "Terminal target DIRECT/REJECT, a proxy group id, or a policy group id. Defaults to the pack default_target when omitted."},
-				"reason": map[string]any{"type": "string", "description": "Short durable reason for enabling this local rule pack."},
-			},
-			"required": []string{"id"},
-		}
-		ruleProviderIntent := ruleProviderInputSchema("External rule-provider id, for example US-Proxy.")
-		proxyGroupIntent := map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"id":       map[string]any{"type": "string", "description": "Proxy group id referenced by packs[].target, for example SteamHK."},
-				"match":    matchIntent,
-				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
-				"reason":   map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs Agent involvement."},
-				"boundary": map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
-			},
-			"required": []string{"id", "mode"},
-		}
-		policyGroupIntent := policyGroupInputSchema("Policy group id referenced by packs[].target, custom_rules[].target, or rule_providers[].target, for example Steam.")
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"properties": map[string]any{
-				"patch_name":           map[string]any{"type": "string", "description": "Human-readable patch slug prefix."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"patches_dir":          map[string]any{"type": "string", "description": "Patch artifact root. Defaults to .runtime/patches."},
-				"config":               map[string]any{"type": "string", "description": "Candidate localClash config filename in the patch. Defaults to localclash-intent.json."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
-				"test":                 map[string]any{"type": "boolean", "description": "Run Mihomo config test for this review artifact. Defaults to false; config_patch_apply is the normal validation boundary."},
-				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
-				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
-				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
-				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
-				"overlay": map[string]any{
-					"type":                 "object",
-					"description":          "Desired localClash overlay. If a target references a proxy group or policy group that is not already in durable localclash-intent.json, include it in overlay.proxy_groups or overlay.policy_groups in this same call. policy_groups are business-layer entries whose exits point to proxy_groups or terminal targets.",
-					"additionalProperties": false,
-					"properties": map[string]any{
-						"packs":              map[string]any{"type": "array", "items": packIntent},
-						"transport_rules":    map[string]any{"type": "array", "items": transportRuleIntent, "description": "High-priority transport rules rendered after the local safety baseline and before domain/CIDR/GEOIP custom rules and catalog packs. Use for AND/NETWORK/DST-PORT rules such as QUIC UDP/443."},
-						"custom_rules":       map[string]any{"type": "array", "items": customRuleIntent},
-						"enabled_rule_packs": map[string]any{"type": "array", "items": localRulePackIntent, "description": "Standalone local rule packs backed by rule-packs/*.json and rendered after custom rules but before catalog/template packs."},
-						"rule_providers":     map[string]any{"type": "array", "items": ruleProviderIntent, "description": "User-supplied external Mihomo rule-providers rendered as rule-providers plus RULE-SET rules."},
-						"proxy_groups":       map[string]any{"type": "array", "items": proxyGroupIntent},
-						"policy_groups":      map[string]any{"type": "array", "items": policyGroupIntent},
-					},
-				},
-			},
-			"required": []string{"overlay"},
-		}
 	case "run_runtime":
 		return map[string]any{
 			"type":                 "object",
@@ -713,6 +648,42 @@ func ruleProviderInputSchema(idDescription string) map[string]any {
 			"interval": map[string]any{"type": "integer", "minimum": 0, "description": "Refresh interval in seconds. Defaults to 86400 for http providers."},
 		},
 		"required": []string{"id", "target"},
+	}
+}
+
+func patchOperationSchema() map[string]any {
+	overlay := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"description":          "Full replacement overlay for upsert_patch. Omitted overlay fields are empty, not retained from the existing patch.",
+		"properties": map[string]any{
+			"packs":              map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			"transport_rules":    map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			"custom_rules":       map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			"enabled_rule_packs": map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			"rule_providers":     map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			"proxy_groups":       map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			"policy_groups":      map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+		},
+	}
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"op", "patch_id"},
+		"properties": map[string]any{
+			"op":                map[string]any{"type": "string", "enum": []string{"upsert_patch", "remove_patch", "set_patch_status", "reorder_patch"}},
+			"patch_id":          map[string]any{"type": "string", "description": "Durable patch id. Allowed characters: letters, digits, dot, underscore, and hyphen."},
+			"base_patch_sha256": map[string]any{"type": "string", "description": "Optional optimistic content hash from config_patch_get when replacing an existing patch."},
+			"title":             map[string]any{"type": "string", "description": "Human readable patch title for upsert_patch."},
+			"source":            map[string]any{"type": "string", "description": "Patch source. Defaults to user for new patches and preserves existing source for updates."},
+			"source_ref":        map[string]any{"type": "string", "description": "Optional provenance reference, normally policy-templates/... for template patches."},
+			"status":            map[string]any{"type": "string", "enum": []string{"enabled", "disabled", "tombstoned"}, "description": "Patch status for upsert_patch or set_patch_status."},
+			"order_id":          map[string]any{"type": "string", "description": "Fixed-width decimal order id such as 1200.500000. Never send as a JSON number."},
+			"summary":           map[string]any{"type": "string", "description": "Short durable summary."},
+			"overlay":           overlay,
+			"before_patch_id":   map[string]any{"type": "string", "description": "For reorder_patch, allocate an order id before this patch."},
+			"after_patch_id":    map[string]any{"type": "string", "description": "For reorder_patch, allocate an order id after this patch."},
+		},
 	}
 }
 

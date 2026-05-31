@@ -39,8 +39,8 @@ func TestListPacksReturnsSummaries(t *testing.T) {
 	if result.Packs[0].ToolArgs.PacksGet.Source != "blackmatrix7" || result.Packs[0].ToolArgs.PacksGet.Pack != "GitHub" {
 		t.Fatalf("tool args = %+v, want copyable source/pack args", result.Packs[0].ToolArgs)
 	}
-	if result.Packs[0].ToolArgs.ConfigPatchCreatePack == nil || result.Packs[0].ToolArgs.ConfigPatchCreatePack.Target != "⚡ 自动选择" {
-		t.Fatalf("tool args = %+v, want config_patch_create pack args", result.Packs[0].ToolArgs)
+	if result.Packs[0].ToolArgs.ConfigPatchDraftPack == nil || result.Packs[0].ToolArgs.ConfigPatchDraftPack.Target != "⚡ 自动选择" {
+		t.Fatalf("tool args = %+v, want config_patch_draft pack args", result.Packs[0].ToolArgs)
 	}
 	assertPublicPackJSONExcludes(t, result, "render_rule_template", "RULE-SET,", "blackmatrix7_GitHub")
 }
