@@ -4,6 +4,61 @@ This document records router-facing usability and performance incidents that
 must be investigated with evidence. Do not treat post-removal or wrong-window
 samples as proof for an incident.
 
+## 2026-05-31 LuCI Reboot Restore Gap
+
+Observed symptom:
+
+- After rebooting the router, LuCI does not restore the localClash router
+  network takeover path.
+- The localClash-managed Mihomo runtime is also not restored automatically, so
+  router traffic is not captured by the expected localClash runtime after boot.
+
+Evidence boundary:
+
+- This is currently a user-reported reboot recovery bug, not yet backed by a
+  full boot-window log capture.
+- Do not infer whether the missing restore is caused by the LuCI UI, ubus/rpcd
+  helper, OpenWrt procd service configuration, localClash core startup, runtime
+  config rendering, or router takeover apply until boot-time evidence is
+  collected.
+
+Current explanation:
+
+- localClash documents router takeover rules as runtime state: a reboot clears
+  them.
+- The missing product behavior is therefore not that nft/runtime takeover rules
+  survive reboot; it is that the LuCI/OpenWrt integration should restore the
+  configured runtime and re-apply takeover after boot when the user has enabled
+  that mode.
+
+Product requirement:
+
+- A router reboot restore path must bring the configured localClash router mode
+  back to the intended operational state without requiring a manual LuCI click.
+- Restore should ensure the localClash service is running, the selected runtime
+  profile and generated config are available, Mihomo is started, and
+  localClash-owned router takeover is applied only after the runtime is ready.
+- The restore path must be idempotent: repeated LuCI/service startup checks
+  should not duplicate nft rules, spawn multiple Mihomo processes, or rewrite
+  unrelated user state.
+- Failure must be visible from LuCI and logs with enough detail to distinguish
+  missing core binary, missing config, failed runtime start, failed takeover
+  apply, and service supervision failures.
+
+Required evidence for the next reproduction:
+
+- OpenWrt boot timestamp and LuCI/localClash package versions.
+- `logread` lines for localClash procd service startup, LuCI/rpcd helper calls,
+  runtime start attempts, and takeover apply attempts.
+- `service localclash status`, relevant procd init settings, and whether the
+  service is enabled at boot.
+- `ps` output for localClash and Mihomo after boot.
+- localClash `runtime_status` and `router_takeover_status` after boot.
+- Presence and contents summary for `localclash-runtime.json`,
+  `generated/mihomo.yaml`, runtime PID files, and localClash MCP/service logs.
+- nft/firewall state showing whether localClash-owned takeover chains or rules
+  are absent, duplicated, or partially applied.
+
 ## 2026-05-29 DHCP Hostname DNS Hijack Regression
 
 Observed symptom:
