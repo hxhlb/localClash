@@ -6,7 +6,7 @@ localClash 是一个 Go 1.24 编写的 Mihomo 运行时管理工具（`internal/
 
 ### 核心设计原则
 
-- **localclash-intent.json 是唯一真相源**，generated/mihomo.yaml 是构建产物
+- **patches/*.json 是配置策略真相源**，localclash-intent.json 与 generated/mihomo.yaml 是构建产物
 - **安全基线不可禁**，本地网络保护规则硬编码在渲染器中
 - **两层策略体系**：精简（minimal）与预设（localclash-default）
 - **Patch 叠加模型**：预设模板通过 8 个有序 patch 文件叠加构建
@@ -24,7 +24,7 @@ localClash 是一个 Go 1.24 编写的 Mihomo 运行时管理工具（`internal/
                            │ JSON-RPC
 ┌──────────────────────────▼──────────────────────────────────┐
 │                   MCP HTTP Server (:8765)                     │
-│  33 tools: safe_read(15) | safe_write(13) | confirm_required(5) │
+│  MCP tools: safe_read | safe_write | confirm_required              │
 └──────────────────────────┬──────────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────────┐
@@ -159,21 +159,21 @@ runtimeprofile.ApplyToConfig()
 generated/mihomo.yaml
 ```
 
-### 4.2 Patch 工作流（create-review-apply）
+### 4.2 Patch 工作流（draft-review-apply）
 
 这是 localClash 最重要的安全设计：
 
-1. **config_patch_create**：加载当前 localclash-intent.json → 叠加 overlay → 解析 → 渲染 → 写入 `.runtime/patches/<id>/`（不触碰活跃文件）
-2. **审查**：Agent 展示 diff/summary 给用户确认
-3. **config_patch_apply**：验证 → 备份旧文件到 `.runtime/backups/` → 准备 temp 候选文件 → fsync → rename 提交 localclash-intent.json、localclash-packs.gob、generated/mihomo.yaml；提交失败会尝试回滚已切换的 active 文件
+1. **config_patch_draft**：读取当前 `patches/*.json` registry → 预览 `upsert_patch/remove_patch/set_patch_status/reorder_patch` → 返回 impact/base hashes/apply args，只保留一个进程内 current draft
+2. **审查**：Agent 展示 impact/summary 给用户确认
+3. **config_patch_apply**：验证 registry hash 与 patch base hashes → 备份旧文件到 `.runtime/backups/` → staging 生成候选文件 → fsync → rename 提交 `patches/*.json`、`localclash-intent.json`、`localclash-packs.gob`、`generated/mihomo.yaml`；提交失败会尝试回滚已切换的 active 文件
 4. **不自动重启**：应用后需要单独确认 restart_runtime
 
 ### 4.3 MCP 工具安全分级
 
 | 等级 | 数量 | 典型工具 |
 |------|------|---------|
-| safe_read | 15 | config_status, doctor, routing_explain, packs_list |
-| safe_write | 13 | config_patch_create, subscriptions_refresh, config_render, sed_file |
+| safe_read | registry 定义 | config_status, config_patch_get, doctor, routing_explain, packs_list |
+| safe_write | registry 定义 | config_patch_draft, config_patch_apply, subscriptions_refresh, config_render, sed_file |
 | confirm_required | 5 | run_runtime, restart_runtime, router_takeover_* |
 
 运行时会改变网络连接状态的工具都需要显式确认，这是合理的安全边界。
@@ -195,9 +195,9 @@ generated/mihomo.yaml
 
 ### 5.1 设计层面
 
-1. **真相源与构建产物分离**：localclash-intent.json vs generated/mihomo.yaml，避免直接编辑 YAML 带来的不可维护性
+1. **真相源与构建产物分离**：`patches/*.json` vs compiled `localclash-intent.json` / `generated/mihomo.yaml`，避免直接编辑 YAML 或 compiled intent 带来的不可维护性
 2. **两层策略互补**：minimal 给高级用户最大自由度，localclash-default 给普通用户开箱即用体验
-3. **Patch 叠加模型**：创建阶段完全隔离（写入 `.runtime/patches/` 而非活跃文件），应用阶段先备份再顺序写入，patch 之间职责单一
+3. **Patch registry 模型**：draft 阶段只保留进程内预览，apply 阶段先备份再提交 `patches/*.json` 与 compiled artifacts，patch 之间职责单一
 4. **AI Agent 原生设计**：MCP 工具提供了完整的观察→计划→审查→应用的闭环
 5. **安全基线不可绕过**：13 条本地保护规则硬编码，确保 LAN/私有 IP/本地 DNS 不会因配置错误而泄露
 6. **路由器一等公民**：normal/router 双配置文件模式，router 模式的 redir-host-mix 透明代理设计完整
@@ -249,7 +249,7 @@ generated/mihomo.yaml
 
 - 基础 `routing_explain` 保持 2s 内，完整证据模式可以更慢但必须显式标记。
 - 无配置变更的 `restart_runtime` 目标低于 3s。
-- `config_render`、`config_patch_create/apply`、`routing_explain` 的阶段耗时有可重复的 smoke 结果，避免再次把 CPU 问题归因到“整个 MCP server 很贵”。
+- `config_render`、`config_patch_draft/apply`、`routing_explain` 的阶段耗时有可重复的 smoke 结果，避免再次把 CPU 问题归因到“整个 MCP server 很贵”。
 
 当前实现状态：Mihomo `-t` 验证缓存记录 generated config SHA-256、core type/version/SHA-256、验证时间、耗时和结果；`restart_runtime` 在停止旧进程前先验证，未变更 config/core 时复用已通过缓存。订阅 source config 存在时，缺失 `.runtime/subscriptions/<source>.gob` 会 hard fail 并要求 `subscriptions_refresh`，不再长期 fallback 到 merged `subscription.gob`。`scripts/mcp-performance-smoke.sh` 输出可重复 JSON artifact，记录 MCP 工具耗时、response 大小、service log 路径和进程 CPU 快照。
 

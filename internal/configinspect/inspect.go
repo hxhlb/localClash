@@ -73,33 +73,34 @@ type OverlayResult struct {
 }
 
 type IntentResult struct {
-	Config              string                `json:"config"`
-	Layer               string                `json:"layer"`
-	Modifiable          bool                  `json:"modifiable"`
-	Exists              bool                  `json:"exists"`
-	Valid               bool                  `json:"valid"`
-	Resolved            bool                  `json:"resolved"`
-	ResolveSkipped      bool                  `json:"resolve_skipped,omitempty"`
-	Version             int                   `json:"version,omitempty"`
-	PolicyTemplate      string                `json:"policy_template,omitempty"`
-	LoadError           string                `json:"load_error,omitempty"`
-	ResolveError        string                `json:"resolve_error,omitempty"`
-	ProxyGroupsCount    int                   `json:"proxy_groups_count"`
-	ProxyGroups         []IntentProxyGroup    `json:"proxy_groups"`
-	PolicyGroupsCount   int                   `json:"policy_groups_count"`
-	PolicyGroups        []IntentPolicyGroup   `json:"policy_groups"`
-	TransportRulesCount int                   `json:"transport_rules_count"`
-	TransportRules      []IntentTransportRule `json:"transport_rules"`
-	CustomRulesCount    int                   `json:"custom_rules_count"`
-	CustomRules         []IntentCustomRule    `json:"custom_rules"`
-	RulePacksCount      int                   `json:"enabled_rule_packs_count"`
-	RulePacks           []IntentRulePack      `json:"enabled_rule_packs"`
-	RuleProvidersCount  int                   `json:"rule_providers_count"`
-	RuleProviders       []IntentRuleProvider  `json:"rule_providers"`
-	PacksCount          int                   `json:"packs_count"`
-	Packs               []IntentPack          `json:"packs"`
-	Truncated           bool                  `json:"truncated,omitempty"`
-	Note                string                `json:"note"`
+	Config              string                         `json:"config"`
+	Layer               string                         `json:"layer"`
+	Modifiable          bool                           `json:"modifiable"`
+	Exists              bool                           `json:"exists"`
+	Valid               bool                           `json:"valid"`
+	Resolved            bool                           `json:"resolved"`
+	ResolveSkipped      bool                           `json:"resolve_skipped,omitempty"`
+	Version             int                            `json:"version,omitempty"`
+	PolicyTemplate      string                         `json:"policy_template,omitempty"`
+	LoadError           string                         `json:"load_error,omitempty"`
+	ResolveError        string                         `json:"resolve_error,omitempty"`
+	ProxyGroupsCount    int                            `json:"proxy_groups_count"`
+	ProxyGroups         []IntentProxyGroup             `json:"proxy_groups"`
+	PolicyGroupsCount   int                            `json:"policy_groups_count"`
+	PolicyGroups        []IntentPolicyGroup            `json:"policy_groups"`
+	TransportRulesCount int                            `json:"transport_rules_count"`
+	TransportRules      []IntentTransportRule          `json:"transport_rules"`
+	CustomRulesCount    int                            `json:"custom_rules_count"`
+	CustomRules         []IntentCustomRule             `json:"custom_rules"`
+	RulePacksCount      int                            `json:"enabled_rule_packs_count"`
+	RulePacks           []IntentRulePack               `json:"enabled_rule_packs"`
+	RuleProvidersCount  int                            `json:"rule_providers_count"`
+	RuleProviders       []IntentRuleProvider           `json:"rule_providers"`
+	PacksCount          int                            `json:"packs_count"`
+	Packs               []IntentPack                   `json:"packs"`
+	Generated           *localconfig.GeneratedMetadata `json:"generated,omitempty"`
+	Truncated           bool                           `json:"truncated,omitempty"`
+	Note                string                         `json:"note"`
 }
 
 type IntentProxyGroup struct {
@@ -273,7 +274,7 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 		RulePacks:      []IntentRulePack{},
 		RuleProviders:  []IntentRuleProvider{},
 		Packs:          []IntentPack{},
-		Note:           "Intent is read from durable localclash-intent.json. Use it before creating a patch to preserve existing proxy groups, policy groups, packs, enabled rule packs, custom rules, and rule providers.",
+		Note:           "Intent is read from compiled localclash-intent.json. Routine changes should mutate patches/*.json through config_patch_draft and config_patch_apply.",
 	}
 	config, err := localconfig.Load(path)
 	if err != nil {
@@ -291,6 +292,10 @@ func InspectIntent(opts IntentOptions) (IntentResult, error) {
 	result.Valid = true
 	result.Version = config.Version
 	result.PolicyTemplate = config.PolicyTemplate
+	result.Generated = config.Generated
+	if config.Generated != nil && config.Generated.Source == "patch_registry" {
+		result.Modifiable = false
+	}
 	result.ProxyGroupsCount = len(config.ProxyGroups)
 	result.PolicyGroupsCount = len(config.PolicyGroups)
 	result.TransportRulesCount = len(config.TransportRules)

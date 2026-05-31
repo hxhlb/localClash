@@ -21,6 +21,7 @@ func TestRuleTarget(t *testing.T) {
 		{name: "domain", rule: "DOMAIN-SUFFIX,local,DIRECT", wantTarget: "DIRECT", wantOK: true},
 		{name: "cidr with no resolve", rule: "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", wantTarget: "DIRECT", wantOK: true},
 		{name: "geoip with no resolve", rule: "GEOIP,telegram,DIRECT,no-resolve", wantTarget: "DIRECT", wantOK: true},
+		{name: "logical and", rule: "AND,((NETWORK,UDP),(DST-PORT,443)),🚦 QUIC", wantTarget: "🚦 QUIC", wantOK: true},
 		{name: "invalid", rule: "MATCH", wantOK: false},
 	}
 

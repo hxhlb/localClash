@@ -6,10 +6,12 @@ current disk-backed localClash policy templates.
 
 ## Boundary
 
-Policy templates are localClash-owned durable intent, not generated Mihomo YAML.
-Template manifests live under `policy-templates/`, and `config_configure` writes
-their resolved intent into `localclash-intent.json`. The renderer then combines that
-intent with the effective subscription and runtime profile.
+Policy templates are localClash-owned default patch sources, not generated
+Mihomo YAML. Template manifests live under `policy-templates/`, and
+`config_configure(policy_template=...)` imports their resolved patches into
+`patches/*.json`, then builds the compiled `localclash-intent.json` artifact.
+The renderer then combines that compiled intent with the effective subscription
+and runtime profile.
 
 Do not model a removed upstream preset as hidden renderer behavior. Broad default
 behavior must appear as explicit patch files in the selected template manifest.
@@ -51,9 +53,9 @@ so subscriptions without a given region can still initialize. Patch files
 intentionally keep emoji identifiers as YAML `\U...` escapes so OpenWrt/BusyBox
 display locale quirks do not change on-disk template bytes.
 
-MCP `config_status` exposes the active template through `intent.packs`,
-`intent.policy_groups`, `intent.proxy_groups`, and `overlay.rules`. For compact
-Agent-facing routing discovery, use the read-only `routing_explain` tool.
+MCP `config_status(patches=true)` exposes the active patch registry and compiled
+intent. For compact Agent-facing routing discovery, use the read-only
+`routing_explain` tool.
 
 ## Router And Game Accelerators
 

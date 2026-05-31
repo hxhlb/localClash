@@ -129,7 +129,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_create", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_draft", "config_patch_get", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -163,7 +163,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"tools_list":                SafeRead,
 		"config_configure":          SafeWrite,
 		"config_patch_apply":        SafeWrite,
-		"config_patch_create":       SafeWrite,
+		"config_patch_draft":        SafeWrite,
+		"config_patch_get":          SafeRead,
 		"config_render":             SafeWrite,
 		"proxy_group_build":         SafeWrite,
 		"policy_group_build":        SafeWrite,
@@ -312,11 +313,15 @@ func TestMCPDefaultsUseWorkspaceRootWhenProcessCWDIsElsewhere(t *testing.T) {
 	statusResult := marshalToolResult(t, statusResp.Result)
 	status := statusResult.StructuredContent.(map[string]any)
 	source := status["source_of_truth"].(map[string]any)
-	if source["path"] != filepath.Join(root, "localclash-intent.json") || source["present"] != true {
-		t.Fatalf("source_of_truth = %+v, want workspace-root intent", source)
+	if source["path"] != filepath.Join(root, "patches") {
+		t.Fatalf("source_of_truth = %+v, want workspace-root patches dir", source)
+	}
+	compiled := status["compiled_intent"].(map[string]any)
+	if compiled["path"] != filepath.Join(root, "localclash-intent.json") || compiled["present"] != true {
+		t.Fatalf("compiled_intent = %+v, want workspace-root intent", compiled)
 	}
 	inputs := status["inputs"].(map[string]any)
-	if inputs["selection"] != filepath.Join(root, "localclash-packs.gob") || inputs["patches_dir"] != filepath.Join(root, ".runtime", "patches") {
+	if inputs["selection"] != filepath.Join(root, "localclash-packs.gob") || inputs["patches_dir"] != filepath.Join(root, "patches") {
 		t.Fatalf("inputs = %+v, want workspace-root selection and patches", inputs)
 	}
 
@@ -592,8 +597,19 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	if content["config_updated"] != true || content["effective_subscription"] != false {
 		t.Fatalf("config_configure content = %+v, want updated config and missing subscription", content)
 	}
+	patchRegistry := content["patch_registry"].(map[string]any)
+	if patchRegistry["imported"] != true {
+		t.Fatalf("patch_registry = %+v, want imported template patches", patchRegistry)
+	}
+	patchFiles, err := filepath.Glob(filepath.Join(dir, "patches", "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(patchFiles) == 0 {
+		t.Fatalf("patches dir has no registry files")
+	}
 	config := readMCPFile(t, configPath)
-	for _, want := range []string{`"policy_template": "localclash-default"`, `"source": "v2fly-dlc"`, `"pack": "openai"`, `"pack": "category-media"`, "template_all_subscription_nodes"} {
+	for _, want := range []string{`"policy_template": "localclash-default"`, `"source": "patch_registry"`, `"source": "v2fly-dlc"`, `"pack": "openai"`, `"pack": "category-media"`, "template_all_subscription_nodes"} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("localclash-intent.json missing %q:\n%s", want, config)
 		}
@@ -606,6 +622,15 @@ func TestToolsCallRoutingExplainExplainsLayeredDefaultRoute(t *testing.T) {
 	cacheDir := filepath.Join(dir, ".runtime", "rules", "packs")
 	writeMCPFile(t, configPath, `version: 2
 policy_template: localclash-default
+generated:
+  source: patch_registry
+  provenance:
+    "packs[v2fly-dlc/steam]":
+      - default.steam.v1
+    "policy_groups[Steam]":
+      - default.steam.v1
+    "proxy_groups[HK]":
+      - default.region-exits.v1
 proxy_groups:
   "⚡ 自动选择":
     mode: auto
@@ -689,6 +714,9 @@ packs:
 	route := routes[0].(map[string]any)
 	if route["target"] != "Steam" || route["target_kind"] != "policy_group" {
 		t.Fatalf("route = %+v, want Steam policy group route", route)
+	}
+	if !containsAnyString(route["provided_by_patches"], "default.steam.v1") || !containsAnyString(content["provided_by_patches"], "default.region-exits.v1") {
+		t.Fatalf("provenance route=%+v top=%+v, want patch providers", route["provided_by_patches"], content["provided_by_patches"])
 	}
 	policy := route["policy_group"].(map[string]any)
 	exits := policy["exits"].([]any)
@@ -1215,8 +1243,8 @@ packs:
 	}
 	result := marshalToolResult(t, resp.Result)
 	content := result.StructuredContent.(map[string]any)
-	if content["source"] != "durable_state" || content["selection"] != selection {
-		t.Fatalf("content = %+v, want durable source and selection", content)
+	if content["source"] != "compiled_intent" || content["selection"] != selection {
+		t.Fatalf("content = %+v, want compiled intent source and selection", content)
 	}
 	rendered := readMCPFile(t, generated)
 	if !strings.Contains(rendered, "RULE-SET,blackmatrix7_OpenAI,AI") || !strings.Contains(rendered, "name: AI") {
@@ -1372,89 +1400,50 @@ func TestToolsCallSubscriptionNodesSearchReturnsNameMatches(t *testing.T) {
 	}
 }
 
-func TestToolsCallConfigPatchCreateReturnsSerializableResult(t *testing.T) {
+func TestToolsCallConfigPatchDraftReturnsSerializableResult(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_patch_create",
-			"arguments": map[string]any{
-				"patch_name":   "ai-test",
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
-				"overlay": map[string]any{
-					"packs": []map[string]any{
-						{"source": "blackmatrix7", "pack": "OpenAI", "target": "AI"},
-					},
-					"proxy_groups": []map[string]any{
-						{"id": "AI", "nodes": []string{"SG 01"}, "mode": "manual"},
-					},
-				},
-			},
+	server := NewServer()
+	content := callConfigPatchDraftForOverlay(t, server, paths, "user.ai-test", map[string]any{
+		"packs": []map[string]any{
+			{"source": "blackmatrix7", "pack": "OpenAI", "target": "AI"},
 		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
-	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
+		"proxy_groups": []map[string]any{
+			{"id": "AI", "nodes": []string{"SG 01"}, "mode": "manual"},
+		},
+	}, false)
 	if content["valid"] != true {
-		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
+		t.Fatalf("config_patch_draft valid = %v, want true", content["valid"])
 	}
-	if _, err := os.Stat(content["output"].(string)); err != nil {
-		t.Fatalf("plan output missing: %v", err)
+	if content["apply_args"] == nil || content["base_registry_hash"] == "" {
+		t.Fatalf("config_patch_draft content = %+v, want apply args and base hash", content)
 	}
-	if _, err := json.Marshal(result.StructuredContent); err != nil {
-		t.Fatalf("config_patch_create structured content is not serializable: %v", err)
+	if _, err := json.Marshal(content); err != nil {
+		t.Fatalf("config_patch_draft structured content is not serializable: %v", err)
 	}
 }
 
-func TestToolsCallConfigPatchCreateSupportsPolicyGroups(t *testing.T) {
+func TestToolsCallConfigPatchDraftSupportsPolicyGroups(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_patch_create",
-			"arguments": map[string]any{
-				"patch_name":   "ai-policy",
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
-				"overlay": map[string]any{
-					"packs": []map[string]any{
-						{"source": "blackmatrix7", "pack": "OpenAI", "target": "AI"},
-					},
-					"proxy_groups": []map[string]any{
-						{"id": "SG", "nodes": []string{"SG 01"}, "mode": "manual"},
-					},
-					"policy_groups": []map[string]any{
-						{"id": "AI", "mode": "manual", "exits": []string{"SG", "DIRECT"}},
-					},
-				},
-			},
+	server := NewServer()
+	draft := callConfigPatchDraftForOverlay(t, server, paths, "user.ai-policy", map[string]any{
+		"packs": []map[string]any{
+			{"source": "blackmatrix7", "pack": "OpenAI", "target": "AI"},
 		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
+		"proxy_groups": []map[string]any{
+			{"id": "SG", "nodes": []string{"SG 01"}, "mode": "manual"},
+		},
+		"policy_groups": []map[string]any{
+			{"id": "AI", "mode": "manual", "exits": []string{"SG", "DIRECT"}},
+		},
+	}, false)
+	content := callConfigPatchApplyCurrentDraft(t, server, paths, draft)
+	if content["applied"] != true || content["valid"] != true {
+		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	if content["valid"] != true {
-		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
-	}
-	config := readMCPFile(t, content["output"].(string))
+	config := readMCPFile(t, filepath.Join("generated", "mihomo.yaml"))
 	for _, want := range []string{"RULE-SET,blackmatrix7_OpenAI,AI", "name: AI", "- SG", "- DIRECT"} {
 		if !strings.Contains(config, want) {
-			t.Fatalf("candidate config missing %q:\n%s", want, config)
+			t.Fatalf("generated config missing %q:\n%s", want, config)
 		}
 	}
 }
@@ -1591,161 +1580,82 @@ func TestToolsCallRuleProviderBuildReturnsReusableIntent(t *testing.T) {
 	}
 }
 
-func TestToolsCallConfigPatchCreateSupportsCustomRulesWithoutPacks(t *testing.T) {
+func TestToolsCallConfigPatchDraftSupportsCustomRulesWithoutPacks(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_patch_create",
-			"arguments": map[string]any{
-				"patch_name":   "huggingface-temp",
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
-				"overlay": map[string]any{
-					"custom_rules": []map[string]any{
-						{
-							"id":     "huggingface_temp",
-							"target": "TempLine",
-							"rules": []map[string]any{
-								{"type": "domain_suffix", "value": "huggingface.co"},
-							},
-						},
-					},
-					"proxy_groups": []map[string]any{
-						{"id": "TempLine", "nodes": []string{"SG 01"}, "mode": "manual"},
-					},
+	server := NewServer()
+	draft := callConfigPatchDraftForOverlay(t, server, paths, "user.huggingface-temp", map[string]any{
+		"custom_rules": []map[string]any{
+			{
+				"id":     "huggingface_temp",
+				"target": "TempLine",
+				"rules": []map[string]any{
+					{"type": "domain_suffix", "value": "huggingface.co"},
 				},
 			},
 		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
-	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	if content["valid"] != true {
-		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
-	}
-	config := readMCPFile(t, content["output"].(string))
+		"proxy_groups": []map[string]any{
+			{"id": "TempLine", "nodes": []string{"SG 01"}, "mode": "manual"},
+		},
+	}, false)
+	_ = callConfigPatchApplyCurrentDraft(t, server, paths, draft)
+	config := readMCPFile(t, filepath.Join("generated", "mihomo.yaml"))
 	if !strings.Contains(config, "DOMAIN-SUFFIX,huggingface.co,TempLine") || !strings.Contains(config, "name: TempLine") {
-		t.Fatalf("candidate config missing custom rule or proxy group:\n%s", config)
+		t.Fatalf("generated config missing custom rule or proxy group:\n%s", config)
 	}
 }
 
-func TestToolsCallConfigPatchCreateSupportsExternalRuleProviders(t *testing.T) {
+func TestToolsCallConfigPatchDraftSupportsExternalRuleProviders(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	resp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_patch_create",
-			"arguments": map[string]any{
-				"patch_name":   "us-proxy",
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
-				"overlay": map[string]any{
-					"rule_providers": []map[string]any{
-						{
-							"id":       "US-Proxy",
-							"target":   "⚡ 自动选择",
-							"type":     "http",
-							"behavior": "classical",
-							"format":   "yaml",
-							"path":     "./rule_provider/US-Proxy.yaml",
-							"url":      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
-							"interval": 86400,
-						},
-					},
-					"proxy_groups": []map[string]any{
-						{"id": "⚡ 自动选择", "nodes": []string{"SG 01"}, "mode": "auto"},
-					},
-				},
+	server := NewServer()
+	draft := callConfigPatchDraftForOverlay(t, server, paths, "user.us-proxy", map[string]any{
+		"rule_providers": []map[string]any{
+			{
+				"id":       "US-Proxy",
+				"target":   "⚡ 自动选择",
+				"type":     "http",
+				"behavior": "classical",
+				"format":   "yaml",
+				"path":     "./rule_provider/US-Proxy.yaml",
+				"url":      "https://raw.githubusercontent.com/qoli/clash_yaml/refs/heads/main/us_proxy.yaml",
+				"interval": 86400,
 			},
 		},
-	})
-	if resp.Error != nil {
-		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", resp.Error)
+		"proxy_groups": []map[string]any{
+			{"id": "⚡ 自动选择", "nodes": []string{"SG 01"}, "mode": "auto"},
+		},
+	}, false)
+	content := callConfigPatchApplyCurrentDraft(t, server, paths, draft)
+	if content["applied"] != true || content["valid"] != true {
+		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
-	result := marshalToolResult(t, resp.Result)
-	content := result.StructuredContent.(map[string]any)
-	if content["valid"] != true {
-		t.Fatalf("config_patch_create valid = %v, want true", content["valid"])
-	}
-	config := readMCPFile(t, content["output"].(string))
+	config := readMCPFile(t, filepath.Join("generated", "mihomo.yaml"))
 	if !strings.Contains(config, "RULE-SET,US-Proxy,⚡ 自动选择") || !strings.Contains(config, "US-Proxy:") || !strings.Contains(config, "us_proxy.yaml") {
-		t.Fatalf("candidate config missing external rule-provider:\n%s", config)
+		t.Fatalf("generated config missing external rule-provider:\n%s", config)
 	}
 }
 
 func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	renderResp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      1,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_patch_create",
-			"arguments": map[string]any{
-				"patch_name":   "ai-test",
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
-				"overlay": map[string]any{
-					"packs": []map[string]any{
-						{"source": "blackmatrix7", "pack": "OpenAI", "target": "AI"},
-					},
-					"proxy_groups": []map[string]any{
-						{"id": "AI", "nodes": []string{"SG 01"}, "mode": "manual"},
-					},
-				},
-			},
+	server := NewServer()
+	draft := callConfigPatchDraftForOverlay(t, server, paths, "user.ai-test", map[string]any{
+		"packs": []map[string]any{
+			{"source": "blackmatrix7", "pack": "OpenAI", "target": "AI"},
 		},
-	})
-	if renderResp.Error != nil {
-		t.Fatalf("config_patch_create returned JSON-RPC error: %+v", renderResp.Error)
-	}
-	renderResult := marshalToolResult(t, renderResp.Result)
-	plan := renderResult.StructuredContent.(map[string]any)
-	applyResp := callHandle(t, map[string]any{
-		"jsonrpc": "2.0",
-		"id":      2,
-		"method":  "tools/call",
-		"params": map[string]any{
-			"name": "config_patch_apply",
-			"arguments": map[string]any{
-				"patch_id":    plan["patch_id"],
-				"patches_dir": paths.outputDir,
-				"test":        false,
-				"background":  false,
-			},
+		"proxy_groups": []map[string]any{
+			{"id": "AI", "nodes": []string{"SG 01"}, "mode": "manual"},
 		},
-	})
-	if applyResp.Error != nil {
-		t.Fatalf("config_patch_apply returned JSON-RPC error: %+v", applyResp.Error)
-	}
-	result := marshalToolResult(t, applyResp.Result)
-	content := result.StructuredContent.(map[string]any)
+	}, false)
+	content := callConfigPatchApplyCurrentDraft(t, server, paths, draft)
 	if content["applied"] != true || content["valid"] != true {
 		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
-	if _, err := os.Stat("generated/mihomo.yaml"); err != nil {
+	if _, err := os.Stat(filepath.Join("generated", "mihomo.yaml")); err != nil {
 		t.Fatalf("generated config missing after apply: %v", err)
 	}
 	if _, err := os.Stat("localclash-intent.json"); err != nil {
 		t.Fatalf("localclash config missing after apply: %v", err)
 	}
-	if _, err := json.Marshal(result.StructuredContent); err != nil {
+	if _, err := json.Marshal(content); err != nil {
 		t.Fatalf("config_patch_apply structured content is not serializable: %v", err)
 	}
 	selection := readMCPFile(t, "localclash-packs.gob")
@@ -1754,60 +1664,74 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 	}
 }
 
-func TestToolsCallConfigPatchCreateInvalidInputReturnsError(t *testing.T) {
+func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_patch_create",
+			"name": "config_patch_draft",
 			"arguments": map[string]any{
 				"subscription": paths.subscription,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
-				"test":         false,
+				"test":         true,
 				"background":   false,
-				"overlay": map[string]any{
-					"packs": []map[string]any{
-						{"source": "blackmatrix7", "pack": "missing_pack", "target": "DIRECT"},
+				"operations": []map[string]any{
+					{
+						"op":       "upsert_patch",
+						"patch_id": "user.missing-pack",
+						"order_id": "1000.000000",
+						"overlay": map[string]any{
+							"packs": []map[string]any{
+								{"source": "blackmatrix7", "pack": "missing_pack", "target": "DIRECT"},
+							},
+						},
 					},
 				},
 			},
 		},
 	})
 	if resp.Error == nil {
-		t.Fatal("expected config_patch_create JSON-RPC error")
+		t.Fatal("expected config_patch_draft JSON-RPC error")
 	}
 	if !strings.Contains(resp.Error.Message, "missing_pack") {
 		t.Fatalf("error = %+v, want missing pack", resp.Error)
 	}
 }
 
-func TestToolsCallConfigPatchCreateRejectsLegacyPackID(t *testing.T) {
+func TestToolsCallConfigPatchDraftRejectsLegacyPackID(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_patch_create",
+			"name": "config_patch_draft",
 			"arguments": map[string]any{
 				"subscription": paths.subscription,
 				"rules_cache":  paths.cache,
 				"patches_dir":  paths.outputDir,
 				"test":         false,
 				"background":   false,
-				"overlay": map[string]any{
-					"packs": []map[string]any{
-						{"id": "v2fly_dlc_geolocation__cn", "target": "DIRECT"},
+				"operations": []map[string]any{
+					{
+						"op":       "upsert_patch",
+						"patch_id": "user.legacy-pack",
+						"order_id": "1000.000000",
+						"overlay": map[string]any{
+							"packs": []map[string]any{
+								{"id": "v2fly_dlc_geolocation__cn", "target": "DIRECT"},
+							},
+						},
 					},
 				},
 			},
 		},
 	})
 	if resp.Error == nil {
-		t.Fatal("expected config_patch_create JSON-RPC error")
+		t.Fatal("expected config_patch_draft JSON-RPC error")
 	}
 	if !strings.Contains(resp.Error.Message, "packs[].id is no longer supported; use packs[].source and packs[].pack from packs_list") ||
 		!strings.Contains(resp.Error.Message, "Composite renderer/provider names are not MCP pack selectors") {
@@ -1821,8 +1745,8 @@ func TestToolsCallRejectsStringifiedArguments(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "config_patch_create",
-			"arguments": `{"overlay":{"packs":[{"id":"sukkaw_ai","target":"AI_US_JP"}]}}`,
+			"name":      "config_patch_draft",
+			"arguments": `{"operations":[{"op":"upsert_patch","patch_id":"user.bad","overlay":{"packs":[{"id":"sukkaw_ai","target":"AI_US_JP"}]}}]}`,
 		},
 	})
 	if resp.Error == nil {
@@ -2906,6 +2830,68 @@ func callHandleWithServer(t *testing.T, server *Server, value any) *rpcResponse 
 	return resp
 }
 
+func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanFixture, patchID string, overlay map[string]any, test bool) map[string]any {
+	t.Helper()
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_patch_draft",
+			"arguments": map[string]any{
+				"draft_name":   patchID,
+				"subscription": paths.subscription,
+				"rules_cache":  paths.cache,
+				"patches_dir":  paths.outputDir,
+				"test":         test,
+				"background":   false,
+				"operations": []map[string]any{
+					{
+						"op":       "upsert_patch",
+						"patch_id": patchID,
+						"title":    patchID,
+						"order_id": "1000.000000",
+						"summary":  patchID,
+						"overlay":  overlay,
+					},
+				},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_patch_draft returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	return result.StructuredContent.(map[string]any)
+}
+
+func callConfigPatchApplyCurrentDraft(t *testing.T, server *Server, paths mcpPlanFixture, draft map[string]any) map[string]any {
+	t.Helper()
+	applyArgs := map[string]any{}
+	for key, value := range draft["apply_args"].(map[string]any) {
+		applyArgs[key] = value
+	}
+	applyArgs["patches_dir"] = paths.outputDir
+	applyArgs["subscription"] = paths.subscription
+	applyArgs["rules_cache"] = paths.cache
+	applyArgs["test"] = false
+	applyArgs["background"] = false
+	resp := callHandleWithServer(t, server, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "config_patch_apply",
+			"arguments": applyArgs,
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_patch_apply returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	return result.StructuredContent.(map[string]any)
+}
+
 func removedMCPTools() []string {
 	return []string{
 		"config_base_inspect",
@@ -2916,6 +2902,7 @@ func removedMCPTools() []string {
 		"config_test",
 		"config_plan_apply",
 		"config_plan_render",
+		"config_patch_create",
 		"inspect_generated_config",
 		"rules_adapt",
 		"rules_render",
@@ -3449,6 +3436,19 @@ func writeMCPFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func containsAnyString(value any, want string) bool {
+	items, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func readMCPFile(t *testing.T, path string) string {
