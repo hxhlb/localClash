@@ -22,6 +22,30 @@ Evidence boundary:
   config rendering, or router takeover apply until boot-time evidence is
   collected.
 
+Router evidence captured on 2026-05-31:
+
+- The router was a FriendlyElec NanoPi R5C running OpenWrt 24.10.0-rc5 with
+  `luci-app-localclash` version `0.1.0-17`.
+- `/etc/init.d/localclash` was absent. The installed boot service was
+  `/etc/init.d/localclash-mcp`, with `/etc/rc.d/S95localclash-mcp` and
+  `/etc/rc.d/K10localclash-mcp` links present.
+- The generated procd script only starts `/usr/local/bin/localclash mcp serve
+  --addr 0.0.0.0:8765 --path /mcp`; it does not call runtime start, runtime
+  restart, or takeover apply during boot.
+- Current live state was healthy at inspection time: `localclash runtime status
+  --json` reported `running: true` for `lc-mihomo-smart`, and `localclash
+  takeover status --json` reported `effective: true`.
+- Current process timings showed the MCP server started at 2026-05-30 19:06:49
+  CST and `lc-mihomo-smart` started at 2026-05-31 00:36:04 CST. This evidence
+  does not prove boot-time restoration; it shows the current runtime was started
+  later than the MCP service.
+- `/tmp/localclash-helper.log` showed the one-time default initialization path
+  starting runtime and applying takeover on 2026-05-30 16:18, and no durable
+  boot-window restore log was present in `logread`.
+- The LuCI rpcd helper exposes `runtime_start_takeover`, and that helper runs
+  runtime start followed by takeover apply. The missing link is that the boot
+  service does not invoke that helper after reboot.
+
 Current explanation:
 
 - localClash documents router takeover rules as runtime state: a reboot clears
@@ -58,6 +82,79 @@ Required evidence for the next reproduction:
   `generated/mihomo.yaml`, runtime PID files, and localClash MCP/service logs.
 - nft/firewall state showing whether localClash-owned takeover chains or rules
   are absent, duplicated, or partially applied.
+
+## 2026-05-31 WAN Firewall Reload Takeover Drift
+
+Observed symptom:
+
+- During the same boot session, localClash router takeover could become
+  ineffective after WAN instability, while the Mihomo runtime itself continued
+  running.
+- This is similar to the reboot restore gap because both expose a missing
+  restore path, but it is a separate failure mode: OpenWrt network churn reloads
+  firewall state and can remove runtime-only nft hooks without rebooting.
+
+Evidence captured on 2026-05-31:
+
+- The WAN event was rooted below PPPoE: kernel logs showed repeated
+  `igc ... eth0: NIC Link is Down` / `NIC Link is Up 1000 Mbps Full Duplex`
+  transitions, and PPPoE PADO/PADS failures followed those carrier changes.
+- OpenWrt then emitted firewall reload events for `ifup` / `ifupdate` of
+  `wan` and `wan_6`. That explains how runtime-only localClash nft hooks can be
+  lost even when Mihomo itself remains alive.
+- A tactical LuCI package fix was deployed as `luci-app-localclash 0.1.0-18`.
+  It added an iface hotplug restore hook and a `takeover_restore` helper path.
+  Current-router verification showed `takeover_status.effective=true`,
+  `runtime_running=true`, and the hotplug restore path could execute.
+- That tactical fix persisted a takeover intent file under the localClash state
+  directory. This is not the final clean design: it can reinterpret a previous
+  takeover apply as permission to restore takeover after router reboot, even
+  when the user did not explicitly opt into boot-time auto-restore.
+
+Current explanation:
+
+- localClash takeover rules remain runtime-only OpenWrt nft/firewall state.
+- OpenWrt `fw4` reloads can remove those runtime-only hooks while leaving the
+  Mihomo process, ports, and TUN device alive.
+- The user-visible result is "network takeover is not effective", but the
+  underlying state differs from a runtime crash or reboot: this is same-boot
+  takeover drift after firewall reload.
+
+Clean design requirement:
+
+- See `docs/router-takeover-restore-requirements.md` for the development
+  requirements that split same-boot repair from explicit boot auto-restore.
+- Preserve the safety boundary that runtime takeover rules are not persistent
+  firewall configuration.
+- Split recovery into two explicit modes:
+  - Same-boot repair: after `fw4` reload, WAN ifup/ifupdate, or similar OpenWrt
+    network churn, restore takeover only when evidence under `/tmp` proves
+    localClash takeover was applied during the current boot. This preserves the
+    expectation that reboot clears operational takeover.
+  - Boot auto-restore: restart Mihomo and re-apply takeover after router reboot
+    only when the user has explicitly enabled a persistent LuCI setting for
+    boot-time takeover restore.
+- A plain `takeover_apply` must not silently create a durable boot auto-restore
+  intent. If product UX needs boot restore, the UI and helper should name that
+  setting directly and provide a matching disable path.
+- `takeover_stop` and any explicit "disable takeover" action must clear the
+  same-boot repair state. It must not silently disable the separate boot
+  auto-restore setting; that policy needs its own visible enable/disable
+  control.
+- Logs and status output should distinguish `same_boot_repair`,
+  `boot_auto_restore`, `manual_apply`, and `manual_stop`, so future incidents do
+  not confuse a repair loop with an intentional boot policy.
+
+Required verification for the final fix:
+
+- Same-boot firewall reload or WAN ifupdate restores takeover only when current
+  boot evidence shows localClash takeover had already been applied.
+- Reboot alone clears operational takeover unless an explicit boot auto-restore
+  setting is enabled.
+- Enabling boot auto-restore is visible in LuCI/status output and disabling it
+  prevents takeover from being restored after reboot.
+- `takeover_stop` clears the same-boot repair state without changing the
+  explicit boot auto-restore setting.
 
 ## 2026-05-29 DHCP Hostname DNS Hijack Regression
 
