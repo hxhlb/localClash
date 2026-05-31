@@ -798,6 +798,9 @@ func mergeSubscriptions(sources []Source, docs map[string]subscriptionDoc) (map[
 			if prefixSource {
 				name = "[" + source.ID + "] " + name
 			}
+			// Mihomo requires unique proxy names, but unsafe subscription
+			// payloads can contain duplicates. Normalize duplicates during
+			// merge so the generated artifact remains selector-safe.
 			name = uniqueProxyName(name, usedNames)
 			if name != originalName {
 				renamed++

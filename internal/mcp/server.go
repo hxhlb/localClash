@@ -1158,6 +1158,7 @@ type configRenderState struct {
 	Stale           bool     `json:"stale"`
 	CanRender       bool     `json:"can_render"`
 	MissingInputs   []string `json:"missing_inputs,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
 	RecommendedTool string   `json:"recommended_tool,omitempty"`
 }
 
@@ -1202,6 +1203,7 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	if _, err := runtimeprofile.ValidateUserProfileForRuntime(in.RuntimeProfile); err != nil {
 		return toolResult{}, err
 	}
+	render := s.configRenderState(in, intent, generated.Present)
 	status := map[string]any{
 		"model":           "patches/*.json is source_of_truth; localclash-intent.json, localclash-packs.gob, and generated/mihomo.yaml are build_artifacts",
 		"source_of_truth": inspectConfigFile(in.PatchesDir),
@@ -1223,7 +1225,7 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		},
 		"intent":         intent,
 		"patch_registry": patchInventory,
-		"render":         s.configRenderState(in, intent, generated.Present),
+		"render":         render,
 		"validation":     s.configValidationState(in, generated.Present),
 		"usage_guidance": []string{
 			"config_status is the preferred tool for checking durable localClash patch registry state and generated overlay state.",
@@ -1232,6 +1234,9 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 			"Use intent.packs and overlay pack metadata to verify localClash-managed pack routing.",
 			"runtime_status only reports whether Mihomo is running; it does not prove that a pending config change is loaded by a running process.",
 		},
+	}
+	if len(render.Warnings) > 0 {
+		status["warnings"] = append([]string{}, render.Warnings...)
 	}
 	if in.Patches || in.Detail {
 		status["patches"] = patchInventory.Patches
@@ -1288,12 +1293,16 @@ func trimConfigStatusIntent(intent *configinspect.IntentResult) {
 func (s *Server) configRenderState(in configToolInput, intent configinspect.IntentResult, generatedPresent bool) configRenderState {
 	missing := missingRenderInputs(in)
 	canRender := len(missing) == 0 && (!intent.Exists || intent.Resolved || (intent.Valid && intent.ResolveSkipped && intent.ResolveError == ""))
-	stale := !generatedPresent || isGeneratedStale(in.Output, []string{in.Config, in.Subscription, in.RuntimeProfile, in.Selection})
+	stale, warnings := generatedStaleState(in.Output, []string{in.Config, in.Subscription, in.RuntimeProfile, in.Selection})
+	if !generatedPresent {
+		stale = true
+	}
 	state := configRenderState{
 		Needed:        !generatedPresent || stale,
 		Stale:         generatedPresent && stale,
 		CanRender:     canRender,
 		MissingInputs: missing,
+		Warnings:      warnings,
 	}
 	if state.Needed && state.CanRender {
 		state.RecommendedTool = "config_render"
@@ -1302,6 +1311,9 @@ func (s *Server) configRenderState(in configToolInput, intent configinspect.Inte
 }
 
 func configStatusNextActions(render configRenderState) []string {
+	if len(render.Warnings) > 0 {
+		return []string{"inspect render.warnings and restore or rebuild missing generated source artifacts before making further localClash changes"}
+	}
 	if len(render.MissingInputs) > 0 {
 		actions := []string{}
 		for _, missing := range render.MissingInputs {
@@ -2720,20 +2732,34 @@ func inspectConfigFile(path string) configFileStatus {
 }
 
 func isGeneratedStale(output string, sources []string) bool {
+	stale, _ := generatedStaleState(output, sources)
+	return stale
+}
+
+func generatedStaleState(output string, sources []string) (bool, []string) {
 	outputInfo, err := os.Stat(output)
 	if err != nil {
-		return true
+		return true, nil
 	}
+	var warnings []string
 	for _, source := range sources {
 		info, err := os.Stat(source)
 		if err != nil {
+			warnings = append(warnings, generatedSourceStatWarning(source, err))
 			continue
 		}
 		if info.ModTime().After(outputInfo.ModTime()) {
-			return true
+			return true, warnings
 		}
 	}
-	return false
+	return false, warnings
+}
+
+func generatedSourceStatWarning(source string, err error) string {
+	if os.IsNotExist(err) {
+		return "generated config freshness cannot be fully verified because source file is missing: " + source + "; Mihomo may continue using the existing generated config, but localClash cannot safely determine whether it is current"
+	}
+	return "generated config freshness cannot be fully verified because source file cannot be inspected: " + source + ": " + err.Error()
 }
 
 func listConfigPatches(root string, limit int) []configPatchSummary {

@@ -298,8 +298,9 @@ func Render(ctx context.Context, opts Options) (Result, error) {
 		finish(err, nil)
 		return Result{}, err
 	}
-	overlaySummary := requestedOverlaySummary(resolved, opts.Overlay, opts.RulesCache)
-	warnings := resolved.Warnings
+	overlaySummary, overlayWarnings := requestedOverlaySummary(resolved, opts.Overlay, opts.RulesCache)
+	warnings := append([]string{}, resolved.Warnings...)
+	warnings = append(warnings, overlayWarnings...)
 	finish(nil, map[string]any{
 		"proxy_groups":       len(resolved.ProxyGroups),
 		"policy_groups":      len(resolved.PolicyGroups),
@@ -1027,7 +1028,7 @@ func overlaySummaryFromResolved(resolved localconfig.Resolved) OverlaySummary {
 	return summary
 }
 
-func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayIntent, rulesCache string) OverlaySummary {
+func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayIntent, rulesCache string) (OverlaySummary, []string) {
 	full := overlaySummaryFromResolved(resolved)
 	summary := OverlaySummary{
 		Packs:            make([]OverlayPackSummary, 0, len(overlay.Packs)),
@@ -1038,13 +1039,18 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 		ProxyGroups:      make([]OverlayProxyGroupSummary, 0, len(overlay.ProxyGroups)),
 		PolicyGroups:     make([]OverlayPolicyGroupSummary, 0, len(overlay.PolicyGroups)),
 	}
+	var warnings []string
 	packsByKey := map[string]OverlayPackSummary{}
 	for _, item := range full.Packs {
 		packsByKey[rules.PackKey(item.Source, item.Pack)] = item
 	}
 	var packIndex *rules.PackIndex
 	if len(overlay.Packs) > 0 {
-		packIndex, _ = rules.LoadPackIndex(rules.PackIndexPath(rulesCache))
+		var err error
+		packIndex, err = rules.LoadPackIndex(rules.PackIndexPath(rulesCache))
+		if err != nil {
+			warnings = append(warnings, "overlay pack summary could not load pack index; preserving requested source/pack fields without resolved pack metadata: "+err.Error())
+		}
 	}
 	for _, item := range overlay.Packs {
 		key := rules.PackKey(item.Source, item.Pack)
@@ -1127,7 +1133,7 @@ func requestedOverlaySummary(resolved localconfig.Resolved, overlay OverlayInten
 			summary.PolicyGroups = append(summary.PolicyGroups, found)
 		}
 	}
-	return summary
+	return summary, warnings
 }
 
 func changesSummaryFromOverlay(overlay OverlayIntent, summary OverlaySummary) ChangesSummary {

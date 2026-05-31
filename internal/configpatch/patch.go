@@ -807,7 +807,10 @@ func previewOperations(registry Registry, ops []Operation) ([]Record, []Operatio
 		}
 		switch op.Op {
 		case "upsert_patch":
-			patch := patchFromUpsert(op, record, exists, records)
+			patch, err := patchFromUpsert(op, record, exists, records)
+			if err != nil {
+				return nil, nil, nil, Impact{}, err
+			}
 			if err := validatePatch(patch); err != nil {
 				return nil, nil, nil, Impact{}, err
 			}
@@ -879,7 +882,7 @@ func previewOperations(registry Registry, ops []Operation) ([]Record, []Operatio
 	return records, normalized, baseHashes, impact, nil
 }
 
-func patchFromUpsert(op Operation, existing Record, exists bool, records []Record) Patch {
+func patchFromUpsert(op Operation, existing Record, exists bool, records []Record) (Patch, error) {
 	source := firstNonEmpty(op.Source, SourceUser)
 	status := firstNonEmpty(op.Status, StatusEnabled)
 	title := firstNonEmpty(op.Title, op.Summary, op.PatchID)
@@ -893,7 +896,11 @@ func patchFromUpsert(op Operation, existing Record, exists bool, records []Recor
 		}
 	}
 	if orderID == "" {
-		orderID = nextUserOrderID(records)
+		var err error
+		orderID, err = nextUserOrderID(records)
+		if err != nil {
+			return Patch{}, err
+		}
 	}
 	return normalizePatch(Patch{
 		Version:   PatchVersion,
@@ -905,7 +912,7 @@ func patchFromUpsert(op Operation, existing Record, exists bool, records []Recor
 		OrderID:   orderID,
 		Summary:   op.Summary,
 		Overlay:   op.Overlay,
-	})
+	}), nil
 }
 
 func verifyBaseHashes(registry Registry, hashes map[string]string) error {
@@ -1615,7 +1622,7 @@ func formatOrderID(value int64) string {
 	return fmt.Sprintf("%04d.%06d", value/1000000, value%1000000)
 }
 
-func nextUserOrderID(records []Record) string {
+func nextUserOrderID(records []Record) (string, error) {
 	var max int64 = 999000000
 	for _, record := range records {
 		if record.Patch.Status == StatusTombstoned {
@@ -1623,13 +1630,13 @@ func nextUserOrderID(records []Record) string {
 		}
 		value, err := parseOrderID(record.Patch.OrderID)
 		if err != nil {
-			continue
+			return "", fmt.Errorf("cannot allocate order_id: patch %q has invalid order_id %q; rebuild the affected Patch with an explicit valid order_id", record.Patch.PatchID, record.Patch.OrderID)
 		}
 		if value > max {
 			max = value
 		}
 	}
-	return formatOrderID(max + 1000000)
+	return formatOrderID(max + 1000000), nil
 }
 
 func templateOrderID(id string, index int) string {

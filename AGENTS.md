@@ -32,3 +32,4 @@ Recent commits use short imperative subjects such as `Add MCP config plan render
 ## Agent-Specific Instructions
 
 Prefix shell commands with `rtk`. For debugging, inspect logs, config state, diagnostics, or MCP responses before changing code. For browser automation, prefer the existing ARC CDP endpoint at `http://localhost:9222` after a quick availability check.
+
