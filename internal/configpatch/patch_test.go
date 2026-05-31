@@ -135,6 +135,34 @@ func TestPreviewOperationsSetStatusAndReorder(t *testing.T) {
 	}
 }
 
+func TestPreviewOperationsRejectsAutoOrderAllocationWithInvalidActiveOrderID(t *testing.T) {
+	registry := Registry{
+		Dir: t.TempDir(),
+		Records: []Record{{
+			Patch: Patch{
+				Version: PatchVersion,
+				PatchID: "user.bad-order",
+				Title:   "Bad Order",
+				Source:  SourceUser,
+				Status:  StatusEnabled,
+				OrderID: "bad",
+			},
+		}},
+	}
+
+	_, _, _, _, err := previewOperations(registry, []Operation{{
+		Op:      "upsert_patch",
+		PatchID: "user.new",
+		Overlay: configplan.OverlayIntent{
+			ProxyGroups: []configplan.OverlayProxyGroupIntent{{ID: "Direct", Mode: "direct"}},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `patch "user.bad-order" has invalid order_id "bad"`) ||
+		!strings.Contains(err.Error(), "rebuild the affected Patch with an explicit valid order_id") {
+		t.Fatalf("error = %v, want explicit invalid active order_id error", err)
+	}
+}
+
 func TestDraftAndApplyCurrentDraftWritesRegistryAndArtifacts(t *testing.T) {
 	dir := t.TempDir()
 	writeSubscriptionGob(t, filepath.Join(dir, "subscription.gob"))

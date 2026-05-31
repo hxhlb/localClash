@@ -2154,6 +2154,54 @@ func TestToolsCallConfigStatusReturnsOverlaySummary(t *testing.T) {
 	}
 }
 
+func TestToolsCallConfigStatusWarnsWhenGeneratedSourceIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	generated := filepath.Join(dir, "generated", "mihomo.yaml")
+	subscription := filepath.Join(dir, "subscription.gob")
+	selection := filepath.Join(dir, "localclash-packs.gob")
+	runtimeProfile := filepath.Join(dir, "localclash-runtime.json")
+	missingConfig := filepath.Join(dir, "localclash-intent.json")
+	writeMCPFile(t, generated, "proxies: []\nproxy-groups: []\nrules: []\n")
+	writeMCPFile(t, subscription, "proxies: []\n")
+	writeMCPFile(t, selection, "version: 1\nproxy_groups: {}\nenabled_packs: []\n")
+	writeMCPFile(t, runtimeProfile, "version: 2\nmode: normal\ncore: meta\n")
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "config_status",
+			"arguments": map[string]any{
+				"config":          missingConfig,
+				"subscription":    subscription,
+				"selection":       selection,
+				"runtime_profile": runtimeProfile,
+				"output":          generated,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("config_status returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	warnings := content["warnings"].([]any)
+	if !guidanceContains(warnings, "source file is missing: "+missingConfig) {
+		t.Fatalf("warnings = %+v, want missing config source warning", warnings)
+	}
+	render := content["render"].(map[string]any)
+	renderWarnings := render["warnings"].([]any)
+	if !guidanceContains(renderWarnings, "localClash cannot safely determine whether it is current") {
+		t.Fatalf("render warnings = %+v, want localClash freshness warning", renderWarnings)
+	}
+	nextActions := content["next_actions"].([]any)
+	if !guidanceContains(nextActions, "restore or rebuild missing generated source artifacts") {
+		t.Fatalf("next_actions = %+v, want warning repair guidance", nextActions)
+	}
+}
+
 func TestToolsCallDoctorReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
 	req := map[string]any{

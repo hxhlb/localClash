@@ -974,6 +974,25 @@ func TestRenderDuplicateProxyGroupNodesAreDeduplicated(t *testing.T) {
 	}
 }
 
+func TestRequestedOverlaySummaryWarnsWhenPackIndexUnavailable(t *testing.T) {
+	dir := t.TempDir()
+
+	summary, warnings := requestedOverlaySummary(localconfig.Resolved{}, OverlayIntent{
+		Packs: []OverlayPackIntent{{Source: "blackmatrix7", Pack: "OpenAI", Type: "classical", Target: "AI", Reason: "test"}},
+	}, filepath.Join(dir, "missing-cache"))
+
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "could not load pack index") {
+		t.Fatalf("warnings = %+v, want pack index warning", warnings)
+	}
+	if len(summary.Packs) != 1 {
+		t.Fatalf("summary packs = %+v, want requested pack preserved", summary.Packs)
+	}
+	pack := summary.Packs[0]
+	if pack.Source != "blackmatrix7" || pack.Pack != "OpenAI" || pack.Type != "classical" || pack.Target != "AI" {
+		t.Fatalf("summary pack = %+v, want raw requested pack fields", pack)
+	}
+}
+
 type planFixturePaths struct {
 	dir          string
 	subscription string

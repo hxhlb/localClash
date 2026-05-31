@@ -741,6 +741,9 @@ func BuildSubscriptionNodesFromArtifactsMeasured(artifacts []SubscriptionSourceA
 			stats.ProxyIterations++
 			name := stringValue(proxy["name"])
 			if name == "" {
+				// Some unsafe Mihomo subscription artifacts contain nameless proxies.
+				// They cannot be referenced by selectors, so keep compatibility by
+				// skipping them instead of inventing a local name.
 				stats.EmptyNameSkipped++
 				continue
 			}
@@ -748,6 +751,9 @@ func BuildSubscriptionNodesFromArtifactsMeasured(artifacts []SubscriptionSourceA
 				name = "[" + artifact.SourceID + "] " + name
 			}
 			var checks int
+			// Mihomo requires unique proxy names, but unsafe subscription artifacts
+			// can contain duplicates. Keep compatibility by normalizing to stable
+			// local names instead of letting later selector resolution collide.
 			name, checks = uniqueNameMeasured(name, usedNames)
 			stats.UniqueNameChecks += checks
 			usedNames[name] = true
