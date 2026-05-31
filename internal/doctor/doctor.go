@@ -690,13 +690,30 @@ func ruleTarget(rule string) (target string, provider string, ok bool) {
 }
 
 func splitRule(rule string) []string {
-	raw := strings.Split(rule, ",")
-	parts := make([]string, 0, len(raw))
-	for _, part := range raw {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			parts = append(parts, part)
+	var parts []string
+	start := 0
+	depth := 0
+	for i, r := range rule {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				part := strings.TrimSpace(rule[start:i])
+				if part != "" {
+					parts = append(parts, part)
+				}
+				start = i + len(string(r))
+			}
 		}
+	}
+	part := strings.TrimSpace(rule[start:])
+	if part != "" {
+		parts = append(parts, part)
 	}
 	return parts
 }

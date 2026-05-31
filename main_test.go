@@ -224,8 +224,8 @@ custom_rules:
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("config render JSON = %q, error = %v", output, err)
 	}
-	if !result.OK || result.Status.Source != "durable_state" || result.Status.Selection != "localclash-packs.gob" {
-		t.Fatalf("config render result = %+v, want durable state with derived selection", result)
+	if !result.OK || result.Status.Source != "compiled_intent" || result.Status.Selection != "localclash-packs.gob" {
+		t.Fatalf("config render result = %+v, want compiled intent with derived selection", result)
 	}
 	generated, err := os.ReadFile(filepath.Join("generated", "mihomo.yaml"))
 	if err != nil {

@@ -260,44 +260,53 @@ not MCP pack selectors.
 
 MCP config model:
 
-- `localclash-intent.json` is the source of truth.
-- `generated/mihomo.yaml` is a build artifact.
-- `.runtime/patches/<patch-id>/` contains review artifacts.
+- `patches/*.json` is the durable source of truth for localClash routing
+  strategy patches.
+- `localclash-intent.json`, `localclash-packs.gob`, and
+  `generated/mihomo.yaml` are compiled build artifacts.
+- `.runtime/backups/` contains apply/build backup history; drafts are process
+  memory only and are not persisted under `.runtime/`.
 
 MCP config tools:
 
 - `config_configure`: configure base product state with optional `core`
   (`meta` or `smart`), `runtime_profile` (`normal` or `router`), and
   `policy_template` (`minimal` or `localclash-default`). It writes
-  `localclash-runtime.json` and/or `localclash-intent.json`, but does not configure
-  subscriptions, render generated config, start runtime, or apply router
-  takeover. Templates are disk JSON manifests under `policy-templates/`.
+  `localclash-runtime.json` and/or imports selected policy-template patches into
+  `patches/*.json`, then compiles `localclash-intent.json`. It does not
+  configure subscriptions, start runtime, or apply router takeover. Templates
+  are disk JSON manifests under `policy-templates/`.
   `localclash-default` is a patch-set manifest whose ordered files under
   `policy-templates/localclash-default.d/` are merged during initialization.
   It is the ACL4SSR-like v2fly-dlc/GEOSITE default for open-box use and renders
   a layered Dashboard structure of business group -> exit group -> subscription
   nodes, while `minimal` keeps the compact policy-template graph for advanced manual
   customization.
-- `config_status`: inspect source-of-truth state, generated config presence,
-  render readiness, and pending patches. The default response is lightweight for
-  router-class CPUs: it does not resolve subscription-node matches and does not
-  parse generated overlay details. Pass `resolve: true` when selected-node
+- `config_status`: inspect patch registry state, compiled intent, generated
+  config presence, render readiness, and optional patch inventory. The default
+  response is lightweight for router-class CPUs: it does not resolve
+  subscription-node matches and does not parse generated overlay details. Pass
+  `patches: true` to include patch summaries, `resolve: true` when selected-node
   matches are needed, or `detail: true` when a full generated-summary/overlay
   audit is needed.
 - `config_render`: rebuild `generated/mihomo.yaml` from the current durable
-  `localclash-intent.json`, subscription, policy template, and runtime profile. If
-  `localclash-intent.json` does not exist, it renders the base config without an
-  overlay. It ignores patches and does not start Mihomo.
+  patch registry, compiled `localclash-intent.json`, subscription, and runtime
+  profile. If no registry exists, it can still render from an existing compiled
+  intent. It does not start Mihomo.
 - `routing_explain`: read-only routing discovery for questions like
   "what handles Steam?", "what routes openai.com?", or "how would I route
-  ChatGPT through Singapore?". It reads durable `localclash-intent.json` intent,
-  active packs, business policy groups, reusable exit groups, and optional
-  cached rule matches, then returns the safe patch path instead of mutating
+  ChatGPT through Singapore?". It reads compiled intent, active packs, business
+  policy groups, reusable exit groups, patch provenance, and optional cached
+  rule matches, then returns the safe patch-registry path instead of mutating
   config.
-- `config_patch_create`: create a reviewable patch with candidate
-  `localclash-intent.json` and `mihomo.yaml` under `.runtime/patches/<patch-id>/`.
-- `config_patch_apply`: apply a reviewed patch by writing `localclash-intent.json`,
-  deriving `localclash-packs.gob`, and regenerating `generated/mihomo.yaml`.
+- `config_patch_get`: read one durable patch file by `patch_id` with its full
+  overlay and current hash.
+- `config_patch_draft`: preview patch registry operations in one in-memory
+  current draft slot. It writes no files and returns impact, base hashes, and
+  `apply_args`.
+- `config_patch_apply`: apply reviewed operations by mutating `patches/*.json`,
+  compiling `localclash-intent.json`, deriving `localclash-packs.gob`, and
+  regenerating `generated/mihomo.yaml`.
 
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from localClash-managed overlay config.
@@ -331,8 +340,8 @@ MCP patch-building tools:
 
 - `proxy_group_build`: build and validate a reusable proxy group target from a
   `name_regex` selector or exact `nodes`. This tool does not persist state; copy
-  the returned proxy group into `config_patch_create.overlay.proxy_groups` when a
-  patch should use it.
+  the returned proxy group into a `config_patch_draft` `upsert_patch` operation
+  overlay when a patch should use it.
 - `policy_group_build`: build and validate a business-layer policy group such as
   `Steam` or `AI`. A policy group is a Dashboard-facing rule target whose
   `exits` point to existing `proxy_groups` such as `HK`, `JP`, `⚡ 自动选择`, or to
@@ -340,47 +349,44 @@ MCP patch-building tools:
 - `custom_rules_build`: build and validate user rules such as domains, domain
   suffixes, CIDRs, or GEOIP tags that share one target.
 - `rule_provider_build`: build and validate a user-supplied external Mihomo
-  rule-provider, such as `US-Proxy` from a raw GitHub URL, before adding it to
-  `config_patch_create.overlay.rule_providers`.
-- `config_patch_create`: accepts proxy groups, policy groups, third-party packs,
-  custom rules, and external rule-providers, then renders candidate
-  `localclash-intent.json`, derived `localclash-packs.gob`, and `mihomo.yaml` into
-  `.runtime/patches/<patch-id>/`. MCP `arguments` must be a JSON object, not a
-  JSON-encoded string. If a pack, custom rule, or external provider targets a new
-  proxy group or policy group, include it in `overlay.proxy_groups` or
-  `overlay.policy_groups` in the same call. Pack overlay entries use
+  rule-provider, such as `US-Proxy` from a raw GitHub URL, before adding it to a
+  patch overlay.
+- `config_patch_draft`: accepts operation-style changes such as `upsert_patch`,
+  `remove_patch`, `set_patch_status`, and `reorder_patch`. MCP `arguments` must
+  be a JSON object, not a JSON-encoded string. If a pack, custom rule, or
+  external provider targets a new proxy group or policy group, include it in
+  `overlay.proxy_groups` or `overlay.policy_groups` in the same `upsert_patch`.
+  Pack overlay entries use
   `{"source":"blackmatrix7","pack":"OpenAI","target":"AI"}`; `id` is not a
   supported pack selector.
-- `config_patch_apply`: applies a reviewed patch by writing durable
-  `localclash-intent.json`, deriving `localclash-packs.gob`, and regenerating
-  `generated/mihomo.yaml`.
+- `config_patch_apply`: applies the reviewed current draft, or explicit
+  operations with base hashes, then rebuilds compiled artifacts.
 
 For flat pack routing such as "Steam through HK", an agent should first call
 `config_status` to discover reusable proxy groups and current durable state,
 then call `subscription_nodes_search`, build or reuse the target with
 `proxy_group_build`, inspect the pack with `packs_list` or `packs_get`, and call
-`config_patch_create` with the desired `proxy_groups` and `packs`. For
-ACL4SSR-style layered routing such as "Steam can choose HK, JP, or US exits",
-build or reuse regional `proxy_groups`, build a `Steam` `policy_group` whose
-`exits` reference those groups, and target the Steam pack at `Steam`. For domain
-routing such as "huggingface.co through temporary line", inspect status,
-search/build or reuse the proxy group, call `custom_rules_build`, then create a
-patch with desired `proxy_groups` and `custom_rules`. For terminal targets such
-as "xxx direct", skip proxy group creation and build custom rules with target
-`DIRECT`. For external provider routing such as adding a raw `US-Proxy`
-rule-provider URL, call `rule_provider_build`, then create a patch with desired
-`rule_providers`; do not edit `generated/mihomo.yaml` directly.
+`config_patch_draft(op=upsert_patch)` with the desired `proxy_groups` and
+`packs`. For ACL4SSR-style layered routing such as "Steam can choose HK, JP, or
+US exits", build or reuse regional `proxy_groups`, build a `Steam`
+`policy_group` whose `exits` reference those groups, and target the Steam pack
+at `Steam`. For domain routing such as "huggingface.co through temporary line",
+inspect status, search/build or reuse the proxy group, call `custom_rules_build`,
+then draft a patch with desired `proxy_groups` and `custom_rules`. For terminal
+targets such as "xxx direct", skip proxy group creation and build custom rules
+with target `DIRECT`. For external provider routing such as adding a raw
+`US-Proxy` rule-provider URL, call `rule_provider_build`, then draft a patch
+with desired `rule_providers`; do not edit `generated/mihomo.yaml` directly.
 
-Patch creation does not overwrite active generated files, start or restart
-Mihomo, or apply router system changes. It loads the current durable
-`localclash-intent.json`, layers the requested overlay on top, and writes the merged
-candidate into the patch directory. After user review, `config_patch_apply`
-resolves selectors against the current subscription, backs up replaced local
-artifacts, writes `localclash-intent.json`, derives `localclash-packs.gob`, and
-regenerates `generated/mihomo.yaml`. It still does not start or restart Mihomo;
-use `run_runtime` for that confirmed step.
+Drafting does not overwrite active files, start or restart Mihomo, or apply
+router system changes. A new draft replaces the previous in-memory draft.
+After review, `config_patch_apply` verifies registry/base hashes, backs up
+replaced local artifacts, writes changed `patches/*.json`, compiles
+`localclash-intent.json`, derives `localclash-packs.gob`, and regenerates
+`generated/mihomo.yaml`. It still does not start or restart Mihomo; use
+`run_runtime` for that confirmed step.
 The normal reviewed-change loop is:
-`config_status` → `config_patch_create` → `config_patch_apply` →
+`config_status(patches=true)` → `config_patch_draft` → `config_patch_apply` →
 `config_status`.
 
 MCP runtime tool:
@@ -447,7 +453,7 @@ Router MCP closed loop:
 
 This is the MCP form of the runtime loop. `doctor` remains the broader
 health-check entrypoint, including generated config validation. Agents should use
-`config_patch_create` and `config_patch_apply` for reviewed routing changes, and
+`config_patch_draft` and `config_patch_apply` for reviewed routing changes, and
 `config_render` for plain rebuilds of the generated Mihomo config.
 
 For a local HTTP MCP smoke test, run:
@@ -577,7 +583,7 @@ such as DNS, TUN, ports, sniffer, `allow-lan`, and `bind-address` come from the
 selected builtin runtime template, or from `localclash-user.json` when that file
 exists. Use `go run . config render --runtime-profile <path> --force` to test an
 alternate runtime selector. For MCP-managed routing changes, prefer
-`config_patch_create` followed by `config_patch_apply`; for plain MCP rebuilds,
+`config_patch_draft` followed by `config_patch_apply`; for plain MCP rebuilds,
 use `config_render`.
 
 The rule model is documented in `docs/rule-model.md`. In short, localClash

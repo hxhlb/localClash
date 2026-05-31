@@ -20,6 +20,7 @@ const ConfigSchemaVersion = 4
 type Config struct {
 	Version          int                    `json:"version" yaml:"version"`
 	PolicyTemplate   string                 `json:"policy_template,omitempty" yaml:"policy_template,omitempty"`
+	Generated        *GeneratedMetadata     `json:"generated,omitempty" yaml:"generated,omitempty"`
 	FallbackTarget   string                 `json:"fallback_target,omitempty" yaml:"fallback_target,omitempty"`
 	ProxyGroups      map[string]ProxyGroup  `json:"proxy_groups" yaml:"proxy_groups,omitempty"`
 	PolicyGroups     map[string]PolicyGroup `json:"policy_groups,omitempty" yaml:"policy_groups,omitempty"`
@@ -28,6 +29,28 @@ type Config struct {
 	EnabledRulePacks []RulePackSelection    `json:"enabled_rule_packs,omitempty" yaml:"enabled_rule_packs,omitempty"`
 	RuleProviders    []ExternalRuleProvider `json:"rule_providers,omitempty" yaml:"rule_providers,omitempty"`
 	Packs            []Pack                 `json:"packs" yaml:"packs,omitempty"`
+}
+
+type GeneratedMetadata struct {
+	Source            string              `json:"source" yaml:"source"`
+	RegistryDir       string              `json:"registry_dir,omitempty" yaml:"registry_dir,omitempty"`
+	RegistryHash      string              `json:"registry_hash,omitempty" yaml:"registry_hash,omitempty"`
+	BuilderVersion    int                 `json:"builder_version,omitempty" yaml:"builder_version,omitempty"`
+	BuiltAt           string              `json:"built_at,omitempty" yaml:"built_at,omitempty"`
+	PolicyTemplate    string              `json:"policy_template,omitempty" yaml:"policy_template,omitempty"`
+	PatchCount        int                 `json:"patch_count,omitempty" yaml:"patch_count,omitempty"`
+	EnabledPatchCount int                 `json:"enabled_patch_count,omitempty" yaml:"enabled_patch_count,omitempty"`
+	TombstonedCount   int                 `json:"tombstoned_count,omitempty" yaml:"tombstoned_count,omitempty"`
+	Patches           []GeneratedPatch    `json:"patches,omitempty" yaml:"patches,omitempty"`
+	Provenance        map[string][]string `json:"provenance,omitempty" yaml:"provenance,omitempty"`
+}
+
+type GeneratedPatch struct {
+	PatchID string `json:"patch_id" yaml:"patch_id"`
+	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
+	Status  string `json:"status" yaml:"status"`
+	OrderID string `json:"order_id" yaml:"order_id"`
+	SHA256  string `json:"sha256,omitempty" yaml:"sha256,omitempty"`
 }
 
 type ProxyGroup struct {

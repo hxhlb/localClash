@@ -108,6 +108,7 @@ type OverlayProxyGroupIntent struct {
 	Nodes    []string           `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 	Match    *localconfig.Match `json:"match,omitempty" yaml:"match,omitempty"`
 	Mode     string             `json:"mode" yaml:"mode"`
+	Optional bool               `json:"optional,omitempty" yaml:"optional,omitempty"`
 	Reason   string             `json:"reason,omitempty" yaml:"reason,omitempty"`
 	Boundary string             `json:"boundary,omitempty" yaml:"boundary,omitempty"`
 }
@@ -764,6 +765,7 @@ func configFromOverlay(overlay OverlayIntent) localconfig.Config {
 			Mode:     group.Mode,
 			Match:    group.Match,
 			Nodes:    append([]string{}, group.Nodes...),
+			Optional: group.Optional,
 			Reason:   group.Reason,
 			Boundary: group.Boundary,
 		}
@@ -804,6 +806,9 @@ func configWithOverlay(path string, overlay OverlayIntent) (localconfig.Config, 
 			Version:     localconfig.ConfigSchemaVersion,
 			ProxyGroups: map[string]localconfig.ProxyGroup{},
 		}
+	}
+	if base.Generated != nil && base.Generated.Source == "patch_registry" {
+		return localconfig.Config{}, fmt.Errorf("%s is a compiled patch-registry artifact; use config_patch_draft and config_patch_apply instead of merging an overlay into localclash-intent.json", path)
 	}
 	return mergeOverlayConfig(base, configFromOverlay(overlay)), nil
 }

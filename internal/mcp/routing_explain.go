@@ -27,43 +27,46 @@ type routingExplainInput struct {
 }
 
 type routingExplainResult struct {
-	Query            string                    `json:"query"`
-	Config           string                    `json:"config"`
-	ConfigExists     bool                      `json:"config_exists"`
-	PolicyTemplate   string                    `json:"policy_template,omitempty"`
-	RouteModel       string                    `json:"route_model"`
-	Resolved         bool                      `json:"resolved"`
-	ResolveError     string                    `json:"resolve_error,omitempty"`
-	CatalogAvailable bool                      `json:"catalog_available"`
-	CatalogError     string                    `json:"catalog_error,omitempty"`
-	Matches          []routingExplainMatch     `json:"matches"`
-	ActiveRoutes     []routingExplainRoute     `json:"active_routes"`
-	ReusableExits    []routingExplainExit      `json:"reusable_exits"`
-	RuleMatches      []routingExplainRuleMatch `json:"rule_matches,omitempty"`
-	Warnings         []string                  `json:"warnings,omitempty"`
-	NextActions      []string                  `json:"next_actions"`
-	PatchGuidance    routingPatchGuidance      `json:"patch_guidance"`
+	Query             string                    `json:"query"`
+	Config            string                    `json:"config"`
+	ConfigExists      bool                      `json:"config_exists"`
+	PolicyTemplate    string                    `json:"policy_template,omitempty"`
+	RouteModel        string                    `json:"route_model"`
+	Resolved          bool                      `json:"resolved"`
+	ResolveError      string                    `json:"resolve_error,omitempty"`
+	CatalogAvailable  bool                      `json:"catalog_available"`
+	CatalogError      string                    `json:"catalog_error,omitempty"`
+	Matches           []routingExplainMatch     `json:"matches"`
+	ActiveRoutes      []routingExplainRoute     `json:"active_routes"`
+	ReusableExits     []routingExplainExit      `json:"reusable_exits"`
+	RuleMatches       []routingExplainRuleMatch `json:"rule_matches,omitempty"`
+	ProvidedByPatches []string                  `json:"provided_by_patches,omitempty"`
+	Warnings          []string                  `json:"warnings,omitempty"`
+	NextActions       []string                  `json:"next_actions"`
+	PatchGuidance     routingPatchGuidance      `json:"patch_guidance"`
 }
 
 type routingExplainMatch struct {
-	Kind   string  `json:"kind"`
-	ID     string  `json:"id"`
-	Target string  `json:"target,omitempty"`
-	Reason string  `json:"reason,omitempty"`
-	Score  int     `json:"score"`
-	Route  *string `json:"route,omitempty"`
+	Kind              string   `json:"kind"`
+	ID                string   `json:"id"`
+	Target            string   `json:"target,omitempty"`
+	Reason            string   `json:"reason,omitempty"`
+	Score             int      `json:"score"`
+	Route             *string  `json:"route,omitempty"`
+	ProvidedByPatches []string `json:"provided_by_patches,omitempty"`
 }
 
 type routingExplainRoute struct {
-	SourceKind  string                `json:"source_kind"`
-	ID          string                `json:"id"`
-	Target      string                `json:"target"`
-	TargetKind  string                `json:"target_kind"`
-	Reason      string                `json:"reason,omitempty"`
-	Pack        *routingExplainPack   `json:"pack,omitempty"`
-	PolicyGroup *routingExplainPolicy `json:"policy_group,omitempty"`
-	ProxyGroup  *routingExplainProxy  `json:"proxy_group,omitempty"`
-	Exits       []routingExplainExit  `json:"exits,omitempty"`
+	SourceKind        string                `json:"source_kind"`
+	ID                string                `json:"id"`
+	Target            string                `json:"target"`
+	TargetKind        string                `json:"target_kind"`
+	Reason            string                `json:"reason,omitempty"`
+	Pack              *routingExplainPack   `json:"pack,omitempty"`
+	PolicyGroup       *routingExplainPolicy `json:"policy_group,omitempty"`
+	ProxyGroup        *routingExplainProxy  `json:"proxy_group,omitempty"`
+	Exits             []routingExplainExit  `json:"exits,omitempty"`
+	ProvidedByPatches []string              `json:"provided_by_patches,omitempty"`
 }
 
 type routingExplainPack struct {
@@ -141,7 +144,7 @@ func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (
 	result := routingExplainResult{
 		Query:      in.Query,
 		Config:     in.Config,
-		RouteModel: "localclash-intent.json durable intent; default template model is business group -> exit group -> subscription nodes",
+		RouteModel: "patches/*.json durable registry -> compiled localclash-intent.json -> generated Mihomo config; default template model is business group -> exit group -> subscription nodes",
 	}
 	config, err := localconfig.Load(in.Config)
 	if err != nil {
@@ -168,7 +171,7 @@ func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (
 		config = resolved.Config
 	} else {
 		result.ResolveError = resolveErr.Error()
-		result.Warnings = append(result.Warnings, "selector/node resolution is unavailable; explanation is based on durable localclash-intent.json intent only")
+		result.Warnings = append(result.Warnings, "selector/node resolution is unavailable; explanation is based on compiled localclash-intent.json intent only")
 	}
 
 	catalog, catalogErr := rules.LoadPackCatalog(in.RulesCache)
@@ -197,6 +200,7 @@ func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (
 	if len(result.ActiveRoutes) == 0 && len(result.RuleMatches) > 0 {
 		result.ActiveRoutes = limitRoutingRoutes(routesFromRuleMatches(result.RuleMatches, index), limit)
 	}
+	result.ProvidedByPatches = providedByPatchesForRoutingResult(result)
 	result.PatchGuidance = defaultRoutingPatchGuidance(firstRouteTarget(result.ActiveRoutes))
 	result.NextActions = routingExplainNextActions(result)
 	return jsonToolResult(result)
@@ -240,6 +244,7 @@ type routingIndex struct {
 	PolicyGroups  map[string]localconfig.PolicyGroup
 	ProxyGroups   map[string]localconfig.ProxyGroup
 	ResolvedProxy map[string]localconfig.ProxyGroupResult
+	Provenance    map[string][]string
 }
 
 func buildRoutingIndex(config localconfig.Config, resolved localconfig.Resolved, hasResolved bool, catalog rules.PackCatalog) routingIndex {
@@ -250,6 +255,12 @@ func buildRoutingIndex(config localconfig.Config, resolved localconfig.Resolved,
 		PolicyGroups:  map[string]localconfig.PolicyGroup{},
 		ProxyGroups:   map[string]localconfig.ProxyGroup{},
 		ResolvedProxy: map[string]localconfig.ProxyGroupResult{},
+		Provenance:    map[string][]string{},
+	}
+	if config.Generated != nil {
+		for key, patchIDs := range config.Generated.Provenance {
+			index.Provenance[key] = append([]string{}, patchIDs...)
+		}
 	}
 	for _, pack := range config.Packs {
 		index.Packs[rules.PackKey(pack.Source, pack.Pack)] = pack
@@ -276,13 +287,13 @@ func queryRoutingMatches(query string, index routingIndex) []routingExplainMatch
 	for id, group := range index.PolicyGroups {
 		if score := matchScore(query, id, group.Reason, group.Boundary, strings.Join(group.Exits, " ")); score > 0 {
 			route := "policy_group:" + id
-			matches = append(matches, routingExplainMatch{Kind: "policy_group", ID: id, Reason: group.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "policy_group", ID: id, Reason: group.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("policy_group", id, index)})
 		}
 	}
 	for id, group := range index.ProxyGroups {
 		if score := matchScore(query, id, group.Reason, group.Boundary, group.Mode, matchText(group.Match)); score > 0 {
 			route := "proxy_group:" + id
-			matches = append(matches, routingExplainMatch{Kind: "proxy_group", ID: id, Reason: group.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "proxy_group", ID: id, Reason: group.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("proxy_group", id, index)})
 		}
 	}
 	for _, pack := range index.Config.Packs {
@@ -290,31 +301,31 @@ func queryRoutingMatches(query string, index routingIndex) []routingExplainMatch
 		detail := index.PackDetails[key]
 		if score := matchScore(query, pack.Source, pack.Pack, pack.Target, pack.Reason, detail.Name, detail.Source); score > 0 {
 			route := "pack:" + key + " -> " + pack.Target
-			matches = append(matches, routingExplainMatch{Kind: "pack", ID: key, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "pack", ID: key, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("pack", key, index)})
 		}
 	}
 	for _, pack := range index.Config.EnabledRulePacks {
 		if score := matchScore(query, pack.ID, pack.Target, pack.Reason); score > 0 {
 			route := "local_rule_pack:" + pack.ID + " -> " + pack.Target
-			matches = append(matches, routingExplainMatch{Kind: "local_rule_pack", ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "local_rule_pack", ID: pack.ID, Target: pack.Target, Reason: pack.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("local_rule_pack", pack.ID, index)})
 		}
 	}
 	for _, rule := range index.Config.TransportRules {
 		if score := matchScore(query, rule.ID, rule.Target, rule.Reason, rule.Network, fmt.Sprintf("%d", rule.DstPort)); score > 0 {
 			route := "transport_rule:" + rule.ID + " -> " + rule.Target
-			matches = append(matches, routingExplainMatch{Kind: "transport_rule", ID: rule.ID, Target: rule.Target, Reason: rule.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "transport_rule", ID: rule.ID, Target: rule.Target, Reason: rule.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("transport_rule", rule.ID, index)})
 		}
 	}
 	for _, custom := range index.Config.CustomRules {
 		if score := matchScore(query, custom.ID, custom.Target, custom.Reason, customRulesText(custom.Rules)); score > 0 {
 			route := "custom_rule:" + custom.ID + " -> " + custom.Target
-			matches = append(matches, routingExplainMatch{Kind: "custom_rule", ID: custom.ID, Target: custom.Target, Reason: custom.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "custom_rule", ID: custom.ID, Target: custom.Target, Reason: custom.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("custom_rule", custom.ID, index)})
 		}
 	}
 	for _, provider := range index.Config.RuleProviders {
 		if score := matchScore(query, provider.ID, provider.Target, provider.Reason, provider.URL, provider.Path); score > 0 {
 			route := "rule_provider:" + provider.ID + " -> " + provider.Target
-			matches = append(matches, routingExplainMatch{Kind: "rule_provider", ID: provider.ID, Target: provider.Target, Reason: provider.Reason, Score: score, Route: &route})
+			matches = append(matches, routingExplainMatch{Kind: "rule_provider", ID: provider.ID, Target: provider.Target, Reason: provider.Reason, Score: score, Route: &route, ProvidedByPatches: provenanceForMatch("rule_provider", provider.ID, index)})
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
@@ -421,6 +432,7 @@ func routeForSource(sourceKind, id, target, reason string, index routingIndex) r
 		for _, exit := range group.Exits {
 			route.Exits = append(route.Exits, exitForTarget(exit, index))
 		}
+		route.ProvidedByPatches = providedByPatchesForRoute(route, index)
 		return route
 	}
 	if _, ok := index.ProxyGroups[target]; ok || isBuiltInRoutingTarget(target) {
@@ -434,7 +446,93 @@ func routeForSource(sourceKind, id, target, reason string, index routingIndex) r
 			route.ProxyGroup = &proxy
 		}
 	}
+	route.ProvidedByPatches = providedByPatchesForRoute(route, index)
 	return route
+}
+
+func providedByPatchesForRoutingResult(result routingExplainResult) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, route := range result.ActiveRoutes {
+		for _, patchID := range route.ProvidedByPatches {
+			if !seen[patchID] {
+				seen[patchID] = true
+				out = append(out, patchID)
+			}
+		}
+	}
+	if len(out) == 0 {
+		for _, match := range result.Matches {
+			for _, patchID := range match.ProvidedByPatches {
+				if !seen[patchID] {
+					seen[patchID] = true
+					out = append(out, patchID)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func providedByPatchesForRoute(route routingExplainRoute, index routingIndex) []string {
+	keys := []string{routingProvenanceKey(route.SourceKind, route.ID)}
+	if route.PolicyGroup != nil {
+		keys = append(keys, routingProvenanceKey("policy_group", route.PolicyGroup.ID))
+	}
+	if route.ProxyGroup != nil {
+		keys = append(keys, routingProvenanceKey("proxy_group", route.ProxyGroup.ID))
+	}
+	for _, exit := range route.Exits {
+		if exit.Kind == "proxy_group" {
+			keys = append(keys, routingProvenanceKey("proxy_group", exit.ID))
+		}
+	}
+	return provenanceForKeys(index, keys...)
+}
+
+func provenanceForMatch(kind, id string, index routingIndex) []string {
+	return provenanceForKeys(index, routingProvenanceKey(kind, id))
+}
+
+func provenanceForKeys(index routingIndex, keys ...string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, key := range keys {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		for _, patchID := range index.Provenance[key] {
+			if !seen[patchID] {
+				seen[patchID] = true
+				out = append(out, patchID)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func routingProvenanceKey(kind, id string) string {
+	id = strings.TrimSpace(id)
+	switch kind {
+	case "policy_group":
+		return "policy_groups[" + id + "]"
+	case "proxy_group":
+		return "proxy_groups[" + id + "]"
+	case "pack":
+		return "packs[" + id + "]"
+	case "local_rule_pack":
+		return "enabled_rule_packs[" + id + "]"
+	case "transport_rule":
+		return "transport_rules[" + id + "]"
+	case "custom_rule":
+		return "custom_rules[" + id + "]"
+	case "rule_provider":
+		return "rule_providers[" + id + "]"
+	default:
+		return ""
+	}
 }
 
 func exitForTarget(target string, index routingIndex) routingExplainExit {
@@ -518,17 +616,17 @@ func queryRoutingRuleMatches(ctx context.Context, in routingExplainInput, index 
 }
 
 func defaultRoutingPatchGuidance(target string) routingPatchGuidance {
-	summary := "Use config_patch_create to make a reviewed routing change; routing_explain is read-only."
+	summary := "Use config_patch_draft to make a reviewed patch-registry change; routing_explain is read-only."
 	if target != "" {
-		summary = "To change this route, create a reviewed patch for target " + target + "."
+		summary = "To change this route, draft a reviewed patch-registry operation for target " + target + "."
 	}
 	return routingPatchGuidance{
 		Summary: summary,
 		Steps: []string{
-			"Call config_status to capture current durable localclash-intent.json intent.",
+			"Call config_status with patches=true to capture current durable patch registry state.",
 			"For a new or changed exit, call proxy_group_build or reuse an existing proxy group returned by routing_explain.reusable_exits.",
-			"For ACL4SSR-style business routing, call policy_group_build with the desired exits, then config_patch_create with overlay.policy_groups and matching packs/enabled_rule_packs/custom_rules/rule_providers.",
-			"Review the returned candidate localclash-intent.json and mihomo.yaml, then call config_patch_apply with the exact patch_id.",
+			"For ACL4SSR-style business routing, call policy_group_build with the desired exits, then config_patch_draft with op=upsert_patch and a full overlay.",
+			"Review the returned impact and apply_args, then call config_patch_apply with use_current_draft=true and the reviewed generation.",
 			"Call config_status or routing_explain again to verify the durable intent; restart_runtime only after user confirmation if the running Mihomo process should load the change.",
 		},
 		Notes: []string{
@@ -543,7 +641,7 @@ func routingExplainNextActions(result routingExplainResult) []string {
 		return []string{"call config_configure with policy_template=localclash-default", "call config_status"}
 	}
 	if len(result.ActiveRoutes) == 0 && len(result.RuleMatches) == 0 {
-		return []string{"call packs_list with a semantic keyword from the query", "call pack_rules_prefetch for candidate packs if domain-level evidence is needed", "call config_patch_create if this is a new route request"}
+		return []string{"call packs_list with a semantic keyword from the query", "call pack_rules_prefetch for candidate packs if domain-level evidence is needed", "call config_patch_draft if this is a new route request"}
 	}
 	actions := []string{"use active_routes to identify the current target and exits", "use patch_guidance.steps for a safe reviewed change path"}
 	if result.ResolveError != "" {
