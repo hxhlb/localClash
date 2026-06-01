@@ -510,9 +510,9 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"url": map[string]any{"type": "string", "description": "HTTP or HTTPS Clash/Mihomo subscription URL. The source id is generated automatically from this URL."},
+				"uri": map[string]any{"type": "string", "description": "HTTP/HTTPS subscription URI or MVP proxy URI. The source id is generated automatically."},
+				"url": map[string]any{"type": "string", "description": "Legacy alias for uri when the source is an HTTP or HTTPS subscription URL."},
 			},
-			"required": []string{"url"},
 		}
 		return map[string]any{
 			"type":                 "object",

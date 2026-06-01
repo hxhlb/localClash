@@ -178,13 +178,14 @@ func runProductSubscription(args []string, state appinit.RuntimeState) error {
 		if err != nil {
 			return err
 		}
-		if _, err := sourcesFromURLs(input.URLs); err != nil {
+		uris := subscriptionInputURIs(input)
+		if _, err := sourcesFromURIs(uris); err != nil {
 			return err
 		}
 		replace := true
 		result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
 			ConfigPath: state.Paths.SubscriptionConfig,
-			URLs:       input.URLs,
+			URIs:       uris,
 			Replace:    &replace,
 		})
 		if err != nil {
@@ -425,6 +426,7 @@ type desiredStateInput struct {
 }
 
 type desiredSubscriptions struct {
+	URIs    []string `json:"uris,omitempty"`
 	URLs    []string `json:"urls,omitempty"`
 	Refresh *bool    `json:"refresh,omitempty"`
 }
@@ -520,8 +522,8 @@ func validateDesiredState(input desiredStateInput) error {
 			return err
 		}
 	}
-	if input.Subscriptions != nil && len(input.Subscriptions.URLs) > 0 {
-		if _, err := sourcesFromURLs(input.Subscriptions.URLs); err != nil {
+	if input.Subscriptions != nil && len(subscriptionURIs(input.Subscriptions)) > 0 {
+		if _, err := sourcesFromURIs(subscriptionURIs(input.Subscriptions)); err != nil {
 			return err
 		}
 	}
@@ -549,12 +551,13 @@ func executeDesiredState(input desiredStateInput, state appinit.RuntimeState) ([
 	warnings := []string{}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	if input.Subscriptions != nil && len(input.Subscriptions.URLs) > 0 {
-		if _, err := sourcesFromURLs(input.Subscriptions.URLs); err != nil {
+	if input.Subscriptions != nil && len(subscriptionURIs(input.Subscriptions)) > 0 {
+		uris := subscriptionURIs(input.Subscriptions)
+		if _, err := sourcesFromURIs(uris); err != nil {
 			return changes, warnings, err
 		}
 		replace := true
-		if _, err := subscriptions.Configure(subscriptions.ConfigureOptions{ConfigPath: state.Paths.SubscriptionConfig, URLs: input.Subscriptions.URLs, Replace: &replace}); err != nil {
+		if _, err := subscriptions.Configure(subscriptions.ConfigureOptions{ConfigPath: state.Paths.SubscriptionConfig, URIs: uris, Replace: &replace}); err != nil {
 			return changes, warnings, err
 		}
 		changes = append(changes, "subscription_sources_replaced")
@@ -744,7 +747,7 @@ func executeDesiredRuntime(input *desiredRuntime, state appinit.RuntimeState) ([
 func desiredChanges(input desiredStateInput) []string {
 	changes := []string{}
 	if input.Subscriptions != nil {
-		if len(input.Subscriptions.URLs) > 0 {
+		if len(subscriptionURIs(input.Subscriptions)) > 0 {
 			changes = append(changes, "subscription_sources_replace")
 		}
 		if input.Subscriptions.Refresh != nil && *input.Subscriptions.Refresh {
@@ -816,6 +819,7 @@ type resetInput struct {
 
 type subscriptionInput struct {
 	Version int      `json:"version"`
+	URIs    []string `json:"uris"`
 	URLs    []string `json:"urls"`
 }
 
@@ -836,8 +840,8 @@ func parseSubscriptionInput(args []string) (subscriptionInput, error) {
 	if input.Version != 1 {
 		return input, fmt.Errorf("version must be 1")
 	}
-	if len(input.URLs) == 0 {
-		return input, fmt.Errorf("urls must contain at least one URL")
+	if len(subscriptionInputURIs(input)) == 0 {
+		return input, fmt.Errorf("uris must contain at least one URI")
 	}
 	return input, nil
 }
@@ -956,7 +960,28 @@ func productWorkspacePath(state appinit.RuntimeState, name string) string {
 }
 
 func sourcesFromURLs(rawURLs []string) ([]subscriptions.Source, error) {
-	return subscriptions.SourcesFromURLs(rawURLs)
+	return sourcesFromURIs(rawURLs)
+}
+
+func sourcesFromURIs(rawURIs []string) ([]subscriptions.Source, error) {
+	return subscriptions.SourcesFromURIs(rawURIs)
+}
+
+func subscriptionInputURIs(input subscriptionInput) []string {
+	if len(input.URIs) > 0 {
+		return input.URIs
+	}
+	return input.URLs
+}
+
+func subscriptionURIs(input *desiredSubscriptions) []string {
+	if input == nil {
+		return nil
+	}
+	if len(input.URIs) > 0 {
+		return input.URIs
+	}
+	return input.URLs
 }
 
 func productStatus(state appinit.RuntimeState) (map[string]any, []string) {

@@ -113,7 +113,6 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 		urls []string
 	}{
 		{name: "empty", urls: nil},
-		{name: "duplicate url", urls: []string{"https://example.com/sub", "https://example.com/sub"}},
 		{name: "bad scheme", urls: []string{"file:///tmp/sub.json"}},
 	}
 	for _, tt := range tests {
@@ -127,6 +126,36 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigureDeduplicatesURIInputs(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, "localclash-subscriptions.json")
+	uri := "vless://uuid@example.com:443?security=tls&type=tcp#VLESS"
+
+	result, err := Configure(ConfigureOptions{
+		ConfigPath: config,
+		URIs: []string{
+			"https://example.com/sub",
+			"https://example.com/sub",
+			uri,
+			uri,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sources) != 2 {
+		t.Fatalf("sources = %+v, want remote source plus one inline source", result.Sources)
+	}
+	raw, err := Get(StatusOptions{ConfigPath: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Count != 2 || len(raw.URIs) != 2 || len(raw.URLs) != 1 {
+		t.Fatalf("get = %+v, want two source URIs and one legacy URL", raw)
+	}
+	assertNoTokenLeak(t, result)
 }
 
 func TestRefreshFetchesArtifactsAndPrefixesMultiSourceNodes(t *testing.T) {
@@ -196,6 +225,67 @@ rules:
 	}
 	merged := readTestFile(t, paths.merged)
 	for _, want := range []string{"[" + primaryID + "] Same", "[" + backupID + "] Same", "[" + backupID + "] Unique"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
+		}
+	}
+	assertNoTokenLeak(t, result)
+}
+
+func TestRefreshRemoteProxyURILines(t *testing.T) {
+	const body = `vless://uuid@example.com:443?security=tls&type=tcp#VLESS
+vmess://eyJ2IjoiMiIsInBzIjoiVk1lc3MiLCJhZGQiOiJ2bWVzcy5leGFtcGxlIiwicG9ydCI6IjQ0MyIsImlkIjoiYjgzMTM4MWQtNjMyNC00ZDUzLWFkNGYtOGNkYTQ4YjMwODExIiwiYWlkIjoiMCIsInNjeSI6ImF1dG8iLCJuZXQiOiJ3cyIsInR5cGUiOiJub25lIiwiaG9zdCI6ImNkbi5leGFtcGxlIiwicGF0aCI6Ii9lZGdlIiwidGxzIjoidGxzIn0=
+`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	paths := writeRefreshConfig(t, []Source{{URI: server.URL + "/sub?token=secret-token"}})
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Merged.ProxiesCount != 2 {
+		t.Fatalf("merged = %+v, want two proxies from URI lines", result.Merged)
+	}
+	if result.Sources[0].Format != subscriptionFormatProxyURILines {
+		t.Fatalf("source format = %q, want proxy URI lines", result.Sources[0].Format)
+	}
+	merged := readTestFile(t, paths.merged)
+	for _, want := range []string{"name: VLESS", "name: VMess"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
+		}
+	}
+	assertNoTokenLeak(t, result)
+}
+
+func TestRefreshInlineProxyURILinesDeduplicatesByURIString(t *testing.T) {
+	vless := "vless://uuid@example.com:443?security=tls&type=tcp#VLESS"
+	hy2 := "hysteria2://pass@example.com:8443?insecure=1#HY2"
+	paths := writeRefreshConfigFromURIs(t, []string{vless, vless, hy2})
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Sources) != 1 || result.Sources[0].Type != sourceTypeInlineProxyURIs {
+		t.Fatalf("sources = %+v, want one inline source", result.Sources)
+	}
+	if result.Merged.ProxiesCount != 2 || result.Merged.RenamedProxiesCount != 0 {
+		t.Fatalf("merged = %+v, want two deduplicated inline proxies without source prefix", result.Merged)
+	}
+	merged := readTestFile(t, paths.merged)
+	for _, want := range []string{"name: VLESS", "name: HY2"} {
 		if !strings.Contains(merged, want) {
 			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
 		}
@@ -380,6 +470,24 @@ func TestRefreshRejectsInvalidResponses(t *testing.T) {
 	}
 }
 
+func TestRefreshRejectsRemoteTextThatIsNeitherYAMLNorProxyURILines(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("hello world\nvless://uuid@example.com:443#VLESS\n"))
+	}))
+	defer server.Close()
+	paths := writeRefreshConfig(t, []Source{{URI: server.URL + "/sub?token=secret-token"}})
+
+	_, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+	})
+	if err == nil || !strings.Contains(err.Error(), "neither Mihomo YAML nor MVP proxy URI lines") {
+		t.Fatalf("error = %v, want explicit input format rejection", err)
+	}
+	assertNoTokenLeak(t, err.Error())
+}
+
 type refreshPaths struct {
 	dir        string
 	config     string
@@ -389,6 +497,15 @@ type refreshPaths struct {
 
 func writeRefreshConfig(t *testing.T, sources []Source) refreshPaths {
 	t.Helper()
+	uris := make([]string, 0, len(sources))
+	for _, source := range sources {
+		uris = append(uris, sourcePrimaryURI(source))
+	}
+	return writeRefreshConfigFromURIs(t, uris)
+}
+
+func writeRefreshConfigFromURIs(t *testing.T, uris []string) refreshPaths {
+	t.Helper()
 	dir := t.TempDir()
 	paths := refreshPaths{
 		dir:        dir,
@@ -396,11 +513,7 @@ func writeRefreshConfig(t *testing.T, sources []Source) refreshPaths {
 		runtimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
 		merged:     filepath.Join(dir, "subscription.gob"),
 	}
-	urls := make([]string, 0, len(sources))
-	for _, source := range sources {
-		urls = append(urls, source.URL)
-	}
-	_, err := Configure(ConfigureOptions{ConfigPath: paths.config, URLs: urls})
+	_, err := Configure(ConfigureOptions{ConfigPath: paths.config, URIs: uris})
 	if err != nil {
 		t.Fatal(err)
 	}
