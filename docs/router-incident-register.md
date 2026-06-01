@@ -58,7 +58,8 @@ Current explanation:
 Product requirement:
 
 - A router reboot restore path must bring the configured localClash router mode
-  back to the intended operational state without requiring a manual LuCI click.
+  back to the intended operational state after the user explicitly enables boot
+  auto-restore.
 - Restore should ensure the localClash service is running, the selected runtime
   profile and generated config are available, Mihomo is started, and
   localClash-owned router takeover is applied only after the runtime is ready.
@@ -68,6 +69,14 @@ Product requirement:
 - Failure must be visible from LuCI and logs with enough detail to distinguish
   missing core binary, missing config, failed runtime start, failed takeover
   apply, and service supervision failures.
+
+Current implementation note:
+
+- The sibling LuCI package `0.1.0-19` adds explicit boot auto-restore helper
+  methods: `boot_restore_status`, `boot_restore_enable`,
+  `boot_restore_disable`, and `boot_restore_run`.
+- A normal takeover apply should not create persistent reboot restore policy.
+  Boot restore is controlled by the explicit LuCI/helper setting.
 
 Required evidence for the next reproduction:
 
@@ -103,13 +112,11 @@ Evidence captured on 2026-05-31:
   `wan` and `wan_6`. That explains how runtime-only localClash nft hooks can be
   lost even when Mihomo itself remains alive.
 - A tactical LuCI package fix was deployed as `luci-app-localclash 0.1.0-18`.
-  It added an iface hotplug restore hook and a `takeover_restore` helper path.
-  Current-router verification showed `takeover_status.effective=true`,
-  `runtime_running=true`, and the hotplug restore path could execute.
-- That tactical fix persisted a takeover intent file under the localClash state
-  directory. This is not the final clean design: it can reinterpret a previous
-  takeover apply as permission to restore takeover after router reboot, even
-  when the user did not explicitly opt into boot-time auto-restore.
+  It added an iface hotplug restore hook and a `takeover_restore` helper path,
+  but conflated same-boot repair with reboot restore intent.
+- The follow-up LuCI package `0.1.0-19` implements the clean split: same-boot
+  repair uses `/tmp` repair evidence, while boot auto-restore uses explicit
+  persistent enable/disable helper methods.
 
 Current explanation:
 

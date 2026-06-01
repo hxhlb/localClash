@@ -252,7 +252,7 @@ Current code has:
   initialization into the same durable `localclash-intent.json` intent model that MCP
   patches use
 - default patch files for region exits, direct baselines,
-  communication/social/Telegram routing (including Telegram GEOIP coverage),
+  QUIC UDP/443 control, communication/social/Telegram routing (including Telegram GEOIP coverage),
   AI/developer routing, Steam,
   media/platform routing, games, and tail fallback routing
 - standalone local `rule-packs/*.json` files enabled through durable
@@ -260,16 +260,21 @@ Current code has:
 - renderer support for selected third-party packs
 - renderer support for enabled local rule packs, emitted after inline
   `custom_rules` and before catalog/template packs
+- renderer and resolver support for high-priority `transport_rules`
 - renderer support for inline `custom_rules`
 - renderer support for user-supplied external `rule_providers`
-- MCP patch tools for proxy groups, custom rules, external rule-providers,
-  reviewed config apply, and atomic generated config rendering
+- resolver checks for transport-rule, custom-rule, external-provider, pack, and
+  local rule-pack targets before rendering
+- MCP patch tools for proxy groups, policy groups, transport rules, custom
+  rules, external rule-providers, reviewed config apply, and atomic generated
+  config rendering
 
 Current code still does not yet have:
 
 - UI support for policy template and rule pack selection
-- doctor checks for custom rule or external provider schema and target
-  references
+- a dedicated doctor pre-render audit for durable patch schema. Current doctor
+  checks generated rule targets and rule-provider references after rendering,
+  while config resolve/render paths reject invalid durable target references.
 
 ## MCP Routing Discovery
 
@@ -317,14 +322,15 @@ queries:
 
 Build this in small steps:
 
-1. Extend MCP patch tools until agents can express common routing intent without
-   editing YAML directly.
-2. Add read-only MCP routing discovery tools so Agents can inspect default
-   business groups without parsing the full `config_status` payload.
-3. Add doctor checks for pack parsing, custom rule validity, target validity,
-   and missing providers.
-4. Add CLI flags for config path and dry-run diff.
-5. Expose the same model through the local web UI.
+1. Keep MCP patch tools as the primary write path for common routing intent;
+   agents should not edit generated YAML directly.
+2. Keep read-only MCP routing discovery (`routing_explain`, `packs_list`,
+   `pack_rules_*`) aligned with the patch-registry model so Agents can inspect
+   default business groups without parsing full generated YAML.
+3. Improve doctor/status coverage for durable patch registry problems that are
+   currently caught during resolve/render.
+4. Expose the same model through LuCI or another UI only after the patch
+   registry remains the source of truth.
 
 Do not start by adding many pack contents. First make the mechanism correct.
 
@@ -338,6 +344,7 @@ A correct implementation must satisfy:
 - product defaults live in explicit policy-template patches, not hidden Go code
 - generated config is reproducible from localClash-owned inputs
 - UI changes are stored in localClash config, not in generated Mihomo YAML
-- doctor can explain missing files, invalid rules, missing targets, missing
-  providers, and failed `mihomo -t`
+- resolve/render fails fast on invalid durable rule targets, missing providers,
+  unsupported custom rule types, and failed `mihomo -t`; doctor explains
+  missing files and generated rule/provider target problems
 - sensitive local files remain ignored by git

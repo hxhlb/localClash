@@ -56,13 +56,16 @@ such as `HK`, `JP`, `⚡ 自动选择`, or `DIRECT` in Dashboard. Non-built-in e
 refer to `proxy_groups`; policy groups do not directly select subscription
 nodes.
 
-The first CLI surface is intentionally small:
+The CLI surface is intentionally small:
 
 ```bash
 go run . rules adapt
+go run . rules index-dump --format json
 go run . rules render --selection localclash-packs.gob
 ```
 
-`rules adapt` reads source JSON and writes runtime pack cache. `rules render`
-reads that cache plus the selection gob and renders rule-provider, proxy-group,
-and rule fragments only. It does not modify `generated/mihomo.yaml`.
+`rules adapt` reads source JSON and writes runtime pack cache plus
+`.runtime/rules/packs/index.gob`. `rules index-dump` exposes that runtime index
+for inspection. `rules render` reads the cache plus the selection gob and
+renders rule-provider, proxy-group, and rule fragments only. It does not modify
+`generated/mihomo.yaml`.

@@ -102,5 +102,8 @@ To return to an installed-but-unconfigured state:
 go run . reset
 ```
 
-The reset command deletes local runtime state and user configuration, but keeps
-downloaded binaries, source files, policies, rule sources, and docs.
+The reset command prints a destructive plan and asks for confirmation. Pass
+`--yes` for non-interactive automation, or `--dry-run` to inspect the plan. The
+default reset deletes local runtime state and user configuration, but keeps
+downloaded binaries, source files, policies, rule sources, and docs. Use
+`--full` only when the entire localClash workspace should be removed.

@@ -1,9 +1,10 @@
 # OpenWrt Test Environments
 
-This document records the reusable OpenWrt test environments recovered from
-the Codex thread `019e4a76-be53-7f00-ba09-889d087535b2` and the current local
-state verified on 2026-05-28. It is a runbook for localClash core and LuCI
-integration testing; it is not a record of private conversation logs.
+This document records the reusable OpenWrt test environments used for
+localClash core and LuCI integration testing. The Docker target was first
+recovered from thread `019e4a76-be53-7f00-ba09-889d087535b2`; this runbook now
+tracks the current repo contracts as of 2026-06-01, not the private thread
+transcript.
 
 Do not commit local router passwords, subscriptions, generated configs, or
 runtime artifacts. The credentials used in the original local test thread are
@@ -26,7 +27,8 @@ intentionally not recorded here.
 ## Docker OpenWrt
 
 Use this environment for LuCI first-use flows, release-manifest bootstrap,
-MCP-over-HTTP smoke tests, runtime/takeover interaction, and rollback behavior.
+MCP-over-HTTP smoke tests, runtime/takeover interaction, same-boot takeover
+repair, boot auto-restore helper behavior, and rollback behavior.
 
 Current verified container:
 
@@ -65,6 +67,15 @@ restore script:  /root/start-localclash-test.sh
 LuCI app:        luci-app-localclash
 package manager: opkg
 ```
+
+The sibling LuCI repo currently builds `luci-app-localclash 0.1.0-19`. That
+package includes the split restore model:
+
+- `takeover_restore`: same-boot repair driven by `/tmp` repair evidence.
+- `boot_restore_status`, `boot_restore_enable`, `boot_restore_disable`, and
+  `boot_restore_run`: explicit persistent boot auto-restore control.
+- An iface hotplug hook that calls `takeover_restore` after OpenWrt network
+  churn, without treating a normal takeover apply as reboot restore intent.
 
 The Docker firewall was intentionally relaxed for browser and MCP testing:
 
@@ -114,6 +125,9 @@ The important rule is to let LuCI perform bootstrap. Do not manually copy
 `/usr/local/bin/localclash` into the container when validating first-use UX.
 The browser path should click one-key initialization and let the helper run
 `bootstrap_core`, release manifest download, checksum verification, and install.
+LuCI bootstrap should refresh the localClash core first, then install base
+assets, refresh subscriptions, render config, start runtime, and apply takeover
+when the selected action requires it.
 
 Docker limitations:
 
@@ -182,7 +196,8 @@ ls -la .runtime/utm-openwrt-perf
 sed -n '1,220p' .runtime/utm-openwrt-perf/summary.json
 ```
 
-The thread's deployed state after the first performance pass was:
+The thread's deployed state after the first performance pass was historical
+evidence, not the current package baseline:
 
 ```text
 localClash core: /usr/local/bin/localclash
@@ -226,6 +241,7 @@ Use Docker OpenWrt for:
 - LuCI first-use flow from missing core and empty state
 - release manifest and mirror download behavior
 - browser-visible long-task feedback
+- same-boot takeover repair and explicit boot auto-restore helper behavior
 - runtime start/restart interaction in an isolated router
 - network takeover apply/stop and cleanup
 - MCP JSON-RPC smoke tests through `127.0.0.1:18765/mcp`
