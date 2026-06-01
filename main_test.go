@@ -44,7 +44,7 @@ func TestRunRuntimeStatusPrintsJSONEnvelope(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join("generated", "mihomo.yaml")
+	config := filepath.Join(workDir, "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRunRuntimeStatusUsesDetectedWorkDir(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	config := filepath.Join(installDir, "generated", "mihomo.yaml")
+	config := filepath.Join(workDir, "config.yaml")
 	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
 		t.Fatal(err)
 	}
