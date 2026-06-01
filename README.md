@@ -82,10 +82,11 @@ If no subscription has been configured, runtime startup should stop with a clear
 bootstrap message instead of guessing. The user or agent should configure one or
 more subscription sources first, then refresh the effective `subscription.gob`.
 
-Low-level operations such as rule source adaptation, rules fragment rendering,
-and raw Mihomo config testing are implementation details of this runtime and
-render pipeline. They may remain available as CLI/debug helpers, but they are
-not the main MCP workflow for agents.
+Low-level operations such as rule source adaptation and rules fragment rendering
+are implementation details of this runtime and render pipeline. They may remain
+available as CLI/debug helpers, but they are not the main MCP workflow for
+agents. The MCP surface exposes `mihomo_config_test` as the productized
+validation gate before hot reload, not as an open-ended raw config probing tool.
 
 ## Safety Boundary
 
@@ -134,8 +135,9 @@ go run . mcp --addr 127.0.0.1:8766 --path /mcp
 The MCP server is the primary agent management interface. It exposes bootstrap,
 inspection, planning, rendering, health-check, and confirmed runtime-start
 tools. It should not expose every internal CLI/debug helper as a product-level
-tool. Rules adaptation, rules fragment rendering, and raw Mihomo config testing
-are internal pipeline or CLI/debug capabilities, not MCP product tools.
+tool. Rules adaptation and rules fragment rendering are internal pipeline
+capabilities, while `mihomo_config_test` is exposed deliberately as the
+explicit validation step for MCP hot reload.
 
 Deploy the router MCP server:
 
@@ -172,16 +174,49 @@ Tool safety levels are part of the tool metadata:
 - `high_risk`: reserved for operations such as applying router config. The
   first product MCP surface currently exposes no high-risk tools.
 
-MCP environment tool:
+Current MCP tool map:
+
+- Discovery, diagnostics, and file helpers: `tools_list`,
+  `environment_inspect`, `doctor`, `nl_file`, and `sed_file`.
+- Subscription setup and node discovery: `subscriptions_status`,
+  `subscriptions_configure`, `subscriptions_refresh`,
+  `subscription_nodes_list`, and `subscription_nodes_search`.
+- Rule-pack catalog and provider-cache inspection: `packs_list`, `packs_get`,
+  `pack_rules_read`, `pack_rules_prefetch`, and `pack_rules_query`.
+- Config intent and patch registry: `config_configure`, `config_status`,
+  `config_render`, `routing_explain`, `config_patch_get`,
+  `config_patch_draft`, and `config_patch_apply`.
+- Patch-building helpers: `proxy_group_build`, `policy_group_build`,
+  `custom_rules_build`, and `rule_provider_build`.
+- Runtime profile and process observation: `runtime_profile_status` and
+  `runtime_status`.
+- Mihomo controller evidence and validation: `mihomo_config_test`,
+  `mihomo_api_request`, `mihomo_connections_read`, and `mihomo_logs_read`.
+- Confirmed lifecycle actions: `run_runtime`, `restart_runtime`, and
+  `stop_runtime`.
+- Router transparent-proxy runtime state: `router_takeover_status`,
+  `router_takeover_apply`, and `router_takeover_stop`.
+
+Use `tools_list` when an MCP client does not expose registry metadata directly.
+It returns the current tool names, safety levels, descriptions, and schemas as
+ordinary tool output.
+
+MCP discovery and diagnostic tools:
 
 - `environment_inspect`: inspect host, network evidence, localClash state, and
   local runtime readiness without exposing credentials.
+- `doctor`: run read-only localClash diagnostics.
+- `nl_file`: read a repository-local text file with stable line numbers for
+  follow-up edits.
+- `sed_file`: apply repository-local sed-style edits. It is `safe_write` and
+  defaults to dry-run mode.
 
-This tool reports observed facts and capabilities, not device identity. It does
-not return an `is_router` boolean. Agents should reason from evidence such as
-service manager, interfaces, routes, DNS/DHCP services, firewall backends,
-and localClash files. Subscription URLs, proxy server addresses, passwords,
-UUIDs, WAN credentials, and private keys are redacted or omitted.
+`environment_inspect` reports observed facts and capabilities, not device
+identity. It does not return an `is_router` boolean. Agents should reason from
+evidence such as service manager, interfaces, routes, DNS/DHCP services,
+firewall backends, and localClash files. Subscription URLs, proxy server
+addresses, passwords, UUIDs, WAN credentials, and private keys are redacted or
+omitted.
 
 The server marks `run_runtime` as `confirm_required`, and assumes the Agent SDK
 or MCP client has completed confirmation before calling it. Router traffic
@@ -387,7 +422,8 @@ replaced local artifacts, writes changed `patches/*.json`, compiles
 `run_runtime` for that confirmed step.
 The normal reviewed-change loop is:
 `config_status(patches=true)` → `config_patch_draft` → `config_patch_apply` →
-`config_status`.
+`mihomo_config_test` → `restart_runtime` → change-specific runtime evidence
+with `mihomo_api_request`, `mihomo_connections_read`, or `mihomo_logs_read`.
 
 MCP runtime tool:
 
@@ -469,17 +505,19 @@ Minimal MCP closed loop:
    should be recorded
 3. `config_status`
 4. `config_render` if `.runtime/mihomo/config.yaml` is missing or stale
-5. `run_runtime`, or `restart_runtime` if Mihomo is already running
-6. `runtime_status`
+5. `mihomo_config_test`
+6. `run_runtime`, or `restart_runtime` if Mihomo is already running
+7. `runtime_status`
 
 Router MCP closed loop:
 
 1. `config_configure` with `runtime_profile: router`, optional `core`, and
    optional `policy_template`
 2. `config_render`
-3. `run_runtime`, or `restart_runtime` if Mihomo is already running
-4. `router_takeover_apply`
-5. `router_takeover_status`
+3. `mihomo_config_test`
+4. `run_runtime`, or `restart_runtime` if Mihomo is already running
+5. `router_takeover_apply`
+6. `router_takeover_status`
 
 This is the MCP form of the runtime loop. `doctor` remains the broader
 health-check entrypoint, including generated config validation. Agents should use
