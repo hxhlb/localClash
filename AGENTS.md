@@ -8,6 +8,10 @@
 
 `/Volumes/Data/Github/localclash-luci` is the sibling OpenWrt LuCI surface for this core project. Keep ownership explicit: this repository owns the Go runtime, product-level CLI/MCP API, subscriptions, config rendering, runtime lifecycle, release manifests, and router-safe diagnostics; the LuCI repository owns UI, package, ACL, menu, and helper files that call those product surfaces. Start future LuCI maintenance tasks from this core project so agents first verify the current core contract, release/manifest state, and runtime behavior before changing the LuCI UI/package layer. When edits must land in `../localclash-luci`, keep them scoped there and do not move runtime logic, generated runtime artifacts, or Mihomo/dashboard assets into the LuCI package.
 
+## Mihomo Core Source Checkouts
+
+The local source checkout for the Mihomo Meta core is `/Volumes/Data/Github/mihomo-Meta`. The local source checkout for the Mihomo Alpha Smart core is `/Volumes/Data/Github/mihomo-Alpha`. Use these sibling repositories for source inspection, upstream behavior checks, and core-specific debugging only; localClash still owns runtime selection, config rendering, lifecycle commands, and managed binary paths such as `bin/*/lc-mihomo-meta` and `bin/*/lc-mihomo-smart`.
+
 ## Build, Test, and Development Commands
 
 - `rtk go test ./...`: run the full Go test suite.
@@ -32,4 +36,3 @@ Recent commits use short imperative subjects such as `Add MCP config plan render
 ## Agent-Specific Instructions
 
 Prefix shell commands with `rtk`. For debugging, inspect logs, config state, diagnostics, or MCP responses before changing code. For browser automation, prefer the existing ARC CDP endpoint at `http://localhost:9222` after a quick availability check.
-
