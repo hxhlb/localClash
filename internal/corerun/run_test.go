@@ -14,7 +14,7 @@ func TestNormalizeOptionsDefaults(t *testing.T) {
 	if got.CorePath != runtimeprofile.MetaCorePath {
 		t.Fatalf("CorePath = %q", got.CorePath)
 	}
-	if got.ConfigPath != "generated/mihomo.yaml" {
+	if got.ConfigPath != filepath.Join(".runtime", "mihomo", "config.yaml") {
 		t.Fatalf("ConfigPath = %q", got.ConfigPath)
 	}
 	if got.WorkDir != ".runtime/mihomo" {

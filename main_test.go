@@ -227,7 +227,7 @@ custom_rules:
 	if !result.OK || result.Status.Source != "compiled_intent" || result.Status.Selection != "localclash-packs.gob" {
 		t.Fatalf("config render result = %+v, want compiled intent with derived selection", result)
 	}
-	generated, err := os.ReadFile(filepath.Join("generated", "mihomo.yaml"))
+	generated, err := os.ReadFile(filepath.Join(".runtime", "mihomo", "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,10 +279,10 @@ proxy_groups:
 	if err := json.Unmarshal([]byte(output), &result); err != nil {
 		t.Fatalf("config render JSON = %q, error = %v", output, err)
 	}
-	if !result.OK || result.Status.Selection != filepath.Join(installDir, "localclash-packs.gob") || result.Status.Output != filepath.Join(installDir, "generated", "mihomo.yaml") {
+	if !result.OK || result.Status.Selection != filepath.Join(installDir, "localclash-packs.gob") || result.Status.Output != filepath.Join(installDir, ".runtime", "mihomo", "config.yaml") {
 		t.Fatalf("config render result = %+v, want paths under %s", result, installDir)
 	}
-	if _, err := os.Stat(filepath.Join(installDir, "generated", "mihomo.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(installDir, ".runtime", "mihomo", "config.yaml")); err != nil {
 		t.Fatalf("generated config should be written under workspace: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(wrongDir, "generated", "mihomo.yaml")); !os.IsNotExist(err) {
@@ -438,7 +438,7 @@ func TestRunProductRuntimeStartRefreshesCoreVersionCache(t *testing.T) {
 	core := filepath.Join(dir, runtimeprofile.MetaCorePath)
 	writeMainExecutableCore(t, core, "Mihomo runtime start")
 	writeMainCoreCache(t, appinit.CoreVersionCachePath(filepath.Join(dir, ".runtime")), core, "Mihomo stale")
-	config := filepath.Join(dir, "generated", "mihomo.yaml")
+	config := filepath.Join(dir, ".runtime", "mihomo", "config.yaml")
 	writeMainTestFile(t, config, "mixed-port: 7890\n")
 
 	output := captureStdout(t, func() error {

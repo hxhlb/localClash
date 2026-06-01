@@ -129,7 +129,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_draft", "config_patch_get", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_draft", "config_patch_get", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "mihomo_api_request", "mihomo_config_test", "mihomo_logs_read", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -156,6 +156,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscription_nodes_list":   SafeRead,
 		"subscription_nodes_search": SafeRead,
 		"runtime_status":            SafeRead,
+		"mihomo_logs_read":          SafeRead,
 		"runtime_profile_status":    SafeRead,
 		"router_takeover_status":    SafeRead,
 		"routing_explain":           SafeRead,
@@ -166,6 +167,8 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"config_patch_draft":        SafeWrite,
 		"config_patch_get":          SafeRead,
 		"config_render":             SafeWrite,
+		"mihomo_api_request":        SafeWrite,
+		"mihomo_config_test":        SafeWrite,
 		"proxy_group_build":         SafeWrite,
 		"policy_group_build":        SafeWrite,
 		"custom_rules_build":        SafeWrite,
@@ -741,7 +744,7 @@ packs:
 
 func TestToolsCallConfigRenderWritesGeneratedConfigWithoutDurableIntent(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	generated := filepath.Join(filepath.Dir(paths.subscription), "generated", "mihomo.yaml")
+	generated := filepath.Join(filepath.Dir(paths.subscription), ".runtime", "mihomo", "config.yaml")
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
 			SubscriptionPath:    paths.subscription,
@@ -1447,7 +1450,7 @@ func TestToolsCallConfigPatchDraftSupportsPolicyGroups(t *testing.T) {
 	if content["applied"] != true || content["valid"] != true {
 		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
-	config := readMCPFile(t, filepath.Join("generated", "mihomo.yaml"))
+	config := readMCPFile(t, filepath.Join(".runtime", "mihomo", "config.yaml"))
 	for _, want := range []string{"RULE-SET,blackmatrix7_OpenAI,AI", "name: AI", "- SG", "- DIRECT"} {
 		if !strings.Contains(config, want) {
 			t.Fatalf("generated config missing %q:\n%s", want, config)
@@ -1605,7 +1608,7 @@ func TestToolsCallConfigPatchDraftSupportsCustomRulesWithoutPacks(t *testing.T) 
 		},
 	}, false)
 	_ = callConfigPatchApplyCurrentDraft(t, server, paths, draft)
-	config := readMCPFile(t, filepath.Join("generated", "mihomo.yaml"))
+	config := readMCPFile(t, filepath.Join(".runtime", "mihomo", "config.yaml"))
 	if !strings.Contains(config, "DOMAIN-SUFFIX,huggingface.co,TempLine") || !strings.Contains(config, "name: TempLine") {
 		t.Fatalf("generated config missing custom rule or proxy group:\n%s", config)
 	}
@@ -1635,7 +1638,7 @@ func TestToolsCallConfigPatchDraftSupportsExternalRuleProviders(t *testing.T) {
 	if content["applied"] != true || content["valid"] != true {
 		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
-	config := readMCPFile(t, filepath.Join("generated", "mihomo.yaml"))
+	config := readMCPFile(t, filepath.Join(".runtime", "mihomo", "config.yaml"))
 	if !strings.Contains(config, "RULE-SET,US-Proxy,⚡ 自动选择") || !strings.Contains(config, "US-Proxy:") || !strings.Contains(config, "us_proxy.yaml") {
 		t.Fatalf("generated config missing external rule-provider:\n%s", config)
 	}
@@ -1656,7 +1659,7 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 	if content["applied"] != true || content["valid"] != true {
 		t.Fatalf("config_patch_apply content = %+v, want applied valid", content)
 	}
-	if _, err := os.Stat(filepath.Join("generated", "mihomo.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(".runtime", "mihomo", "config.yaml")); err != nil {
 		t.Fatalf("generated config missing after apply: %v", err)
 	}
 	if _, err := os.Stat("localclash-intent.json"); err != nil {
@@ -2413,6 +2416,7 @@ sleep 30
 				"config":            config,
 				"runtime_dir":       workDir,
 				"log_file":          filepath.Join(workDir, "mihomo.log"),
+				"strategy":          "process_restart",
 				"force_config_test": true,
 				"background":        false,
 			},
@@ -2432,6 +2436,149 @@ sleep 30
 	}
 	if got := strings.TrimSpace(readMCPFile(t, counter)); got != "1" {
 		t.Fatalf("forced config test count = %q, want one fresh -t run", got)
+	}
+}
+
+func TestMihomoAPIRequestToolUsesConfiguredController(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".runtime", "mihomo", "config.yaml")
+	var gotAuth string
+	var gotQuery string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotQuery = r.URL.RawQuery
+		if r.URL.Path != "/proxies" {
+			t.Fatalf("path = %q, want /proxies", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"proxies":{"香港-Vmess-ARGO":{"type":"Vmess"}}}`))
+	}))
+	defer api.Close()
+	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: test-secret\n")
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "mihomo_api_request",
+			"arguments": map[string]any{
+				"config": config,
+				"method": "GET",
+				"path":   "/proxies",
+				"query":  map[string]any{"name": "香港-Vmess-ARGO"},
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("mihomo_api_request returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["status_code"] != float64(http.StatusOK) {
+		t.Fatalf("content = %+v, want 200", content)
+	}
+	if gotAuth != "Bearer test-secret" {
+		t.Fatalf("authorization = %q, want bearer secret", gotAuth)
+	}
+	if !strings.Contains(gotQuery, "name=") {
+		t.Fatalf("query = %q, want name query", gotQuery)
+	}
+	jsonBody := content["json"].(map[string]any)
+	proxies := jsonBody["proxies"].(map[string]any)
+	if proxies["香港-Vmess-ARGO"] == nil {
+		t.Fatalf("json = %+v, want expected proxy node", jsonBody)
+	}
+}
+
+func TestMihomoLogsReadToolReadsBoundedHTTPStream(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".runtime", "mihomo", "config.yaml")
+	var gotAuth string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/logs" || r.URL.Query().Get("level") != "info" {
+			t.Fatalf("request = %s, want /logs?level=info", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"type":"info","payload":"first"}`+"\n"+`{"type":"info","payload":"second"}`+"\n")
+	}))
+	defer api.Close()
+	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: log-secret\n")
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "mihomo_logs_read",
+			"arguments": map[string]any{
+				"config":    config,
+				"transport": "http_stream",
+				"level":     "info",
+				"max_lines": 1,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("mihomo_logs_read returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["transport"] != "http_stream" || content["line_count"] != float64(1) || content["truncated"] != true {
+		t.Fatalf("content = %+v, want one truncated http_stream line", content)
+	}
+	if gotAuth != "Bearer log-secret" {
+		t.Fatalf("authorization = %q, want bearer secret", gotAuth)
+	}
+}
+
+func TestMihomoConfigTestToolRecordsAttestation(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(dir, "lc-mihomo-meta")
+	writeTestExecutable(t, core, `#!/bin/sh
+if [ "$1" = "-v" ]; then
+  echo Mihomo Meta test
+  exit 0
+fi
+for arg in "$@"; do
+  if [ "$arg" = "-t" ]; then
+    echo configuration test is successful
+    exit 0
+  fi
+done
+exit 9
+`)
+	runtimeDir := filepath.Join(dir, ".runtime", "mihomo")
+	config := filepath.Join(runtimeDir, "config.candidate.yaml")
+	attestation := filepath.Join(runtimeDir, "config-test-attestation.json")
+	writeMCPFile(t, config, "external-controller: 127.0.0.1:9090\n")
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "mihomo_config_test",
+			"arguments": map[string]any{
+				"background":  false,
+				"core":        core,
+				"config":      config,
+				"runtime_dir": runtimeDir,
+				"attestation": attestation,
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("mihomo_config_test returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	if content["passed"] != true || content["recorded"] != true || content["config_sha256"] == "" {
+		t.Fatalf("content = %+v, want passing recorded config test", content)
+	}
+	if _, err := mihomotest.ReadAttestation(attestation); err != nil {
+		t.Fatalf("read attestation: %v", err)
 	}
 }
 
@@ -2743,7 +2890,7 @@ func TestRouterTakeoverApplyFailureMarksToolResultError(t *testing.T) {
 func TestRunRuntimeToolUsesBootstrapDiagnostics(t *testing.T) {
 	state := appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
-			GeneratedConfig:  "generated/mihomo.yaml",
+			GeneratedConfig:  ".runtime/mihomo/config.yaml",
 			MihomoRuntimeDir: ".runtime/mihomo",
 			CorePath:         "bin/lc-mihomo-meta",
 		},
@@ -3319,7 +3466,7 @@ proxies:
   - name: Direct
     type: direct
 `)
-	writeMCPFile(t, filepath.Join(root, "generated", "mihomo.yaml"), `
+	writeMCPFile(t, filepath.Join(root, ".runtime", "mihomo", "config.yaml"), `
 proxies: []
 proxy-groups: []
 rules: []
@@ -3341,7 +3488,7 @@ core: smart
 			RuntimeRoot:         filepath.Join(root, ".runtime"),
 			RuleSourcesDir:      filepath.Join(root, "rule-sources"),
 			RulesCacheDir:       filepath.Join(root, ".runtime", "rules", "packs"),
-			GeneratedConfig:     filepath.Join(root, "generated", "mihomo.yaml"),
+			GeneratedConfig:     filepath.Join(root, ".runtime", "mihomo", "config.yaml"),
 			SubscriptionConfig:  filepath.Join(root, "localclash-subscriptions.json"),
 			SubscriptionPath:    filepath.Join(root, "subscription.gob"),
 			SubscriptionRuntime: filepath.Join(root, ".runtime", "subscriptions"),

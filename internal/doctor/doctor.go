@@ -67,7 +67,7 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 	if subscription.Status == statusOK {
 		checkSubscriptionProxyCount(&subscription)
 	}
-	config := checkConfigFile("generated_config", "generated/mihomo.yaml", opts.ConfigPath)
+	config := checkConfigFile("generated_config", ".runtime/mihomo/config.yaml", opts.ConfigPath)
 
 	report.add(core)
 	report.add(subscription)
@@ -100,7 +100,7 @@ func normalizeOptions(opts Options) Options {
 		opts.SubscriptionPath = "subscription.gob"
 	}
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = "generated/mihomo.yaml"
+		opts.ConfigPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.DashboardDir == "" {
 		opts.DashboardDir = ".runtime/mihomo/ui/zashboard"

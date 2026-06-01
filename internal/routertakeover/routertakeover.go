@@ -269,7 +269,7 @@ func normalizeOptions(opts Options) Options {
 		opts.RuntimeProfile = runtimeprofile.DefaultPath
 	}
 	if strings.TrimSpace(opts.ConfigPath) == "" {
-		opts.ConfigPath = "generated/mihomo.yaml"
+		opts.ConfigPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if strings.TrimSpace(opts.RuntimeDir) == "" {
 		opts.RuntimeDir = filepath.Join(".runtime", "mihomo")

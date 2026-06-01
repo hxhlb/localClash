@@ -3,6 +3,7 @@ package configinspect
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -378,7 +379,7 @@ func readConfigMap(path string) (map[string]any, error) {
 
 func defaultConfigPath(path string) string {
 	if strings.TrimSpace(path) == "" {
-		return "generated/mihomo.yaml"
+		return filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	return path
 }

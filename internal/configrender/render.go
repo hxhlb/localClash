@@ -559,7 +559,7 @@ func normalizeOptions(opts Options) Options {
 		opts.SourcePath = "subscription.gob"
 	}
 	if opts.OutputPath == "" {
-		opts.OutputPath = "generated/mihomo.yaml"
+		opts.OutputPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.RulesCacheDir == "" {
 		opts.RulesCacheDir = ".runtime/rules/packs"

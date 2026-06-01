@@ -88,7 +88,7 @@ Required evidence for the next reproduction:
 - `ps` output for localClash and Mihomo after boot.
 - localClash `runtime_status` and `router_takeover_status` after boot.
 - Presence and contents summary for `localclash-runtime.json`,
-  `generated/mihomo.yaml`, runtime PID files, and localClash MCP/service logs.
+  `.runtime/mihomo/config.yaml`, runtime PID files, and localClash MCP/service logs.
 - nft/firewall state showing whether localClash-owned takeover chains or rules
   are absent, duplicated, or partially applied.
 

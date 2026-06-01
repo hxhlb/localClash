@@ -37,7 +37,7 @@
 
 **4. 配置狀態、構建與 Patch 工作流**
 
-- `config_status`：看 `patches/*.json` registry、compiled `localclash-intent.json`、`generated/mihomo.yaml`、render readiness。預設輕量，`patches=true/resolve=true/detail=true` 才做重查或列 patch。
+- `config_status`：看 `patches/*.json` registry、compiled `localclash-intent.json`、`.runtime/mihomo/config.yaml`、render readiness。預設輕量，`patches=true/resolve=true/detail=true` 才做重查或列 patch。
 - `config_configure`：改核心、runtime profile、policy template；policy template 會 import 成 `patches/*.json`，再 build compiled intent。
 - `proxy_group_build`：建立出口組，例如 HK/JP/US/⚡ 自动选择。
 - `policy_group_build`：建立業務組，例如 Steam -> HK/JP/US。
@@ -46,7 +46,7 @@
 - `config_patch_get`：讀取一個 durable patch 的完整 overlay 與 hash。
 - `config_patch_draft`：用 `upsert_patch/remove_patch/set_patch_status/reorder_patch` 預覽 patch registry 操作，只保留一個 in-memory draft。
 - `config_patch_apply`：套用 current draft 或顯式 operations，寫入 `patches/*.json` 並重建 compiled intent / generated config。
-- `config_render`：從 durable patch registry 或 compiled intent 重新渲染 `generated/mihomo.yaml`。
+- `config_render`：從 durable patch registry 或 compiled intent 重新渲染 `.runtime/mihomo/config.yaml`。
 
 服務場景：這是現在的「patch registry first」模型。Agent 先構建候選 overlay，再 draft patch operation 給用戶/自己審核，最後 apply，不直接亂改 compiled artifacts。
 
@@ -59,10 +59,13 @@
 
 服務場景：回答「現在 Telegram 為什麼不走代理」、「Steam 最終落到哪個出口」、「是否已接管路由器網路」。
 
-**6. 執行型工具**
+**6. Mihomo Runtime API 與執行型工具**
 
 - `run_runtime`：啟動 Mihomo。
-- `restart_runtime`：先用 Mihomo validation cache 驗證 generated config，再 stop/start/status。適合 Agent 依賴代理路徑時使用；`force_config_test=true` 可強制跳過 cache。
+- `mihomo_config_test`：顯式執行 `mihomo -t`，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。
+- `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。
+- `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token，也不輸出 token。
+- `restart_runtime`：MCP 預設 hot reload。它只校對已通過 `mihomo_config_test` 的 config hash，然後呼叫 Mihomo API reload；若要 stop/start，必須顯式傳 `strategy=process_restart`。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。
 - `router_takeover_apply`：套用 localClash 管理的 OpenWrt runtime 接管規則。
 - `router_takeover_stop`：撤銷 localClash 管理的接管規則，不停止 Mihomo。
@@ -77,8 +80,9 @@
 4. 需要修改配置時走 `proxy_group_build` / `policy_group_build` / `custom_rules_build`
 5. 用 `config_patch_draft` 產生 current draft
 6. 用 `config_patch_apply` 套用
-7. 用 `config_render` 或直接由 apply 產生 generated config
-8. 經用戶確認後 `restart_runtime`；如果需要重新跑 Mihomo config test，傳 `force_config_test=true`
-9. 路由器接管只在明確確認後 `router_takeover_apply`
+7. 用 `config_render` 或直接由 apply 產生 `.runtime/mihomo/config.yaml`
+8. 用 `mihomo_config_test` 對即將載入的 config 做顯式驗證
+9. 經用戶確認後 `restart_runtime`；預設 hot reload，若需要進程重啟才傳 `strategy=process_restart`
+10. 路由器接管只在明確確認後 `router_takeover_apply`
 
 長任務現在的觀測入口是：工具返回 `task_id`、`log_file`、`status_file`，Agent 應該用 `nl_file` 持續讀 log，而不是等待 MCP 一次性返回。
