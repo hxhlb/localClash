@@ -398,6 +398,10 @@ MCP runtime tool:
   passing config hash used by hot reload.
 - `mihomo_api_request`: calls a bounded Mihomo controller API path through the
   configured local controller endpoint and secret. It rejects full URLs.
+- `mihomo_connections_read`: reads bounded Mihomo active connection snapshots
+  from the controller. The default snapshot mode uses `GET /connections/` once;
+  `mode=stream` reads bounded WebSocket frames from `/connections/` for live
+  connection observation.
 - `mihomo_logs_read`: reads a bounded batch of controller logs over WebSocket
   or HTTP streaming without exposing the controller token.
 - `restart_runtime`: defaults to hot reload for MCP. It verifies the current

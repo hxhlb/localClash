@@ -129,7 +129,7 @@ func TestToolsListIncludesCoreTools(t *testing.T) {
 	for _, tool := range result.Tools {
 		byName[tool.Name] = tool
 	}
-	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_draft", "config_patch_get", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "mihomo_api_request", "mihomo_config_test", "mihomo_logs_read", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
+	for _, name := range []string{"doctor", "environment_inspect", "config_configure", "config_status", "config_render", "config_patch_apply", "config_patch_draft", "config_patch_get", "proxy_group_build", "policy_group_build", "custom_rules_build", "rule_provider_build", "nl_file", "pack_rules_query", "pack_rules_prefetch", "pack_rules_read", "packs_list", "packs_get", "routing_explain", "subscription_nodes_list", "subscription_nodes_search", "runtime_profile_status", "runtime_status", "mihomo_api_request", "mihomo_connections_read", "mihomo_config_test", "mihomo_logs_read", "router_takeover_status", "subscriptions_status", "tools_list", "subscriptions_configure", "subscriptions_refresh", "run_runtime", "restart_runtime", "router_takeover_apply", "router_takeover_stop", "sed_file", "stop_runtime"} {
 		if byName[name].Name == "" {
 			t.Fatalf("missing tool %q", name)
 		}
@@ -156,6 +156,7 @@ func TestRegistrySafetyLevels(t *testing.T) {
 		"subscription_nodes_list":   SafeRead,
 		"subscription_nodes_search": SafeRead,
 		"runtime_status":            SafeRead,
+		"mihomo_connections_read":   SafeRead,
 		"mihomo_logs_read":          SafeRead,
 		"runtime_profile_status":    SafeRead,
 		"router_takeover_status":    SafeRead,
@@ -2488,6 +2489,61 @@ func TestMihomoAPIRequestToolUsesConfiguredController(t *testing.T) {
 	proxies := jsonBody["proxies"].(map[string]any)
 	if proxies["香港-Vmess-ARGO"] == nil {
 		t.Fatalf("json = %+v, want expected proxy node", jsonBody)
+	}
+}
+
+func TestMihomoConnectionsReadToolReadsSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	config := filepath.Join(dir, ".runtime", "mihomo", "config.yaml")
+	var gotAuth string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/connections/" {
+			t.Fatalf("path = %q, want /connections/", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{
+			"downloadTotal":10,
+			"uploadTotal":20,
+			"connections":[{
+				"id":"active-1",
+				"metadata":{"network":"tcp","sourceIP":"192.168.6.2","sourcePort":"50000","destinationPort":"443","host":"example.com"},
+				"chains":["香港-Vmess-ARGO","GLOBAL"],
+				"upload":5,
+				"download":6,
+				"rule":"RuleSet",
+				"rulePayload":"syncnext_SyncnextProxy"
+			}]
+		}`)
+	}))
+	defer api.Close()
+	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: conn-secret\n")
+
+	resp := callHandle(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "mihomo_connections_read",
+			"arguments": map[string]any{
+				"config": config,
+				"mode":   "snapshot",
+			},
+		},
+	})
+	if resp.Error != nil {
+		t.Fatalf("mihomo_connections_read returned JSON-RPC error: %+v", resp.Error)
+	}
+	result := marshalToolResult(t, resp.Result)
+	content := result.StructuredContent.(map[string]any)
+	latest := content["latest"].(map[string]any)
+	connections := latest["connections"].([]any)
+	connection := connections[0].(map[string]any)
+	if connection["selected_proxy"] != "香港-Vmess-ARGO" || connection["rule_payload"] != "syncnext_SyncnextProxy" {
+		t.Fatalf("connection = %+v, want selected proxy and rule payload", connection)
+	}
+	if gotAuth != "Bearer conn-secret" {
+		t.Fatalf("authorization = %q, want bearer secret", gotAuth)
 	}
 }
 

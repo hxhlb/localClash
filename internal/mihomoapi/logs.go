@@ -136,65 +136,16 @@ func (c *Client) readHTTPStreamLogs(ctx context.Context, opts LogsOptions, start
 }
 
 func (c *Client) readWebSocketLogs(ctx context.Context, opts LogsOptions, started time.Time) (LogsResult, error) {
-	host := c.Controller
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
-	if err != nil {
-		return LogsResult{}, err
-	}
-	defer conn.Close()
-	key, err := randomWebSocketKey()
-	if err != nil {
-		return LogsResult{}, err
-	}
-	path := "/logs"
 	q := url.Values{}
 	q.Set("level", opts.Level)
 	if opts.Format == "structured" {
 		q.Set("format", "structured")
 	}
-	if c.Secret != "" {
-		q.Set("token", c.Secret)
-	}
-	path += "?" + q.Encode()
-	request := "GET " + path + " HTTP/1.1\r\n" +
-		"Host: " + host + "\r\n" +
-		"Upgrade: websocket\r\n" +
-		"Connection: Upgrade\r\n" +
-		"Sec-WebSocket-Version: 13\r\n" +
-		"Sec-WebSocket-Key: " + key + "\r\n\r\n"
-	if _, err := io.WriteString(conn, request); err != nil {
-		return LogsResult{}, err
-	}
-	reader := bufio.NewReader(conn)
-	statusLine, err := reader.ReadString('\n')
+	conn, reader, err := c.openWebSocket(ctx, "/logs", q, "mihomo logs")
 	if err != nil {
 		return LogsResult{}, err
 	}
-	status, err := parseHTTPStatus(strings.TrimSpace(statusLine))
-	if err != nil {
-		return LogsResult{}, err
-	}
-	headers := http.Header{}
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return LogsResult{}, err
-		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if ok {
-			headers.Add(strings.TrimSpace(key), strings.TrimSpace(value))
-		}
-	}
-	if status != http.StatusSwitchingProtocols {
-		return LogsResult{}, fmt.Errorf("mihomo logs websocket handshake failed with status %d", status)
-	}
-	if got := headers.Get("Sec-WebSocket-Accept"); got != webSocketAccept(key) {
-		return LogsResult{}, fmt.Errorf("mihomo logs websocket handshake returned invalid accept header")
-	}
+	defer conn.Close()
 	result := LogsResult{Transport: TransportWebSocket, Level: opts.Level, Format: opts.Format}
 	for {
 		if deadline, ok := ctx.Deadline(); ok {

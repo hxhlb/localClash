@@ -547,6 +547,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callRuntimeProfileStatus(args)
 	case "mihomo_api_request":
 		return s.callMihomoAPIRequest(ctx, args)
+	case "mihomo_connections_read":
+		return s.callMihomoConnectionsRead(ctx, args)
 	case "mihomo_logs_read":
 		return s.callMihomoLogsRead(ctx, args)
 	case "mihomo_config_test":
@@ -2607,6 +2609,43 @@ func (s *Server) callMihomoAPIRequest(ctx context.Context, args json.RawMessage)
 	})
 	if err != nil {
 		return jsonToolResult(map[string]any{"ok": false, "error": err.Error(), "response": result})
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Mode           string `json:"mode"`
+		IntervalMS     int    `json:"interval_ms"`
+		DurationMS     int    `json:"duration_ms"`
+		MaxFrames      int    `json:"max_frames"`
+		MaxConnections int    `json:"max_connections"`
+		MaxBytes       int    `json:"max_bytes"`
+		IncludeRaw     bool   `json:"include_raw"`
+		Config         string `json:"config"`
+	}
+	if err := decodeToolInput(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Config == "" {
+		in.Config = s.state.Paths.GeneratedConfig
+	}
+	setDefault(&in.Config, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo", "config.yaml")))
+	client, err := mihomoapi.NewFromConfig(in.Config)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result, err := client.Connections(ctx, mihomoapi.ConnectionsOptions{
+		Mode:           in.Mode,
+		Interval:       time.Duration(in.IntervalMS) * time.Millisecond,
+		Duration:       time.Duration(in.DurationMS) * time.Millisecond,
+		MaxFrames:      in.MaxFrames,
+		MaxConnections: in.MaxConnections,
+		MaxBytes:       in.MaxBytes,
+		IncludeRaw:     in.IncludeRaw,
+	})
+	if err != nil {
+		return jsonToolResult(map[string]any{"ok": false, "error": err.Error()})
 	}
 	return jsonToolResult(result)
 }
