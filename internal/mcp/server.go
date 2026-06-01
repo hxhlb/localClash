@@ -2004,6 +2004,7 @@ func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, 
 
 func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
 	type subscriptionConfigureSourceInput struct {
+		URI string `json:"uri"`
 		URL string `json:"url"`
 	}
 	var in struct {
@@ -2019,13 +2020,17 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.SubscriptionConfig
 	}
-	urls := make([]string, 0, len(in.Sources))
+	uris := make([]string, 0, len(in.Sources))
 	for _, source := range in.Sources {
-		urls = append(urls, source.URL)
+		if strings.TrimSpace(source.URI) != "" {
+			uris = append(uris, source.URI)
+			continue
+		}
+		uris = append(uris, source.URL)
 	}
 	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
 		ConfigPath: in.Config,
-		URLs:       urls,
+		URIs:       uris,
 		Replace:    in.Replace,
 	})
 	if err != nil {

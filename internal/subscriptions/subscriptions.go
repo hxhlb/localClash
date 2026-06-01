@@ -27,10 +27,20 @@ const DefaultUserAgent = "clash-verge/v1.5.1"
 const sourceIDPrefix = "S-"
 const sourceIDHashLength = 8
 const refreshFetchConcurrency = 4
+const (
+	sourceTypeRemoteSubscription = "remote_subscription"
+	sourceTypeInlineProxyURIs    = "inline_proxy_uris"
+
+	subscriptionFormatMihomoYAML    = "mihomo_yaml"
+	subscriptionFormatProxyURILines = "proxy_uri_lines"
+)
 
 type Source struct {
-	ID  string `json:"id" yaml:"id"`
-	URL string `json:"url" yaml:"url"`
+	ID   string   `json:"id" yaml:"id"`
+	Type string   `json:"type,omitempty" yaml:"type,omitempty"`
+	URI  string   `json:"uri,omitempty" yaml:"uri,omitempty"`
+	URIs []string `json:"uris,omitempty" yaml:"uris,omitempty"`
+	URL  string   `json:"url,omitempty" yaml:"url,omitempty"` // legacy config key
 }
 
 type Config struct {
@@ -46,6 +56,7 @@ type StatusOptions struct {
 
 type ConfigureOptions struct {
 	ConfigPath string
+	URIs       []string
 	URLs       []string
 	Replace    *bool
 }
@@ -78,7 +89,10 @@ type StatusResult struct {
 
 type SourceStatus struct {
 	ID               string `json:"id"`
-	URL              string `json:"url"`
+	Type             string `json:"type"`
+	URI              string `json:"uri,omitempty"`
+	URL              string `json:"url,omitempty"`
+	URIHash          string `json:"uri_hash,omitempty"`
 	Artifact         string `json:"artifact"`
 	Exists           bool   `json:"exists"`
 	ProxiesCount     int    `json:"proxies_count,omitempty"`
@@ -105,14 +119,18 @@ type ConfigureResult struct {
 }
 
 type ConfiguredSource struct {
-	ID  string `json:"id"`
-	URL string `json:"url"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	URI     string `json:"uri,omitempty"`
+	URL     string `json:"url,omitempty"`
+	URIHash string `json:"uri_hash,omitempty"`
 }
 
 type GetResult struct {
 	Config     string             `json:"config"`
 	Configured bool               `json:"configured"`
 	Sources    []ConfiguredSource `json:"sources"`
+	URIs       []string           `json:"uris"`
 	URLs       []string           `json:"urls"`
 	Count      int                `json:"count"`
 	Message    string             `json:"message,omitempty"`
@@ -133,6 +151,8 @@ type RefreshSourceSummary struct {
 	ProxiesCount     int    `json:"proxies_count,omitempty"`
 	ProxyGroupsCount int    `json:"proxy_groups_count,omitempty"`
 	RulesCount       int    `json:"rules_count,omitempty"`
+	Type             string `json:"type"`
+	Format           string `json:"format,omitempty"`
 	Status           string `json:"status"`
 }
 
@@ -142,14 +162,16 @@ type RefreshArtifact struct {
 }
 
 type subscriptionDoc struct {
-	Data map[string]any
-	Raw  []byte
+	Data   map[string]any
+	Raw    []byte
+	Format string
 }
 
 type subscriptionArtifact struct {
 	Version int
 	Data    map[string]any
 	Raw     []byte
+	Format  string
 }
 
 var sourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -171,7 +193,7 @@ func Status(opts StatusOptions) (StatusResult, error) {
 	config, err := readConfig(opts.ConfigPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			result.Message = "subscription sources are not configured; ask the user for one or more subscription URLs, then run subscriptions_configure"
+			result.Message = "subscription sources are not configured; ask the user for one or more subscription URIs, then run subscriptions_configure"
 			result.Merged = summarizeArtifact(opts.MergedPath)
 			return result, nil
 		}
@@ -183,7 +205,10 @@ func Status(opts StatusOptions) (StatusResult, error) {
 		summary := summarizeArtifact(artifact)
 		result.Sources = append(result.Sources, SourceStatus{
 			ID:               source.ID,
-			URL:              MaskURL(source.URL),
+			Type:             sourceType(source),
+			URI:              MaskURI(sourcePrimaryURI(source)),
+			URL:              legacyURLForResult(source),
+			URIHash:          sourceURIHash(source),
 			Artifact:         artifact,
 			Exists:           summary.Exists,
 			ProxiesCount:     summary.ProxiesCount,
@@ -204,15 +229,27 @@ func Get(opts StatusOptions) (GetResult, error) {
 	config, err := readConfig(opts.ConfigPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			result.Message = "subscription sources are not configured; ask the user for one or more subscription URLs, then run subscriptions_configure"
+			result.Message = "subscription sources are not configured; ask the user for one or more subscription URIs, then run subscriptions_configure"
 			return result, nil
 		}
 		return GetResult{}, err
 	}
 	result.Configured = true
 	for _, source := range config.Sources {
-		result.Sources = append(result.Sources, ConfiguredSource{ID: source.ID, URL: source.URL})
-		result.URLs = append(result.URLs, source.URL)
+		uri := sourcePrimaryURI(source)
+		result.Sources = append(result.Sources, ConfiguredSource{
+			ID:      source.ID,
+			Type:    sourceType(source),
+			URI:     uri,
+			URL:     legacyURLForGet(source),
+			URIHash: sourceURIHash(source),
+		})
+		if uri != "" {
+			result.URIs = append(result.URIs, uri)
+		}
+		if sourceType(source) == sourceTypeRemoteSubscription {
+			result.URLs = append(result.URLs, uri)
+		}
 	}
 	result.Count = len(result.Sources)
 	return result, nil
@@ -223,10 +260,14 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 	if opts.Replace != nil && !*opts.Replace {
 		return ConfigureResult{}, fmt.Errorf("replace=false is not supported in this version")
 	}
-	if len(opts.URLs) == 0 {
-		return ConfigureResult{}, fmt.Errorf("urls is required")
+	rawURIs := opts.URIs
+	if len(rawURIs) == 0 {
+		rawURIs = opts.URLs
 	}
-	sources, err := SourcesFromURLs(opts.URLs)
+	if len(rawURIs) == 0 {
+		return ConfigureResult{}, fmt.Errorf("uris is required")
+	}
+	sources, err := SourcesFromURIs(rawURIs)
 	if err != nil {
 		return ConfigureResult{}, err
 	}
@@ -240,21 +281,31 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 		Message:    "Subscription sources configured. Run subscriptions_refresh to update local artifacts.",
 	}
 	for _, source := range sources {
-		result.Sources = append(result.Sources, ConfiguredSource{ID: source.ID, URL: MaskURL(source.URL)})
+		result.Sources = append(result.Sources, ConfiguredSource{
+			ID:      source.ID,
+			Type:    sourceType(source),
+			URI:     MaskURI(sourcePrimaryURI(source)),
+			URL:     legacyMaskedURL(source),
+			URIHash: sourceURIHash(source),
+		})
 	}
 	return result, nil
 }
 
 func SourcesFromURLs(rawURLs []string) ([]Source, error) {
-	sources := make([]Source, 0, len(rawURLs))
-	for i, raw := range rawURLs {
+	return SourcesFromURIs(rawURLs)
+}
+
+func SourcesFromURIs(rawURIs []string) ([]Source, error) {
+	inputs := make([]string, 0, len(rawURIs))
+	for i, raw := range rawURIs {
 		trimmed := strings.TrimSpace(raw)
 		if trimmed == "" {
-			return nil, fmt.Errorf("urls[%d] must not be empty", i)
+			return nil, fmt.Errorf("uris[%d] must not be empty", i)
 		}
-		sources = append(sources, Source{URL: trimmed})
+		inputs = append(inputs, trimmed)
 	}
-	return normalizeSources(sources)
+	return normalizeSourcesFromURIs(inputs)
 }
 
 func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
@@ -351,6 +402,8 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 			ProxiesCount:     summary.ProxiesCount,
 			ProxyGroupsCount: summary.ProxyGroupsCount,
 			RulesCount:       summary.RulesCount,
+			Type:             sourceType(source),
+			Format:           doc.Format,
 			Status:           status,
 		})
 	}
@@ -467,8 +520,8 @@ func refreshSelectedSources(ctx context.Context, sources []Source, selected map[
 }
 
 func refreshOneSource(ctx context.Context, source Source, opts RefreshOptions, stage func(string, map[string]any) func(error, map[string]any)) sourceRefreshOutcome {
-	finish := stage("fetch_source", map[string]any{"source_id": source.ID, "url": MaskURL(source.URL)})
-	doc, err := fetchSource(ctx, source, opts.UserAgent)
+	finish := stage("refresh_source", map[string]any{"source_id": source.ID, "type": sourceType(source), "uri": MaskURI(sourcePrimaryURI(source))})
+	doc, err := refreshSource(ctx, source, opts.UserAgent)
 	if err != nil {
 		finish(err, nil)
 		return sourceRefreshOutcome{sourceID: source.ID, err: err}
@@ -484,6 +537,7 @@ func refreshOneSource(ctx context.Context, source Source, opts RefreshOptions, s
 	summary := summarizeMap(doc.Data)
 	finish(nil, map[string]any{
 		"bytes":        len(doc.Raw),
+		"format":       doc.Format,
 		"proxies":      summary.ProxiesCount,
 		"proxy_groups": summary.ProxyGroupsCount,
 		"rules":        summary.RulesCount,
@@ -581,45 +635,128 @@ func writeConfig(path string, config Config) error {
 
 func normalizeSources(sources []Source) ([]Source, error) {
 	normalized := make([]Source, 0, len(sources))
-	seenCanonicalURL := map[string]bool{}
+	seenCanonicalURI := map[string]bool{}
 	usedIDs := map[string]bool{}
-	canonicalURLs := make([]string, 0, len(sources))
+	canonicalURIs := make([]string, 0, len(sources))
 	for i, source := range sources {
-		rawURL := strings.TrimSpace(source.URL)
-		canonicalURL, err := canonicalSubscriptionURL(rawURL)
+		canonicalURI, err := canonicalSourceURI(source)
 		if err != nil {
 			return nil, fmt.Errorf("sources[%d] %w", i, err)
 		}
-		if seenCanonicalURL[canonicalURL] {
-			return nil, fmt.Errorf("duplicate subscription URL at sources[%d]", i)
+		if seenCanonicalURI[canonicalURI] {
+			return nil, fmt.Errorf("duplicate subscription URI at sources[%d]", i)
 		}
-		seenCanonicalURL[canonicalURL] = true
-		canonicalURLs = append(canonicalURLs, canonicalURL)
+		seenCanonicalURI[canonicalURI] = true
+		canonicalURIs = append(canonicalURIs, canonicalURI)
 	}
 	for i, source := range sources {
-		id := sourceIDFromCanonicalURL(canonicalURLs[i], usedIDs)
+		id := sourceIDFromCanonicalURI(canonicalURIs[i], usedIDs)
 		usedIDs[id] = true
-		normalized = append(normalized, Source{
-			ID:  id,
-			URL: strings.TrimSpace(source.URL),
-		})
+		normalized = append(normalized, normalizeSourceForConfig(source, id))
 	}
 	return normalized, nil
 }
 
-func canonicalSubscriptionURL(rawURL string) (string, error) {
-	if rawURL == "" {
-		return "", fmt.Errorf("url is required")
+func normalizeSourcesFromURIs(rawURIs []string) ([]Source, error) {
+	var remoteSources []Source
+	var inlineURIs []string
+	seenRemote := map[string]bool{}
+	seenInline := map[string]bool{}
+	for i, rawURI := range rawURIs {
+		kind, canonical, err := classifyInputURI(rawURI)
+		if err != nil {
+			return nil, fmt.Errorf("uris[%d] %w", i, err)
+		}
+		switch kind {
+		case sourceTypeRemoteSubscription:
+			if seenRemote[canonical] {
+				continue
+			}
+			seenRemote[canonical] = true
+			remoteSources = append(remoteSources, Source{Type: sourceTypeRemoteSubscription, URI: strings.TrimSpace(rawURI)})
+		case sourceTypeInlineProxyURIs:
+			trimmed := strings.TrimSpace(rawURI)
+			if seenInline[trimmed] {
+				continue
+			}
+			seenInline[trimmed] = true
+			inlineURIs = append(inlineURIs, trimmed)
+		default:
+			return nil, fmt.Errorf("uris[%d] unsupported source type %q", i, kind)
+		}
 	}
-	parsed, err := url.Parse(rawURL)
+	sources := make([]Source, 0, len(remoteSources)+1)
+	sources = append(sources, remoteSources...)
+	if len(inlineURIs) > 0 {
+		sources = append(sources, Source{Type: sourceTypeInlineProxyURIs, URIs: inlineURIs})
+	}
+	return normalizeSources(sources)
+}
+
+func classifyInputURI(rawURI string) (string, string, error) {
+	trimmed := strings.TrimSpace(rawURI)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("uri is required")
+	}
+	scheme, rest, ok := strings.Cut(trimmed, "://")
+	if !ok {
+		return "", "", fmt.Errorf("uri must include a scheme")
+	}
+	scheme = strings.ToLower(scheme)
+	switch {
+	case scheme == "http" || scheme == "https":
+		canonical, err := canonicalRemoteSubscriptionURI(trimmed)
+		if err != nil {
+			return "", "", err
+		}
+		return sourceTypeRemoteSubscription, canonical, nil
+	case proxyURISchemes[scheme] && strings.TrimSpace(rest) != "":
+		return sourceTypeInlineProxyURIs, "proxy:" + trimmed, nil
+	default:
+		return "", "", fmt.Errorf("uri scheme %q is not supported; use http/https or an MVP proxy URI scheme", scheme)
+	}
+}
+
+func canonicalSourceURI(source Source) (string, error) {
+	switch sourceType(source) {
+	case sourceTypeRemoteSubscription:
+		return canonicalRemoteSubscriptionURI(sourcePrimaryURI(source))
+	case sourceTypeInlineProxyURIs:
+		if len(source.URIs) == 0 {
+			return "", fmt.Errorf("inline proxy URI source requires uris")
+		}
+		for i, uri := range source.URIs {
+			kind, _, err := classifyInputURI(uri)
+			if err != nil {
+				return "", fmt.Errorf("inline proxy URI %d is invalid: %w", i, err)
+			}
+			if kind != sourceTypeInlineProxyURIs {
+				return "", fmt.Errorf("inline proxy URI %d must use an MVP proxy URI scheme", i)
+			}
+		}
+		return "inline:" + strings.Join(source.URIs, "\n"), nil
+	default:
+		return "", fmt.Errorf("source type %q is not supported", sourceType(source))
+	}
+}
+
+func canonicalSubscriptionURL(rawURL string) (string, error) {
+	return canonicalRemoteSubscriptionURI(rawURL)
+}
+
+func canonicalRemoteSubscriptionURI(rawURI string) (string, error) {
+	if rawURI == "" {
+		return "", fmt.Errorf("uri is required")
+	}
+	parsed, err := url.Parse(rawURI)
 	if err != nil {
-		return "", fmt.Errorf("url is invalid")
+		return "", fmt.Errorf("uri is invalid")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("url must use http or https")
+		return "", fmt.Errorf("uri must use http or https")
 	}
 	if parsed.Host == "" {
-		return "", fmt.Errorf("url must include a host")
+		return "", fmt.Errorf("uri must include a host")
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
 	parsed.Host = strings.ToLower(parsed.Host)
@@ -628,7 +765,11 @@ func canonicalSubscriptionURL(rawURL string) (string, error) {
 }
 
 func sourceIDFromCanonicalURL(canonicalURL string, used map[string]bool) string {
-	sum := sha256.Sum256([]byte(canonicalURL))
+	return sourceIDFromCanonicalURI(canonicalURL, used)
+}
+
+func sourceIDFromCanonicalURI(canonicalURI string, used map[string]bool) string {
+	sum := sha256.Sum256([]byte(canonicalURI))
 	encoded := hex.EncodeToString(sum[:])
 	for length := sourceIDHashLength; length <= len(encoded); length += 2 {
 		id := sourceIDPrefix + encoded[:length]
@@ -646,20 +787,8 @@ func validateSource(source Source) error {
 	if !sourceIDPattern.MatchString(source.ID) {
 		return fmt.Errorf("source id %q is invalid; use only letters, digits, underscore, and hyphen", source.ID)
 	}
-	if source.URL == "" {
-		return fmt.Errorf("source %q url is required", source.ID)
-	}
-	parsed, err := url.Parse(source.URL)
-	if err != nil {
-		return fmt.Errorf("source %q url is invalid", source.ID)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return fmt.Errorf("source %q url must use http or https", source.ID)
-	}
-	if parsed.Host == "" {
-		return fmt.Errorf("source %q url must include a host", source.ID)
-	}
-	return nil
+	_, err := canonicalSourceURI(source)
+	return err
 }
 
 func selectedSourceIDs(sources []Source, ids []string) (map[string]bool, error) {
@@ -684,8 +813,19 @@ func selectedSourceIDs(sources []Source, ids []string) (map[string]bool, error) 
 	return selected, nil
 }
 
+func refreshSource(ctx context.Context, source Source, userAgent string) (subscriptionDoc, error) {
+	switch sourceType(source) {
+	case sourceTypeRemoteSubscription:
+		return fetchSource(ctx, source, userAgent)
+	case sourceTypeInlineProxyURIs:
+		return parseProxyURIList(source.ID, []byte(strings.Join(source.URIs, "\n")))
+	default:
+		return subscriptionDoc{}, fmt.Errorf("source %q type %q is not supported", source.ID, sourceType(source))
+	}
+}
+
 func fetchSource(ctx context.Context, source Source, userAgent string) (subscriptionDoc, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourcePrimaryURI(source), nil)
 	if err != nil {
 		return subscriptionDoc{}, fmt.Errorf("source %q request could not be created", source.ID)
 	}
@@ -704,12 +844,24 @@ func fetchSource(ctx context.Context, source Source, userAgent string) (subscrip
 	if err != nil {
 		return subscriptionDoc{}, fmt.Errorf("source %q response could not be read", source.ID)
 	}
-	doc, err := parseSubscription(source.ID, body)
+	doc, err := parseRemoteSubscription(source.ID, body)
 	if err != nil {
 		return subscriptionDoc{}, err
 	}
 	doc.Raw = append([]byte(nil), body...)
 	return doc, nil
+}
+
+func parseRemoteSubscription(sourceID string, data []byte) (subscriptionDoc, error) {
+	doc, yamlErr := parseSubscription(sourceID, data)
+	if yamlErr == nil {
+		return doc, nil
+	}
+	doc, uriErr := parseProxyURIList(sourceID, data)
+	if uriErr == nil {
+		return doc, nil
+	}
+	return subscriptionDoc{}, fmt.Errorf("source %q response is neither Mihomo YAML nor MVP proxy URI lines: yaml: %v; proxy_uri_lines: %v", sourceID, yamlErr, uriErr)
 }
 
 func parseSubscription(sourceID string, data []byte) (subscriptionDoc, error) {
@@ -737,7 +889,7 @@ func parseSubscription(sourceID string, data []byte) (subscriptionDoc, error) {
 			return subscriptionDoc{}, fmt.Errorf("source %q subscription contains a proxy without name", sourceID)
 		}
 	}
-	return subscriptionDoc{Data: doc}, nil
+	return subscriptionDoc{Data: doc, Format: subscriptionFormatMihomoYAML}, nil
 }
 
 func readSubscription(path string) (subscriptionDoc, error) {
@@ -756,7 +908,7 @@ func readSubscription(path string) (subscriptionDoc, error) {
 	if len(artifact.Data) == 0 {
 		return subscriptionDoc{}, fmt.Errorf("subscription artifact %q is empty; run localclash subscriptions refresh", path)
 	}
-	return subscriptionDoc{Data: artifact.Data, Raw: artifact.Raw}, nil
+	return subscriptionDoc{Data: artifact.Data, Raw: artifact.Raw, Format: artifact.Format}, nil
 }
 
 func writeSubscriptionArtifact(path string, doc subscriptionDoc) error {
@@ -768,7 +920,7 @@ func writeSubscriptionArtifact(path string, doc subscriptionDoc) error {
 	if err != nil {
 		return err
 	}
-	encodeErr := gob.NewEncoder(file).Encode(subscriptionArtifact{Version: 1, Data: doc.Data, Raw: doc.Raw})
+	encodeErr := gob.NewEncoder(file).Encode(subscriptionArtifact{Version: 1, Data: doc.Data, Raw: doc.Raw, Format: doc.Format})
 	closeErr := file.Close()
 	if encodeErr != nil {
 		_ = os.Remove(tmp)
@@ -857,9 +1009,18 @@ func summarizeMap(doc map[string]any) ArtifactSummary {
 }
 
 func MaskURL(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
+	return MaskURI(rawURL)
+}
+
+func MaskURI(rawURI string) string {
+	kind, _, err := classifyInputURI(rawURI)
+	if err == nil && kind == sourceTypeInlineProxyURIs {
+		scheme, _, _ := strings.Cut(strings.TrimSpace(rawURI), "://")
+		return strings.ToLower(scheme) + "://<redacted>"
+	}
+	parsed, err := url.Parse(rawURI)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "<invalid-url>"
+		return "<invalid-uri>"
 	}
 	path := parsed.EscapedPath()
 	if path == "" {
@@ -874,6 +1035,80 @@ func MaskURL(rawURL string) string {
 		masked += "?..."
 	}
 	return masked
+}
+
+func sourceType(source Source) string {
+	if source.Type != "" {
+		return source.Type
+	}
+	if source.URL != "" || source.URI != "" {
+		return sourceTypeRemoteSubscription
+	}
+	if len(source.URIs) > 0 {
+		return sourceTypeInlineProxyURIs
+	}
+	return ""
+}
+
+func sourcePrimaryURI(source Source) string {
+	if strings.TrimSpace(source.URI) != "" {
+		return strings.TrimSpace(source.URI)
+	}
+	if strings.TrimSpace(source.URL) != "" {
+		return strings.TrimSpace(source.URL)
+	}
+	if len(source.URIs) == 1 {
+		return strings.TrimSpace(source.URIs[0])
+	}
+	return ""
+}
+
+func normalizeSourceForConfig(source Source, id string) Source {
+	switch sourceType(source) {
+	case sourceTypeRemoteSubscription:
+		return Source{ID: id, Type: sourceTypeRemoteSubscription, URI: sourcePrimaryURI(source)}
+	case sourceTypeInlineProxyURIs:
+		uris := make([]string, 0, len(source.URIs))
+		seen := map[string]bool{}
+		for _, rawURI := range source.URIs {
+			uri := strings.TrimSpace(rawURI)
+			if uri == "" || seen[uri] {
+				continue
+			}
+			seen[uri] = true
+			uris = append(uris, uri)
+		}
+		return Source{ID: id, Type: sourceTypeInlineProxyURIs, URIs: uris}
+	default:
+		return Source{ID: id}
+	}
+}
+
+func sourceURIHash(source Source) string {
+	canonical, err := canonicalSourceURI(source)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])[:sourceIDHashLength]
+}
+
+func legacyURLForResult(source Source) string {
+	if sourceType(source) != sourceTypeRemoteSubscription {
+		return ""
+	}
+	return MaskURI(sourcePrimaryURI(source))
+}
+
+func legacyMaskedURL(source Source) string {
+	return legacyURLForResult(source)
+}
+
+func legacyURLForGet(source Source) string {
+	if sourceType(source) != sourceTypeRemoteSubscription {
+		return ""
+	}
+	return sourcePrimaryURI(source)
 }
 
 func artifactPath(runtimeDir, id string) string {

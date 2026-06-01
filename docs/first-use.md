@@ -7,8 +7,8 @@ commands with `rtk`; otherwise `go run . ...` is enough.
 ## Prerequisites
 
 - Go is installed and can build this module.
-- You have a Clash/Mihomo subscription URL.
-- The subscription URL is secret. Do not commit `subscription*.gob`,
+- You have a Clash/Mihomo subscription URI or proxy node URI list.
+- The subscription URI is secret. Do not commit `subscription*.gob`,
   `localclash-subscriptions.json`, `localclash-intent.json`, or `.runtime/`.
 
 ## 1. Download the Host Core
@@ -53,7 +53,7 @@ For the MCP-managed path, start the server and ask the agent to use
 go run . mcp
 ```
 
-The MCP path stores source URLs in `localclash-subscriptions.json` and produces
+The MCP path stores source URIs in `localclash-subscriptions.json` and produces
 the merged `subscription.gob`. When more than one source is configured, merged
 proxy names are prefixed with `[source-id]` so Dashboard and MCP selectors can
 show where each node came from. A single source keeps the provider's original

@@ -1,17 +1,26 @@
 # Subscription Inputs
 
-localClash currently treats a subscription source as a full Mihomo-compatible
-YAML document. The downloaded response must parse as YAML, must be a mapping,
-and must include a non-empty top-level `proxies` list. Each proxy entry must be
-a mapping with a non-empty `name`. The refresh path then stores per-source
-artifacts under `.runtime/subscriptions/` and merges them into the effective
-`subscription.gob`.
+localClash subscription input is a list of whitelisted URIs. Each URI must be
+one of:
+
+- `http://` or `https://` remote subscription URI
+- MVP proxy URI listed below
+
+Remote subscription responses are parsed as full Mihomo-compatible YAML first.
+If the response is not a usable Mihomo subscription YAML document, localClash
+then parses it as one proxy URI per line. Inline MVP proxy URI inputs are parsed
+directly as one proxy URI per line. In all cases, accepted input is normalized
+to a top-level `proxies` list, then stored under `.runtime/subscriptions/` and
+merged into the effective `subscription.gob`.
+
+URI deduplication is string-level only. localClash does not decode or compare
+proxy server fields, passwords, UUIDs, or node names when removing duplicate URI
+inputs.
 
 ## Proxy URI Import Scope
 
-Future subscription input refactoring may add proxy URI list import. Use the
-Mihomo Meta source checkout at `/Volumes/Data/Github/mihomo-Meta` as the
-reference for share-link parsing behavior. The relevant upstream parser is
+Use the Mihomo Meta source checkout at `/Volumes/Data/Github/mihomo-Meta` as
+the reference for share-link parsing behavior. The relevant upstream parser is
 `common/convert/converter.go`, with shared VMess/VLESS handling in
 `common/convert/v.go`.
 
@@ -31,11 +40,12 @@ MVP-supported proxy URI schemes:
 - `socks5://`
 - `socks5h://`
 
-MVP exclusions and notes:
+Exclusions and notes:
 
 - `http://` and `https://` are valid Mihomo proxy-node URI schemes only when
-  they appear in a clearly delimited proxy-node list. Exclude them from the MVP
-  scanner because arbitrary text commonly contains normal web URLs.
+  they appear in a clearly delimited proxy-node list. localClash does not treat
+  them as proxy URI inputs in the MVP because they are reserved for remote
+  subscription URIs.
 - `snell://` is not in Mihomo Meta's proxy URI parser. `snell` is a supported
   Mihomo YAML proxy `type`, but localClash should not treat `snell://` as an
   MVP proxy URI input unless a separate parser is intentionally added.

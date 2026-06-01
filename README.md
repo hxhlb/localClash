@@ -203,10 +203,10 @@ MCP subscription bootstrap tools:
 
 From a clean setup, an agent should call `subscriptions_status` first. If no
 sources are configured, it should ask the user for one or more subscription
-URLs, call `subscriptions_configure`, then call `subscriptions_refresh`.
+URIs, call `subscriptions_configure`, then call `subscriptions_refresh`.
 `subscription.gob` is the merged output used by the render pipeline, not the
 only source of truth. `localclash-subscriptions.json` contains sensitive
-subscription URLs and must not be committed. If a saved selector in
+subscription URIs and must not be committed. If a saved selector in
 `localclash-intent.json` still matches after refresh, localClash updates the selected
 nodes, derives `localclash-packs.gob`, and regenerates `generated/mihomo.yaml`.
 If exact `nodes` were selected and one of those nodes disappears, the tool
@@ -548,7 +548,7 @@ go run . subscription download --url "https://example.com/playlist?token=..." --
 
 The default User-Agent is `clash-verge/v1.5.1`. The downloaded subscription file is local data and should not be committed.
 
-Current subscription input constraints and the planned proxy URI MVP scope are
+Current subscription input constraints and the proxy URI MVP scope are
 documented in [Subscription Inputs](docs/subscription-inputs.md).
 
 ## Dashboard
