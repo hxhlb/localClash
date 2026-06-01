@@ -66,7 +66,7 @@ go run . config render --force
 go run . doctor
 ```
 
-`config render` writes `generated/mihomo.yaml`. `doctor` checks local files,
+`config render` writes `.runtime/mihomo/config.yaml`. `doctor` checks local files,
 dashboard state, proxy-group references, and runs Mihomo config validation.
 
 ## 5. Start Mihomo

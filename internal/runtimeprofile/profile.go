@@ -161,13 +161,13 @@ func StatusFor(path string) (Status, error) {
 	if file.Mode == ModeRouter {
 		status.RouterTakeoverRequired = true
 		status.NextActions = []string{
-			"call config_render when generated/mihomo.yaml is missing or stale",
+			"call config_render when .runtime/mihomo/config.yaml is missing or stale",
 			"call run_runtime after user confirmation to start Mihomo",
 			"call router_takeover_apply after user confirmation to capture router traffic",
 		}
 	} else {
 		status.NextActions = []string{
-			"call config_render when generated/mihomo.yaml is missing or stale",
+			"call config_render when .runtime/mihomo/config.yaml is missing or stale",
 			"call run_runtime after user confirmation to start Mihomo",
 		}
 	}

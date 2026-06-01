@@ -73,7 +73,7 @@ localclash run
 -> ensure core
 -> ensure subscription exists
 -> ensure rules cache and pack catalog
--> render generated/mihomo.yaml
+-> render .runtime/mihomo/config.yaml
 -> doctor, including Mihomo config validation
 -> start Mihomo runtime
 ```
@@ -208,7 +208,7 @@ URIs, call `subscriptions_configure`, then call `subscriptions_refresh`.
 only source of truth. `localclash-subscriptions.json` contains sensitive
 subscription URIs and must not be committed. If a saved selector in
 `localclash-intent.json` still matches after refresh, localClash updates the selected
-nodes, derives `localclash-packs.gob`, and regenerates `generated/mihomo.yaml`.
+nodes, derives `localclash-packs.gob`, and regenerates `.runtime/mihomo/config.yaml`.
 If exact `nodes` were selected and one of those nodes disappears, the tool
 reports `state: stale_exact_nodes` with `missing_nodes` and leaves the active
 generated config unchanged. New nodes are only reported in `node_diff.added`;
@@ -263,7 +263,7 @@ MCP config model:
 - `patches/*.json` is the durable source of truth for localClash routing
   strategy patches.
 - `localclash-intent.json`, `localclash-packs.gob`, and
-  `generated/mihomo.yaml` are compiled build artifacts.
+  `.runtime/mihomo/config.yaml` are compiled build artifacts.
 - `.runtime/backups/` contains apply/build backup history; drafts are process
   memory only and are not persisted under `.runtime/`.
 
@@ -289,7 +289,7 @@ MCP config tools:
   `patches: true` to include patch summaries, `resolve: true` when selected-node
   matches are needed, or `detail: true` when a full generated-summary/overlay
   audit is needed.
-- `config_render`: rebuild `generated/mihomo.yaml` from the current durable
+- `config_render`: rebuild `.runtime/mihomo/config.yaml` from the current durable
   patch registry, compiled `localclash-intent.json`, subscription, and runtime
   profile. If no registry exists, it can still render from an existing compiled
   intent. It does not start Mihomo.
@@ -306,7 +306,7 @@ MCP config tools:
   `apply_args`.
 - `config_patch_apply`: apply reviewed operations by mutating `patches/*.json`,
   compiling `localclash-intent.json`, deriving `localclash-packs.gob`, and
-  regenerating `generated/mihomo.yaml`.
+  regenerating `.runtime/mihomo/config.yaml`.
 
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from localClash-managed overlay config.
@@ -376,14 +376,14 @@ then draft a patch with desired `proxy_groups` and `custom_rules`. For terminal
 targets such as "xxx direct", skip proxy group creation and build custom rules
 with target `DIRECT`. For external provider routing such as adding a raw
 `US-Proxy` rule-provider URL, call `rule_provider_build`, then draft a patch
-with desired `rule_providers`; do not edit `generated/mihomo.yaml` directly.
+with desired `rule_providers`; do not edit `.runtime/mihomo/config.yaml` directly.
 
 Drafting does not overwrite active files, start or restart Mihomo, or apply
 router system changes. A new draft replaces the previous in-memory draft.
 After review, `config_patch_apply` verifies registry/base hashes, backs up
 replaced local artifacts, writes changed `patches/*.json`, compiles
 `localclash-intent.json`, derives `localclash-packs.gob`, and regenerates
-`generated/mihomo.yaml`. It still does not start or restart Mihomo; use
+`.runtime/mihomo/config.yaml`. It still does not start or restart Mihomo; use
 `run_runtime` for that confirmed step.
 The normal reviewed-change loop is:
 `config_status(patches=true)` → `config_patch_draft` → `config_patch_apply` →
@@ -391,13 +391,19 @@ The normal reviewed-change loop is:
 
 MCP runtime tool:
 
-- `run_runtime`: starts Mihomo from `generated/mihomo.yaml` in the background.
+- `run_runtime`: starts Mihomo from `.runtime/mihomo/config.yaml` in the background.
   If the effective subscription exists but the generated config is missing,
-  localClash renders `generated/mihomo.yaml` before starting runtime.
-- `restart_runtime`: validates/renders config, stops localClash-owned Mihomo
-  processes by managed core process name, and starts the selected core again in
-  one confirmed call. Use this when Mihomo is already running and the agent may
-  lose connectivity between a separate `stop_runtime` and `run_runtime`.
+  localClash renders `.runtime/mihomo/config.yaml` before starting runtime.
+- `mihomo_config_test`: runs explicit `mihomo -t` validation and records the
+  passing config hash used by hot reload.
+- `mihomo_api_request`: calls a bounded Mihomo controller API path through the
+  configured local controller endpoint and secret. It rejects full URLs.
+- `mihomo_logs_read`: reads a bounded batch of controller logs over WebSocket
+  or HTTP streaming without exposing the controller token.
+- `restart_runtime`: defaults to hot reload for MCP. It verifies the current
+  `.runtime/mihomo/config.yaml` hash against a prior `mihomo_config_test`
+  attestation before calling Mihomo `PUT /configs`. Use
+  `strategy: process_restart` for an explicit stop/start restart.
 - `stop_runtime`: stops Mihomo only when it is not still required by active
   router takeover. If `router_takeover_status.effective` is true, call
   `router_takeover_stop` first, or pass `force: true` only after explicit user
@@ -438,7 +444,7 @@ Minimal MCP closed loop:
 2. `config_configure` with `policy_template: minimal` when durable base intent
    should be recorded
 3. `config_status`
-4. `config_render` if `generated/mihomo.yaml` is missing or stale
+4. `config_render` if `.runtime/mihomo/config.yaml` is missing or stale
 5. `run_runtime`, or `restart_runtime` if Mihomo is already running
 6. `runtime_status`
 
@@ -579,7 +585,7 @@ Render a runtime Mihomo config from a downloaded subscription source and localCl
 go run . config render --force
 ```
 
-The default render path is `generated/mihomo.yaml`. The renderer treats the
+The default render path is `.runtime/mihomo/config.yaml`. The renderer treats the
 subscription as a proxy source only and owns the runtime rules, rule providers,
 proxy groups, proxies, and `x-localclash` metadata locally. Runtime-layer keys
 such as DNS, TUN, ports, sniffer, `allow-lan`, and `bind-address` come from the
@@ -596,7 +602,7 @@ packs, selected policy-template patches, and finally fallback.
 Test the generated config:
 
 ```bash
-./bin/darwin-arm64/lc-mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml -t
+./bin/darwin-arm64/lc-mihomo-meta -d .runtime/mihomo -f .runtime/mihomo/config.yaml -t
 ```
 
 Run the generated config:
@@ -608,7 +614,7 @@ go run . run
 By default this is equivalent to:
 
 ```bash
-./bin/darwin-arm64/lc-mihomo-meta -d .runtime/mihomo -f generated/mihomo.yaml
+./bin/darwin-arm64/lc-mihomo-meta -d .runtime/mihomo -f .runtime/mihomo/config.yaml
 ```
 
 Mihomo output is also appended to a dated log file under `.runtime/mihomo/logs/`, for example `.runtime/mihomo/logs/mihomo-2026-05-15.log`. Override the path with `--log`. Dated logs are retained for 7 days by default; use `--log-retention` to change this.
@@ -626,8 +632,9 @@ generated config, log file, external controller, and dashboard URL when
 available. Use `go run . status --json` for scripts. `stop` sends SIGTERM to
 managed `lc-mihomo-meta` / `lc-mihomo-smart` processes and removes the legacy
 PID file if present; use `--force` to send SIGKILL if the runtime does not stop
-before `--timeout`. `restart` validates the generated config before stopping
-the old managed process, then starts a new background runtime.
+before `--timeout`. CLI `restart` uses an explicit process restart unless
+`--strategy hot_reload` is supplied; MCP `restart_runtime` defaults to hot
+reload and requires a prior config-test attestation.
 The MCP `stop_runtime` tool adds an Agent safety guard: it refuses to stop
 Mihomo while localClash router takeover is effective unless `force: true` is
 explicitly supplied.

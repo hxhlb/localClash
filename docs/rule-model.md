@@ -16,7 +16,7 @@ compile localClash-owned policy data into a Mihomo runtime config with:
 - no cloud dependency
 - no sensitive config collection
 
-The web UI must edit localClash policy data, not `generated/mihomo.yaml`
+The web UI must edit localClash policy data, not `.runtime/mihomo/config.yaml`
 directly.
 
 ## Layers
@@ -172,7 +172,7 @@ Template patches may define:
 
 The web UI should present policy templates separately from optional rule packs.
 Changing the selected template changes the durable `localclash-intent.json` intent; it
-does not mutate `generated/mihomo.yaml` directly.
+does not mutate `.runtime/mihomo/config.yaml` directly.
 
 ### 5. Fallback
 
@@ -209,7 +209,7 @@ use them.
 
 ## Renderer Contract
 
-The renderer should compile inputs into `generated/mihomo.yaml` in this order:
+The renderer should compile inputs into `.runtime/mihomo/config.yaml` in this order:
 
 ```text
 subscription proxies

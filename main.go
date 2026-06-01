@@ -18,6 +18,7 @@ import (
 	"localclash/internal/dashboard"
 	"localclash/internal/doctor"
 	"localclash/internal/mcp"
+	"localclash/internal/mihomotest"
 	"localclash/internal/reset"
 	"localclash/internal/rules"
 	"localclash/internal/subdownload"
@@ -38,6 +39,8 @@ Usage:
   localclash config status --json
   localclash config apply-template --input config-request.json --json
   localclash config render --json
+  localclash mihomo config-test --json
+  localclash mihomo config-promote --json
   localclash runtime status --json
   localclash runtime start --json
   localclash runtime restart --json
@@ -91,7 +94,7 @@ Flags for dashboard download:
 
 Flags for config render:
   --source string   downloaded subscription gob (default "subscription.gob")
-  --output string   generated Mihomo config path (default "generated/mihomo.yaml")
+  --output string   generated Mihomo config path (default ".runtime/mihomo/config.yaml")
   --packs-selection string
                  packs selection gob; optional
   --rules-cache string
@@ -118,14 +121,14 @@ Flags for rules render:
 
 Flags for run:
   --core string     Mihomo core binary path (default from active runtime profile)
-  --config string   Mihomo runtime config path (default "generated/mihomo.yaml")
+  --config string   Mihomo runtime config path (default ".runtime/mihomo/config.yaml")
   --workdir string  Mihomo runtime data directory (default ".runtime/mihomo")
   --log string      Mihomo log file path (default "<workdir>/logs/mihomo-YYYY-MM-DD.log")
   --log-retention int
                  days of dated Mihomo logs to keep (default 7)
 
 Flags for status:
-  --config string   Mihomo runtime config path (default "generated/mihomo.yaml")
+  --config string   Mihomo runtime config path (default ".runtime/mihomo/config.yaml")
   --workdir string  Mihomo runtime data directory (default ".runtime/mihomo")
   --log string      Mihomo log file path (default "<workdir>/mihomo.log")
   --json            print machine-readable JSON status
@@ -138,17 +141,22 @@ Flags for stop:
 
 Flags for restart:
   --core string          Mihomo core binary path (default from active runtime profile)
-  --config string        Mihomo runtime config path (default "generated/mihomo.yaml")
+  --config string        Mihomo runtime config path (default ".runtime/mihomo/config.yaml")
   --workdir string       Mihomo runtime data directory (default ".runtime/mihomo")
   --log string           Mihomo log file path (default "<workdir>/mihomo.log")
+  --strategy string      restart strategy: process_restart or hot_reload (default process_restart)
+  --config-sha256 string expected config sha256 for hot_reload
+  --attestation string   passing mihomo config-test attestation for hot_reload
   --timeout duration     stop timeout before reporting failure (default 5s)
+  --reload-timeout duration
+                         hot reload API timeout (default 10s)
   --force                send SIGKILL if SIGTERM does not stop before timeout
   --json                 print machine-readable JSON result
 
 Flags for doctor:
   --core string          Mihomo core binary path (default from active runtime profile)
   --subscription string  downloaded subscription gob (default "subscription.gob")
-  --config string        generated Mihomo config path (default "generated/mihomo.yaml")
+  --config string        generated Mihomo config path (default ".runtime/mihomo/config.yaml")
   --dashboard string     zashboard directory (default ".runtime/mihomo/ui/zashboard")
   --workdir string       Mihomo runtime data directory for config test (default ".runtime/mihomo")
   --json                print machine-readable JSON report
@@ -201,6 +209,12 @@ func run(args []string) error {
 	}
 	if len(args) >= 2 && args[0] == "config" && args[1] == "render" {
 		return runConfigRender(args[2:], state)
+	}
+	if len(args) >= 2 && args[0] == "mihomo" && args[1] == "config-test" {
+		return runMihomoConfigTest(args[2:], state)
+	}
+	if len(args) >= 2 && args[0] == "mihomo" && args[1] == "config-promote" {
+		return runMihomoConfigPromote(args[2:], state)
 	}
 	if len(args) >= 1 && args[0] == "rules" {
 		return runRules(args[1:], state)
@@ -385,6 +399,77 @@ func runConfigRender(args []string, state appinit.RuntimeState) error {
 
 	fmt.Printf("rendered runtime/%s core/%s config to %s (%d proxies, %d rules)\n", result.RuntimeMode, result.Core, result.OutputPath, result.ProxyCount, result.RuleCount)
 	return nil
+}
+
+func runMihomoConfigTest(args []string, state appinit.RuntimeState) error {
+	fs := flag.NewFlagSet("mihomo config-test", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	var asJSON bool
+	var record bool
+	var timeout time.Duration
+	opts := mihomotest.TestOptions{}
+	fs.StringVar(&opts.CorePath, "core", state.Paths.CorePath, "Mihomo core binary path")
+	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "Mihomo config path")
+	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
+	fs.StringVar(&opts.AttestationPath, "attestation", "", "passing config test attestation path")
+	fs.StringVar(&opts.PromotedConfigPath, "promoted-config", "", "promoted config path to record in the attestation")
+	fs.BoolVar(&record, "record", true, "write passing config test attestation")
+	fs.DurationVar(&timeout, "timeout", 90*time.Second, "config test timeout")
+	fs.BoolVar(&asJSON, "json", false, "print machine-readable JSON result")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+	opts.Record = record
+	opts.Timeout = timeout
+	opts.CachePath = mihomotest.DefaultCachePath(opts.WorkDir)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+5*time.Second)
+	defer cancel()
+	result, err := mihomotest.Test(ctx, opts)
+	if asJSON {
+		if jsonErr := printJSON(result); jsonErr != nil {
+			return jsonErr
+		}
+	} else if result.Passed {
+		fmt.Printf("mihomo config test passed for %s sha256=%s\n", result.ConfigPath, result.ConfigSHA256)
+	} else {
+		fmt.Printf("mihomo config test failed for %s\n%s\n", result.ConfigPath, result.Output)
+	}
+	return err
+}
+
+func runMihomoConfigPromote(args []string, state appinit.RuntimeState) error {
+	fs := flag.NewFlagSet("mihomo config-promote", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	var candidate string
+	var promoted string
+	var attestation string
+	var asJSON bool
+	fs.StringVar(&candidate, "candidate", filepath.Join(state.Paths.MihomoRuntimeDir, "config.candidate.yaml"), "candidate config path")
+	fs.StringVar(&promoted, "config", state.Paths.GeneratedConfig, "promoted config path")
+	fs.StringVar(&attestation, "attestation", mihomotest.DefaultAttestationPath(state.Paths.MihomoRuntimeDir), "passing config test attestation path")
+	fs.BoolVar(&asJSON, "json", false, "print machine-readable JSON result")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected positional arguments: %v", fs.Args())
+	}
+	result, err := mihomotest.PromoteConfig(candidate, promoted, attestation)
+	if asJSON {
+		if jsonErr := printJSON(result); jsonErr != nil {
+			return jsonErr
+		}
+	} else if err == nil {
+		fmt.Printf("promoted mihomo config to %s sha256=%s\n", result.Promoted, result.ConfigSHA256)
+	}
+	return err
 }
 
 func runRules(args []string, state appinit.RuntimeState) error {
@@ -599,7 +684,11 @@ func runRestart(args []string, state appinit.RuntimeState) error {
 	fs.StringVar(&opts.ConfigPath, "config", state.Paths.GeneratedConfig, "Mihomo runtime config path")
 	fs.StringVar(&opts.WorkDir, "workdir", state.Paths.MihomoRuntimeDir, "Mihomo runtime data directory")
 	fs.StringVar(&opts.LogPath, "log", "", "Mihomo log file path")
+	fs.StringVar(&opts.Strategy, "strategy", "", "restart strategy: process_restart or hot_reload")
+	fs.StringVar(&opts.ConfigSHA256, "config-sha256", "", "expected config sha256 for hot_reload")
+	fs.StringVar(&opts.AttestationPath, "attestation", "", "mihomo config test attestation for hot_reload")
 	fs.DurationVar(&opts.StopTimeout, "timeout", 5*time.Second, "stop timeout before reporting failure")
+	fs.DurationVar(&opts.ReloadTimeout, "reload-timeout", 10*time.Second, "hot reload API timeout")
 	fs.BoolVar(&opts.ForceKill, "force", false, "send SIGKILL if the runtime does not exit before timeout")
 	fs.BoolVar(&asJSON, "json", false, "print machine-readable JSON result")
 

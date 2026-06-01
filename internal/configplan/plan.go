@@ -693,7 +693,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.SelectionPath = "localclash-packs.gob"
 	}
 	if opts.OutputPath == "" {
-		opts.OutputPath = "generated/mihomo.yaml"
+		opts.OutputPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.CorePath == "" {
 		opts.CorePath = activeRuntimeCorePath(opts.RuntimeProfilePath)

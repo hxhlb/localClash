@@ -28,6 +28,7 @@ import (
 	"localclash/internal/envinspect"
 	"localclash/internal/fileops"
 	"localclash/internal/localconfig"
+	"localclash/internal/mihomoapi"
 	"localclash/internal/mihomotest"
 	"localclash/internal/policytemplate"
 	"localclash/internal/routertakeover"
@@ -544,6 +545,12 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (toolResu
 		return s.callRuntimeStatus(args)
 	case "runtime_profile_status":
 		return s.callRuntimeProfileStatus(args)
+	case "mihomo_api_request":
+		return s.callMihomoAPIRequest(ctx, args)
+	case "mihomo_logs_read":
+		return s.callMihomoLogsRead(ctx, args)
+	case "mihomo_config_test":
+		return s.callMaybeAsyncTool(ctx, "mihomo_config_test", args, s.callMihomoConfigTest)
 	case "router_takeover_status":
 		return s.callRouterTakeoverStatus(ctx, args)
 	case "routing_explain":
@@ -1205,7 +1212,7 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 	}
 	render := s.configRenderState(in, intent, generated.Present)
 	status := map[string]any{
-		"model":           "patches/*.json is source_of_truth; localclash-intent.json, localclash-packs.gob, and generated/mihomo.yaml are build_artifacts",
+		"model":           "patches/*.json is source_of_truth; localclash-intent.json, localclash-packs.gob, and .runtime/mihomo/config.yaml are build_artifacts",
 		"source_of_truth": inspectConfigFile(in.PatchesDir),
 		"compiled_intent": inspectConfigFile(in.Config),
 		"generated":       generated,
@@ -1328,9 +1335,9 @@ func configStatusNextActions(render configRenderState) []string {
 		return []string{"inspect intent.resolve_error in config_status and repair localclash-intent.json or subscription node references before rendering"}
 	}
 	if render.RecommendedTool != "" {
-		return []string{"call " + render.RecommendedTool + " to rebuild generated/mihomo.yaml from durable localClash state"}
+		return []string{"call " + render.RecommendedTool + " to rebuild .runtime/mihomo/config.yaml from durable localClash state"}
 	}
-	return []string{"generated/mihomo.yaml is present; use config_patch_draft for reviewed routing changes"}
+	return []string{".runtime/mihomo/config.yaml is present; use config_patch_draft for reviewed routing changes"}
 }
 
 func (s *Server) callConfigRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
@@ -1521,7 +1528,7 @@ func (s *Server) callConfigPatchDraft(ctx context.Context, args json.RawMessage)
 	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
 	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
 	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
-	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.Output, workspacePath(root, filepath.Join(".runtime", "mihomo", "config.yaml")))
 	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
 	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
 	if s.state != nil {
@@ -1634,7 +1641,7 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
 	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
 	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
-	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.Output, workspacePath(root, filepath.Join(".runtime", "mihomo", "config.yaml")))
 	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
 	setDefault(&in.BackupDir, workspacePath(root, filepath.Join(".runtime", "backups", "config-patch-apply")))
 	if s.state != nil {
@@ -2086,7 +2093,7 @@ func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMess
 	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
 	setDefault(&in.RulesCache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
 	setDefault(&in.RuntimeProfileConfig, workspacePath(root, runtimeprofile.DefaultPath))
-	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.Output, workspacePath(root, filepath.Join(".runtime", "mihomo", "config.yaml")))
 	if in.Selection == "" {
 		in.Selection = workspacePath(root, "localclash-packs.gob")
 	}
@@ -2511,6 +2518,9 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 		Core            string `json:"core"`
 		Foreground      bool   `json:"foreground"`
 		LogFile         string `json:"log_file"`
+		Strategy        string `json:"strategy"`
+		ConfigSHA256    string `json:"config_sha256"`
+		Attestation     string `json:"attestation"`
 		TimeoutMS       int    `json:"timeout_ms"`
 		Force           bool   `json:"force"`
 		ForceConfigTest bool   `json:"force_config_test"`
@@ -2544,6 +2554,10 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 		ConfigPath:          in.Config,
 		WorkDir:             in.RuntimeDir,
 		LogPath:             in.LogFile,
+		Strategy:            defaultString(in.Strategy, corerun.RestartStrategyHotReload),
+		ConfigSHA256:        in.ConfigSHA256,
+		AttestationPath:     in.Attestation,
+		ReloadTimeout:       time.Duration(in.TimeoutMS) * time.Millisecond,
 		ValidationCachePath: validationCachePath("", in.RuntimeDir),
 		ForceConfigTest:     in.ForceConfigTest,
 		StopTimeout:         time.Duration(in.TimeoutMS) * time.Millisecond,
@@ -2558,6 +2572,132 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 			result.Warnings = append(result.Warnings, "Runtime profile is router; restart_runtime only restarts Mihomo and does not capture router traffic.")
 			result.NextActions = append(result.NextActions, "call router_takeover_status to verify existing takeover rules, or router_takeover_apply after user confirmation if takeover is not active")
 		}
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callMihomoAPIRequest(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Method    string         `json:"method"`
+		Path      string         `json:"path"`
+		Query     map[string]any `json:"query"`
+		Body      any            `json:"body"`
+		TimeoutMS int            `json:"timeout_ms"`
+		MaxBytes  int64          `json:"max_bytes"`
+		Config    string         `json:"config"`
+	}
+	if err := decodeToolInput(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Config == "" {
+		in.Config = s.state.Paths.GeneratedConfig
+	}
+	setDefault(&in.Config, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo", "config.yaml")))
+	client, err := mihomoapi.NewFromConfig(in.Config)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result, err := client.Request(ctx, mihomoapi.RequestOptions{
+		Method:   in.Method,
+		Path:     in.Path,
+		Query:    in.Query,
+		Body:     in.Body,
+		Timeout:  time.Duration(in.TimeoutMS) * time.Millisecond,
+		MaxBytes: in.MaxBytes,
+	})
+	if err != nil {
+		return jsonToolResult(map[string]any{"ok": false, "error": err.Error(), "response": result})
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callMihomoLogsRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Level      string `json:"level"`
+		Format     string `json:"format"`
+		Transport  string `json:"transport"`
+		DurationMS int    `json:"duration_ms"`
+		MaxLines   int    `json:"max_lines"`
+		MaxBytes   int    `json:"max_bytes"`
+		Config     string `json:"config"`
+	}
+	if err := decodeToolInput(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil && in.Config == "" {
+		in.Config = s.state.Paths.GeneratedConfig
+	}
+	setDefault(&in.Config, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo", "config.yaml")))
+	client, err := mihomoapi.NewFromConfig(in.Config)
+	if err != nil {
+		return toolResult{}, err
+	}
+	result, err := client.Logs(ctx, mihomoapi.LogsOptions{
+		Level:     in.Level,
+		Format:    in.Format,
+		Transport: in.Transport,
+		Duration:  time.Duration(in.DurationMS) * time.Millisecond,
+		MaxLines:  in.MaxLines,
+		MaxBytes:  in.MaxBytes,
+	})
+	if err != nil {
+		return jsonToolResult(map[string]any{"ok": false, "error": err.Error()})
+	}
+	return jsonToolResult(result)
+}
+
+func (s *Server) callMihomoConfigTest(ctx context.Context, args json.RawMessage) (toolResult, error) {
+	var in struct {
+		Config         string `json:"config"`
+		RuntimeDir     string `json:"runtime_dir"`
+		Core           string `json:"core"`
+		Record         *bool  `json:"record"`
+		Attestation    string `json:"attestation"`
+		PromotedConfig string `json:"promoted_config"`
+		TimeoutMS      int    `json:"timeout_ms"`
+	}
+	if err := decodeToolInput(args, &in); err != nil {
+		return toolResult{}, err
+	}
+	if s.state != nil {
+		if in.Config == "" {
+			in.Config = s.state.Paths.GeneratedConfig
+		}
+		if in.RuntimeDir == "" {
+			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
+		}
+		if in.Core == "" {
+			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
+		}
+	}
+	setDefault(&in.Config, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo", "config.yaml")))
+	setDefault(&in.RuntimeDir, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo")))
+	if in.Core == "" {
+		in.Core = workspacePath(s.workspaceRoot(), runtimeprofile.MetaCorePath)
+	}
+	record := true
+	if in.Record != nil {
+		record = *in.Record
+	}
+	timeout := 90 * time.Second
+	if in.TimeoutMS > 0 {
+		timeout = time.Duration(in.TimeoutMS) * time.Millisecond
+	}
+	result, err := mihomotest.Test(ctx, mihomotest.TestOptions{
+		ValidationOptions: mihomotest.ValidationOptions{
+			CorePath:   in.Core,
+			ConfigPath: in.Config,
+			WorkDir:    in.RuntimeDir,
+			CachePath:  validationCachePath("", in.RuntimeDir),
+			Timeout:    timeout,
+			Force:      true,
+		},
+		Record:             record,
+		AttestationPath:    in.Attestation,
+		PromotedConfigPath: in.PromotedConfig,
+	})
+	if err != nil {
+		return jsonToolResult(result)
 	}
 	return jsonToolResult(result)
 }
@@ -2671,7 +2811,7 @@ func runtimeErrorResult(message string) map[string]any {
 		"next_actions": []string{
 			"call subscriptions_status",
 			"call subscriptions_refresh if subscription.gob is unavailable or stale",
-			"call run_runtime again after generated/mihomo.yaml can be rendered",
+			"call run_runtime again after .runtime/mihomo/config.yaml can be rendered",
 		},
 		"warnings": []string{
 			"Starting or restarting the proxy runtime may temporarily interrupt network connectivity.",
@@ -2707,7 +2847,7 @@ func (s *Server) applyConfigToolDefaults(in *configToolInput) {
 	setDefault(&in.SubscriptionConfig, workspacePath(root, "localclash-subscriptions.json"))
 	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
 	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
-	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.Output, workspacePath(root, filepath.Join(".runtime", "mihomo", "config.yaml")))
 	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
 	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
 	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
@@ -2813,6 +2953,13 @@ func setDefault(value *string, fallback string) {
 	if strings.TrimSpace(*value) == "" && strings.TrimSpace(fallback) != "" {
 		*value = fallback
 	}
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func registryHasPatches(dir string) bool {
@@ -2932,7 +3079,7 @@ func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
 	setDefault(&in.Subscription, workspacePath(root, "subscription.gob"))
 	setDefault(&in.SubscriptionRuntime, workspacePath(root, filepath.Join(".runtime", "subscriptions")))
 	setDefault(&in.Selection, workspacePath(root, "localclash-packs.gob"))
-	setDefault(&in.Output, workspacePath(root, filepath.Join("generated", "mihomo.yaml")))
+	setDefault(&in.Output, workspacePath(root, filepath.Join(".runtime", "mihomo", "config.yaml")))
 	setDefault(&in.RuntimeDir, workspacePath(root, filepath.Join(".runtime", "mihomo")))
 	setDefault(&in.ValidationCache, validationCachePath(in.ValidationCache, in.RuntimeDir))
 
@@ -3161,7 +3308,7 @@ func configConfigureNextActions(status runtimeprofile.Status, effectiveSubscript
 		}
 	}
 	actions := []string{
-		"call config_render to rebuild generated/mihomo.yaml from durable localClash state",
+		"call config_render to rebuild .runtime/mihomo/config.yaml from durable localClash state",
 		"call runtime_status to inspect whether Mihomo is already running",
 		"call restart_runtime after user confirmation if Mihomo is already running and should load the updated generated config",
 		"call run_runtime after user confirmation if Mihomo is not running",

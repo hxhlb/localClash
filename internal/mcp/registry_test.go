@@ -57,7 +57,7 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["config_patch_apply"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_patch_apply safety = %q, want %q", byName["config_patch_apply"].SafetyLevel, SafeWrite)
 	}
-	if !strings.Contains(byName["config_patch_apply"].Description, "generated/mihomo.yaml") {
+	if !strings.Contains(byName["config_patch_apply"].Description, ".runtime/mihomo/config.yaml") {
 		t.Fatalf("config_patch_apply description should mention generated config: %q", byName["config_patch_apply"].Description)
 	}
 	if byName["config_patch_draft"].SafetyLevel != SafeWrite {
@@ -68,6 +68,15 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	}
 	if byName["config_render"].SafetyLevel != SafeWrite {
 		t.Fatalf("config_render safety = %q, want %q", byName["config_render"].SafetyLevel, SafeWrite)
+	}
+	if byName["mihomo_logs_read"].SafetyLevel != SafeRead {
+		t.Fatalf("mihomo_logs_read safety = %q, want %q", byName["mihomo_logs_read"].SafetyLevel, SafeRead)
+	}
+	if byName["mihomo_api_request"].SafetyLevel != SafeWrite {
+		t.Fatalf("mihomo_api_request safety = %q, want %q", byName["mihomo_api_request"].SafetyLevel, SafeWrite)
+	}
+	if byName["mihomo_config_test"].SafetyLevel != SafeWrite {
+		t.Fatalf("mihomo_config_test safety = %q, want %q", byName["mihomo_config_test"].SafetyLevel, SafeWrite)
 	}
 	if byName["proxy_group_build"].SafetyLevel != SafeWrite {
 		t.Fatalf("proxy_group_build safety = %q, want %q", byName["proxy_group_build"].SafetyLevel, SafeWrite)
@@ -117,8 +126,8 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if !strings.Contains(byName["run_runtime"].Description, "network connectivity") || !strings.Contains(byName["run_runtime"].Description, "Agent itself") {
 		t.Fatalf("run_runtime description missing network risk: %q", byName["run_runtime"].Description)
 	}
-	if !strings.Contains(byName["restart_runtime"].Description, "instead of stop_runtime then run_runtime") {
-		t.Fatalf("restart_runtime description missing chain guidance: %q", byName["restart_runtime"].Description)
+	if !strings.Contains(byName["restart_runtime"].Description, "hot reload") || !strings.Contains(byName["restart_runtime"].Description, "process restart") {
+		t.Fatalf("restart_runtime description missing reload strategy guidance: %q", byName["restart_runtime"].Description)
 	}
 	for _, name := range []string{"config_base_inspect", "config_intent_inspect", "config_overlay_inspect", "config_draft_apply", "config_draft_render", "config_test", "config_plan_apply", "config_plan_render", "inspect_generated_config", "rules_adapt", "rules_render", "switch_proxy_group", "apply_router_config"} {
 		if byName[name].Name != "" {

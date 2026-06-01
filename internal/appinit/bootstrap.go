@@ -134,9 +134,6 @@ func normalizeOptions(opts Options) Options {
 	if strings.TrimSpace(opts.RulesCacheDir) == "" {
 		opts.RulesCacheDir = filepath.Join(opts.RuntimeRoot, "rules", "packs")
 	}
-	if strings.TrimSpace(opts.GeneratedConfig) == "" {
-		opts.GeneratedConfig = defaultPath(baseDir, "generated/mihomo.yaml")
-	}
 	if strings.TrimSpace(opts.SubscriptionConfig) == "" {
 		opts.SubscriptionConfig = defaultPath(baseDir, "localclash-subscriptions.json")
 	}
@@ -148,6 +145,9 @@ func normalizeOptions(opts Options) Options {
 	}
 	if strings.TrimSpace(opts.MihomoRuntimeDir) == "" {
 		opts.MihomoRuntimeDir = filepath.Join(opts.RuntimeRoot, "mihomo")
+	}
+	if strings.TrimSpace(opts.GeneratedConfig) == "" {
+		opts.GeneratedConfig = filepath.Join(opts.MihomoRuntimeDir, "config.yaml")
 	}
 	if strings.TrimSpace(opts.PacksSelectionPath) == "" && fileExists(defaultPath(baseDir, "localclash-packs.gob")) {
 		opts.PacksSelectionPath = defaultPath(baseDir, "localclash-packs.gob")
@@ -202,6 +202,7 @@ func looksLikeWorkDir(dir string) bool {
 		"localclash-runtime.json",
 		"localclash-intent.json",
 		"subscription.gob",
+		filepath.Join(".runtime", "mihomo", "config.yaml"),
 		filepath.Join("generated", "mihomo.yaml"),
 		"policy-templates",
 		"rule-sources",
@@ -322,7 +323,7 @@ func inspectGeneratedConfig(state *RuntimeState, opts Options) {
 	if !state.Subscription.Available {
 		state.Config.Diagnostic = "generated config is missing and effective subscription is unavailable; run subscriptions_refresh before config_render"
 	} else {
-		state.Config.Diagnostic = "generated config is missing; run config_render to build generated/mihomo.yaml from durable localClash state"
+		state.Config.Diagnostic = "generated config is missing; run config_render to build .runtime/mihomo/config.yaml from durable localClash state"
 	}
 	state.addDiagnostic("generated_config", "warning", state.Config.Diagnostic)
 }
