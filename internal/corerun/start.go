@@ -184,7 +184,7 @@ func normalizeStartOptions(opts StartOptions) StartOptions {
 		opts.CorePath = runtimeprofile.MetaCorePath
 	}
 	if opts.ConfigPath == "" {
-		opts.ConfigPath = "generated/mihomo.yaml"
+		opts.ConfigPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.WorkDir == "" {
 		opts.WorkDir = ".runtime/mihomo"

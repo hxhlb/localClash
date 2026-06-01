@@ -127,7 +127,7 @@ func TestBootstrapDefaultsToDetectedRouterWorkDir(t *testing.T) {
 	wrongDir := t.TempDir()
 	routerDir := t.TempDir()
 	t.Chdir(wrongDir)
-	writeAppinitFile(t, filepath.Join(routerDir, "generated", "mihomo.yaml"), "mixed-port: 7890\n", 0o644)
+	writeAppinitFile(t, filepath.Join(routerDir, ".runtime", "mihomo", "config.yaml"), "mixed-port: 7890\n", 0o644)
 	oldCandidates := defaultWorkDirCandidates
 	defaultWorkDirCandidates = []string{routerDir}
 	t.Cleanup(func() {
@@ -139,7 +139,7 @@ func TestBootstrapDefaultsToDetectedRouterWorkDir(t *testing.T) {
 	if state.Paths.MihomoRuntimeDir != filepath.Join(routerDir, ".runtime", "mihomo") {
 		t.Fatalf("mihomo runtime dir = %q, want detected router workdir", state.Paths.MihomoRuntimeDir)
 	}
-	if state.Paths.GeneratedConfig != filepath.Join(routerDir, "generated", "mihomo.yaml") {
+	if state.Paths.GeneratedConfig != filepath.Join(routerDir, ".runtime", "mihomo", "config.yaml") {
 		t.Fatalf("generated config = %q, want detected router workdir", state.Paths.GeneratedConfig)
 	}
 	if got := defaultWorkDirPath(state.Paths.RuntimeRoot, "localclash-intent.json"); got != filepath.Join(routerDir, "localclash-intent.json") {

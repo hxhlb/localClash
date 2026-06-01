@@ -219,7 +219,7 @@ func PackListGuidance() []string {
 	return []string{
 		"packs_list lists available catalog packs, not currently active routing policy.",
 		"The pack target field is the pack's default/recommended render target from the catalog. It is not evidence that the pack is currently configured.",
-		"Use config_status to inspect active localclash-intent.json intent and generated/mihomo.yaml overlay before claiming a pack is configured.",
+		"Use config_status to inspect active localclash-intent.json intent and .runtime/mihomo/config.yaml overlay before claiming a pack is configured.",
 	}
 }
 

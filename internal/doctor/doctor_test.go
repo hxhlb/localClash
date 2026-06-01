@@ -103,14 +103,14 @@ func TestCheckConfigFileMissingPathIncludesResolvedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	check := checkConfigFile("generated_config", "generated config", filepath.Join("generated", "mihomo.yaml"))
+	check := checkConfigFile("generated_config", "generated config", filepath.Join(".runtime", "mihomo", "config.yaml"))
 	if check.Status != statusFail {
 		t.Fatalf("status = %s, want %s", check.Status, statusFail)
 	}
 	details := strings.Join(check.Details, "\n")
 	for _, want := range []string{
 		"working directory: " + dir,
-		"resolved path: " + filepath.Join(dir, "generated", "mihomo.yaml"),
+		"resolved path: " + filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
 	} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("details = %q, want %q", details, want)
@@ -128,7 +128,7 @@ func TestRunAlwaysIncludesWorkingDirectoryTree(t *testing.T) {
 	report, err := Run(context.Background(), Options{
 		CorePath:         filepath.Join(dir, "missing-core"),
 		SubscriptionPath: "subscription.yaml",
-		ConfigPath:       filepath.Join("generated", "mihomo.yaml"),
+		ConfigPath:       filepath.Join(".runtime", "mihomo", "config.yaml"),
 		DashboardDir:     filepath.Join(dir, "missing-dashboard"),
 		WorkDir:          filepath.Join(dir, ".runtime", "mihomo"),
 	})

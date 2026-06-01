@@ -1734,7 +1734,7 @@ func normalizeDraftOptions(opts DraftOptions) DraftOptions {
 		opts.SelectionPath = "localclash-packs.gob"
 	}
 	if opts.OutputPath == "" {
-		opts.OutputPath = filepath.Join("generated", "mihomo.yaml")
+		opts.OutputPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.gob"
@@ -1774,7 +1774,7 @@ func normalizeApplyOptions(opts ApplyOptions) ApplyOptions {
 		opts.SelectionPath = "localclash-packs.gob"
 	}
 	if opts.OutputPath == "" {
-		opts.OutputPath = filepath.Join("generated", "mihomo.yaml")
+		opts.OutputPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.gob"
@@ -1823,7 +1823,7 @@ func normalizeImportOptions(opts ImportTemplateOptions) ImportTemplateOptions {
 		opts.SelectionPath = "localclash-packs.gob"
 	}
 	if opts.OutputPath == "" {
-		opts.OutputPath = filepath.Join("generated", "mihomo.yaml")
+		opts.OutputPath = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.Subscription == "" {
 		opts.Subscription = "subscription.gob"

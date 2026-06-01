@@ -1,6 +1,6 @@
 # Mihomo API Hot Reload Development Plan
 
-Status: draft.
+Status: in progress on `codex/mihomo-hot-reload`.
 
 This document splits the subscription apply improvement into separate
 development tasks. The goal is to make config activation observable and explicit:
@@ -57,7 +57,8 @@ Required code areas:
 - `internal/corerun`: runtime start/restart default config path.
 - `internal/mcp`: tool defaults and restart/hot reload behavior.
 - LuCI helper: subscription setup and runtime control paths.
-- Docs/tests that still name `generated/mihomo.yaml`.
+- Docs/tests that still name legacy `generated/mihomo.yaml` outside reset or
+  backward-compatible workspace detection.
 
 ## Mihomo API MCP Tool
 
