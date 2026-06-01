@@ -548,6 +548,9 @@ go run . subscription download --url "https://example.com/playlist?token=..." --
 
 The default User-Agent is `clash-verge/v1.5.1`. The downloaded subscription file is local data and should not be committed.
 
+Current subscription input constraints and the planned proxy URI MVP scope are
+documented in [Subscription Inputs](docs/subscription-inputs.md).
+
 ## Dashboard
 
 Download the zashboard static UI for Mihomo runtime inspection:
