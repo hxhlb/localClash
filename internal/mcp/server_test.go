@@ -492,6 +492,13 @@ func TestMCPAsyncTaskLogPathCanBeReadByNLFile(t *testing.T) {
 	root, wrongDir, state := setupMCPWorkspaceRootFixture(t)
 	t.Chdir(wrongDir)
 	server := NewServerWithState(state)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			t.Fatalf("Shutdown error = %v", err)
+		}
+	}()
 
 	runResp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
