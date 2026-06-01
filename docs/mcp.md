@@ -52,7 +52,7 @@
 
 **5. 路由解釋與可理解性**
 
-- `routing_explain`：解釋某個服務、域名、pack、policy group、出口目前怎麼路由。
+- `routing_explain`：解釋某個服務、域名、pack、policy group、出口在 localClash compiled intent 裡應該怎麼路由。這是 config/intent evidence，不證明 Mihomo runtime 已載入，也不證明當前流量正在使用。
 - `runtime_profile_status`：看當前 Meta/Smart、normal/router 等 runtime profile。
 - `runtime_status`：看 Mihomo 是否運行、PID、controller/UI endpoint。
 - `router_takeover_status`：看 OpenWrt firewall/nft/DNS hijack/fwmark/TUN 接管狀態。
@@ -63,8 +63,8 @@
 
 - `run_runtime`：啟動 Mihomo。
 - `mihomo_config_test`：顯式執行 `mihomo -t`，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。
-- `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。
-- `mihomo_connections_read`：讀取 bounded Mihomo active connection snapshot；預設用 `GET /connections/` 做一次性觀測，`mode=stream` 才使用 WebSocket `/connections/` 讀取有限幀。用於回答當前連接、命中規則與 selected proxy chain。
+- `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。推薦用 `/version`、`/configs`、`/rules`、`/providers/rules`、`/proxies` 查 loaded runtime evidence；`/connections/` 存在，但 active connection 摘要優先用 `mihomo_connections_read`。
+- `mihomo_connections_read`：讀取 bounded Mihomo active connection snapshot；預設用 `GET /connections/` 做一次性觀測，`mode=stream` 才使用 WebSocket `/connections/` 讀取有限幀。用於回答「當前活躍連接」的命中規則與 selected proxy chain；沒有某個 domain 的 active connection，不代表未來連接不會匹配該規則。
 - `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token，也不輸出 token。
 - `restart_runtime`：MCP 預設 hot reload。它只校對已通過 `mihomo_config_test` 的 config hash，然後呼叫 Mihomo `PUT /configs`。Mihomo reload 是同步長操作；request timeout 只能表示結果不確定，不等於 reload 失敗。工具不做配置語義驗證，Agent 應根據本次改動用 `mihomo_api_request` 查 `/rules`、`/providers/rules`、`/proxies` 或 `/configs`。若要 stop/start，必須顯式傳 `strategy=process_restart`。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。
@@ -74,6 +74,13 @@
 服務場景：真正改變運行狀態或路由器網路狀態，所以是 `confirm_required`。這組現在也會輸出階段性 task log，Agent 可以追 `stop -> start -> status` 或 takeover script/verify 的進度。
 
 **推薦 Agent 流程**
+
+**Runtime evidence ladder**
+
+1. `routing_explain`：配置意圖，回答「localClash 編譯後應該怎麼走」。
+2. `mihomo_api_request`：已載入 runtime，查 `/rules`、`/providers/rules`、`/proxies`、`/configs`。
+3. `mihomo_connections_read`：active data plane，查目前連接實際命中的 rule / selected proxy chain。
+4. `mihomo_logs_read` 或製造新流量：當沒有 active connection，但需要 runtime evidence 時使用。
 
 1. `tools_list` + `environment_inspect`
 2. `subscriptions_status` / `config_status` / `runtime_status`

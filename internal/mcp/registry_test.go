@@ -75,8 +75,17 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["mihomo_connections_read"].SafetyLevel != SafeRead {
 		t.Fatalf("mihomo_connections_read safety = %q, want %q", byName["mihomo_connections_read"].SafetyLevel, SafeRead)
 	}
+	if !strings.Contains(byName["mihomo_connections_read"].Description, "currently tracked active connections only") || !strings.Contains(byName["mihomo_connections_read"].Description, "absence of a domain is not proof") {
+		t.Fatalf("mihomo_connections_read description missing active-connection boundary: %q", byName["mihomo_connections_read"].Description)
+	}
+	if !strings.Contains(byName["routing_explain"].Description, "config/intent evidence") || !strings.Contains(byName["routing_explain"].Description, "not proof that Mihomo has loaded") {
+		t.Fatalf("routing_explain description missing intent/runtime boundary: %q", byName["routing_explain"].Description)
+	}
 	if byName["mihomo_api_request"].SafetyLevel != SafeWrite {
 		t.Fatalf("mihomo_api_request safety = %q, want %q", byName["mihomo_api_request"].SafetyLevel, SafeWrite)
+	}
+	if !strings.Contains(byName["mihomo_api_request"].Description, "/providers/rules") || !strings.Contains(byName["mihomo_api_request"].Description, "prefer mihomo_connections_read") {
+		t.Fatalf("mihomo_api_request description missing recommended runtime paths: %q", byName["mihomo_api_request"].Description)
 	}
 	if byName["mihomo_config_test"].SafetyLevel != SafeWrite {
 		t.Fatalf("mihomo_config_test safety = %q, want %q", byName["mihomo_config_test"].SafetyLevel, SafeWrite)

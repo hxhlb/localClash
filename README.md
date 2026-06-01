@@ -397,11 +397,16 @@ MCP runtime tool:
 - `mihomo_config_test`: runs explicit `mihomo -t` validation and records the
   passing config hash used by hot reload.
 - `mihomo_api_request`: calls a bounded Mihomo controller API path through the
-  configured local controller endpoint and secret. It rejects full URLs.
+  configured local controller endpoint and secret. It rejects full URLs. Use
+  `/version`, `/configs`, `/rules`, `/providers/rules`, and `/proxies` for
+  loaded-runtime evidence; prefer `mihomo_connections_read` over raw
+  `/connections/` for active traffic summaries.
 - `mihomo_connections_read`: reads bounded Mihomo active connection snapshots
   from the controller. The default snapshot mode uses `GET /connections/` once;
   `mode=stream` reads bounded WebSocket frames from `/connections/` for live
-  connection observation.
+  connection observation. This proves only currently tracked active
+  connections; absence of a domain is not proof of how a future connection will
+  route.
 - `mihomo_logs_read`: reads a bounded batch of controller logs over WebSocket
   or HTTP streaming without exposing the controller token.
 - `restart_runtime`: defaults to hot reload for MCP. It verifies the current
@@ -416,6 +421,17 @@ MCP runtime tool:
   router takeover. If `router_takeover_status.effective` is true, call
   `router_takeover_stop` first, or pass `force: true` only after explicit user
   confirmation.
+
+Agent verification ladder:
+
+1. Use `routing_explain` for localClash config intent: what the compiled intent
+   says should happen.
+2. Use `mihomo_api_request` read paths for loaded runtime state: what the
+   running Mihomo controller has loaded.
+3. Use `mihomo_connections_read` for active data-plane evidence: what current
+   tracked connections are actually doing.
+4. Use `mihomo_logs_read` or generate fresh traffic when no active connection
+   exists for the domain or scenario being investigated.
 
 localClash-owned Mihomo cores are downloaded with managed process names
 (`lc-mihomo-meta` and `lc-mihomo-smart`), and lifecycle tools scan those exact
