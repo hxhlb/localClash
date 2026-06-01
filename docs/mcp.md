@@ -1,9 +1,5 @@
 目前 localClash MCP 工具可以理解成 6 組，核心目標是讓 Agent 能「先觀察、再規劃、再生成、最後執行」，避免一上來就動路由器網路。
 
-Related field report:
-
-- [MCP Local Operation Friction Report - 2026-05-31](mcp-local-operation-friction-2026-05-31.md)
-
 **1. 自我發現與環境診斷**
 
 - `tools_list`：給不會展示 MCP registry 的 Agent 自己查工具清單。

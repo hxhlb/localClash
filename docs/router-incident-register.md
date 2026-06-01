@@ -122,8 +122,7 @@ Current explanation:
 
 Clean design requirement:
 
-- See `docs/router-takeover-restore-requirements.md` for the development
-  requirements that split same-boot repair from explicit boot auto-restore.
+- Split same-boot repair from explicit boot auto-restore.
 - Preserve the safety boundary that runtime takeover rules are not persistent
   firewall configuration.
 - Split recovery into two explicit modes:
