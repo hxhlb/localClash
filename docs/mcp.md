@@ -65,7 +65,7 @@
 - `mihomo_config_test`：顯式執行 `mihomo -t`，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。
 - `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。
 - `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token，也不輸出 token。
-- `restart_runtime`：MCP 預設 hot reload。它只校對已通過 `mihomo_config_test` 的 config hash，然後呼叫 Mihomo API reload；若要 stop/start，必須顯式傳 `strategy=process_restart`。
+- `restart_runtime`：MCP 預設 hot reload。它只校對已通過 `mihomo_config_test` 的 config hash，然後呼叫 Mihomo `PUT /configs`。Mihomo reload 是同步長操作；request timeout 只能表示結果不確定，不等於 reload 失敗。工具不做配置語義驗證，Agent 應根據本次改動用 `mihomo_api_request` 查 `/rules`、`/providers/rules`、`/proxies` 或 `/configs`。若要 stop/start，必須顯式傳 `strategy=process_restart`。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。
 - `router_takeover_apply`：套用 localClash 管理的 OpenWrt runtime 接管規則。
 - `router_takeover_stop`：撤銷 localClash 管理的接管規則，不停止 Mihomo。
@@ -83,6 +83,7 @@
 7. 用 `config_render` 或直接由 apply 產生 `.runtime/mihomo/config.yaml`
 8. 用 `mihomo_config_test` 對即將載入的 config 做顯式驗證
 9. 經用戶確認後 `restart_runtime`；預設 hot reload，若需要進程重啟才傳 `strategy=process_restart`
-10. 路由器接管只在明確確認後 `router_takeover_apply`
+10. 若 hot reload timeout，視為 `indeterminate`，不要推斷失敗或自動 process restart；按本次改動語義用 `mihomo_api_request` 做追查
+11. 路由器接管只在明確確認後 `router_takeover_apply`
 
 長任務現在的觀測入口是：工具返回 `task_id`、`log_file`、`status_file`，Agent 應該用 `nl_file` 持續讀 log，而不是等待 MCP 一次性返回。
