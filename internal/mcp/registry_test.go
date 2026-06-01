@@ -72,6 +72,9 @@ func TestRegistryIncludesSafetyLevels(t *testing.T) {
 	if byName["mihomo_logs_read"].SafetyLevel != SafeRead {
 		t.Fatalf("mihomo_logs_read safety = %q, want %q", byName["mihomo_logs_read"].SafetyLevel, SafeRead)
 	}
+	if byName["mihomo_connections_read"].SafetyLevel != SafeRead {
+		t.Fatalf("mihomo_connections_read safety = %q, want %q", byName["mihomo_connections_read"].SafetyLevel, SafeRead)
+	}
 	if byName["mihomo_api_request"].SafetyLevel != SafeWrite {
 		t.Fatalf("mihomo_api_request safety = %q, want %q", byName["mihomo_api_request"].SafetyLevel, SafeWrite)
 	}

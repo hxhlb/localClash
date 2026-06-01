@@ -65,6 +65,7 @@ func Registry() []Tool {
 		{Name: "runtime_profile_status", SafetyLevel: SafeRead, Description: "Inspect the active Mihomo runtime profile and its safe summary without exposing proxy credentials."},
 		{Name: "subscriptions_status", SafetyLevel: SafeRead, Description: "Inspect configured subscription sources and local effective subscription state."},
 		{Name: "runtime_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned Mihomo runtime processes by managed core process name without changing runtime state."},
+		{Name: "mihomo_connections_read", SafetyLevel: SafeRead, Description: "Read bounded Mihomo active connection snapshots from the controller over HTTP or WebSocket without exposing the controller token. Use this to inspect current connection routing, selected proxy chains, and matched rules."},
 		{Name: "mihomo_logs_read", SafetyLevel: SafeRead, Description: "Read a bounded batch of Mihomo controller logs over WebSocket or HTTP streaming without exposing the controller token."},
 		{Name: "router_takeover_status", SafetyLevel: SafeRead, Description: "Inspect localClash-owned OpenWrt router takeover runtime state: runtime profile, Mihomo runtime, fw4/nft chains, DNS hijack, fwmark route, and TUN device."},
 		{Name: "routing_explain", SafetyLevel: SafeRead, Description: "Explain active compiled routing intent for a service, domain, pack, policy group, or exit query. Reads localclash-intent.json, patch provenance, active packs, policy groups, proxy groups, custom rules, and cached rule matches; does not modify config or start runtime."},
@@ -418,6 +419,21 @@ func inputSchemaForTool(name string) map[string]any {
 				"config":     map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 			"required": []string{"path"},
+		}
+	case "mihomo_connections_read":
+		return map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"mode":            map[string]any{"type": "string", "enum": []string{"snapshot", "stream"}, "description": "Connection read mode. snapshot performs one GET /connections/ request. stream reads bounded WebSocket frames from /connections/. Defaults to snapshot."},
+				"interval_ms":     map[string]any{"type": "integer", "minimum": 1, "description": "WebSocket stream interval in milliseconds. Only used for mode=stream. Defaults to 1000."},
+				"duration_ms":     map[string]any{"type": "integer", "minimum": 1, "description": "Maximum request or stream collection duration. Defaults to 3000."},
+				"max_frames":      map[string]any{"type": "integer", "minimum": 1, "description": "Maximum WebSocket frames to return for mode=stream. Defaults to 3."},
+				"max_connections": map[string]any{"type": "integer", "minimum": 1, "description": "Maximum active connections to include per snapshot. Defaults to 200."},
+				"max_bytes":       map[string]any{"type": "integer", "minimum": 1, "description": "Maximum bytes to read from Mihomo. Defaults to 262144."},
+				"include_raw":     map[string]any{"type": "boolean", "description": "Include raw Mihomo connection snapshots in returned frames. Defaults to false."},
+				"config":          map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
+			},
 		}
 	case "mihomo_logs_read":
 		return map[string]any{

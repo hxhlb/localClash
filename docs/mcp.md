@@ -64,6 +64,7 @@
 - `run_runtime`：啟動 Mihomo。
 - `mihomo_config_test`：顯式執行 `mihomo -t`，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。
 - `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。
+- `mihomo_connections_read`：讀取 bounded Mihomo active connection snapshot；預設用 `GET /connections/` 做一次性觀測，`mode=stream` 才使用 WebSocket `/connections/` 讀取有限幀。用於回答當前連接、命中規則與 selected proxy chain。
 - `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token，也不輸出 token。
 - `restart_runtime`：MCP 預設 hot reload。它只校對已通過 `mihomo_config_test` 的 config hash，然後呼叫 Mihomo `PUT /configs`。Mihomo reload 是同步長操作；request timeout 只能表示結果不確定，不等於 reload 失敗。工具不做配置語義驗證，Agent 應根據本次改動用 `mihomo_api_request` 查 `/rules`、`/providers/rules`、`/proxies` 或 `/configs`。若要 stop/start，必須顯式傳 `strategy=process_restart`。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。

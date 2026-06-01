@@ -159,6 +159,69 @@ func (c *Client) requestURL(path string, query map[string]any) string {
 	return u.String()
 }
 
+func (c *Client) openWebSocket(ctx context.Context, path string, query url.Values, errorPrefix string) (net.Conn, *bufio.Reader, error) {
+	host := c.Controller
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
+	if err != nil {
+		return nil, nil, err
+	}
+	closeOnError := true
+	defer func() {
+		if closeOnError {
+			_ = conn.Close()
+		}
+	}()
+	key, err := randomWebSocketKey()
+	if err != nil {
+		return nil, nil, err
+	}
+	if c.Secret != "" {
+		query.Set("token", c.Secret)
+	}
+	u := url.URL{Path: path, RawQuery: query.Encode()}
+	request := "GET " + u.RequestURI() + " HTTP/1.1\r\n" +
+		"Host: " + host + "\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Version: 13\r\n" +
+		"Sec-WebSocket-Key: " + key + "\r\n\r\n"
+	if _, err := io.WriteString(conn, request); err != nil {
+		return nil, nil, err
+	}
+	reader := bufio.NewReader(conn)
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, nil, err
+	}
+	status, err := parseHTTPStatus(strings.TrimSpace(statusLine))
+	if err != nil {
+		return nil, nil, err
+	}
+	headers := http.Header{}
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, nil, err
+		}
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			break
+		}
+		headerKey, value, ok := strings.Cut(line, ":")
+		if ok {
+			headers.Add(strings.TrimSpace(headerKey), strings.TrimSpace(value))
+		}
+	}
+	if status != http.StatusSwitchingProtocols {
+		return nil, nil, fmt.Errorf("%s websocket handshake failed with status %d", errorPrefix, status)
+	}
+	if got := headers.Get("Sec-WebSocket-Accept"); got != webSocketAccept(key) {
+		return nil, nil, fmt.Errorf("%s websocket handshake returned invalid accept header", errorPrefix)
+	}
+	closeOnError = false
+	return conn, reader, nil
+}
+
 func encodeBody(body any) (io.Reader, error) {
 	if body == nil {
 		return nil, nil
