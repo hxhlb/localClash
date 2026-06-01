@@ -1,8 +1,11 @@
 package mihomoapi
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,6 +97,59 @@ func TestLogsWebSocketHandshakeFailureIsExplicit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "handshake failed") {
 		t.Fatalf("error = %v, want websocket handshake failure", err)
 	}
+}
+
+func TestLogsWebSocketNoFramesEndsAtDuration(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
+		var wsKey string
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimRight(line, "\r\n")
+			if line == "" {
+				break
+			}
+			key, value, ok := strings.Cut(line, ":")
+			if ok && strings.EqualFold(strings.TrimSpace(key), "Sec-WebSocket-Key") {
+				wsKey = strings.TrimSpace(value)
+			}
+		}
+		if wsKey == "" {
+			return
+		}
+		_, _ = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\n"+
+			"Upgrade: websocket\r\n"+
+			"Connection: Upgrade\r\n"+
+			"Sec-WebSocket-Accept: "+webSocketAccept(wsKey)+"\r\n\r\n")
+		time.Sleep(200 * time.Millisecond)
+	}()
+	client, err := New(listener.Addr().String(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Logs(context.Background(), LogsOptions{Transport: TransportWebSocket, Duration: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LineCount != 0 || result.Transport != TransportWebSocket {
+		t.Fatalf("result = %+v, want empty websocket log result", result)
+	}
+	<-done
 }
 
 func writeMihomoAPIConfig(t *testing.T, controllerURL, secret string) string {

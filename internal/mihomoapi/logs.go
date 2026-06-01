@@ -123,6 +123,9 @@ func (c *Client) readHTTPStreamLogs(ctx context.Context, opts LogsOptions, start
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return LogsResult{Transport: TransportHTTPStream, Level: opts.Level, Format: opts.Format, ElapsedMS: time.Since(started).Milliseconds()}, nil
+		}
 		return LogsResult{}, err
 	}
 	defer resp.Body.Close()
@@ -199,7 +202,7 @@ func (c *Client) readWebSocketLogs(ctx context.Context, opts LogsOptions, starte
 		}
 		opcode, payload, err := readWebSocketFrame(reader)
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || isTimeoutError(err) {
 				break
 			}
 			return result, err
@@ -217,6 +220,11 @@ func (c *Client) readWebSocketLogs(ctx context.Context, opts LogsOptions, starte
 	}
 	result.ElapsedMS = time.Since(started).Milliseconds()
 	return result, nil
+}
+
+func isTimeoutError(err error) bool {
+	netErr, ok := err.(net.Error)
+	return ok && netErr.Timeout()
 }
 
 func collectLogLines(ctx context.Context, r io.Reader, opts LogsOptions, started time.Time, transport string) (LogsResult, error) {
