@@ -11,8 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"localclash/internal/mihomoapi"
 	"localclash/internal/mihomotest"
 	"localclash/internal/runtimeprofile"
+)
+
+const (
+	RestartStrategyProcess   = "process_restart"
+	RestartStrategyHotReload = "hot_reload"
 )
 
 type StatusOptions struct {
@@ -47,6 +53,10 @@ type RestartOptions struct {
 	ConfigPath          string
 	WorkDir             string
 	LogPath             string
+	Strategy            string
+	ConfigSHA256        string
+	AttestationPath     string
+	ReloadTimeout       time.Duration
 	ValidationCachePath string
 	ForceConfigTest     bool
 	StopTimeout         time.Duration
@@ -88,14 +98,23 @@ type StopResult struct {
 
 type RestartResult struct {
 	Restarted        bool                        `json:"restarted"`
+	Reloaded         bool                        `json:"reloaded,omitempty"`
+	AppliedStrategy  string                      `json:"applied_strategy"`
+	ConfigSHA256     string                      `json:"config_sha256,omitempty"`
 	ConfigValidation mihomotest.ValidationResult `json:"config_validation"`
 	Stop             StopResult                  `json:"stop"`
 	Start            StartResult                 `json:"start"`
 	Status           StatusResult                `json:"status"`
+	HotReload        *HotReloadResult            `json:"hot_reload,omitempty"`
 	Timings          RestartTimings              `json:"timings"`
 	Error            string                      `json:"error,omitempty"`
 	Warnings         []string                    `json:"warnings,omitempty"`
 	NextActions      []string                    `json:"next_actions,omitempty"`
+}
+
+type HotReloadResult struct {
+	Config     string `json:"config"`
+	StatusCode int    `json:"status_code"`
 }
 
 func Status(opts StatusOptions) StatusResult {
@@ -129,6 +148,7 @@ func Status(opts StatusOptions) StatusResult {
 
 func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 	totalStarted := time.Now()
+	opts = normalizeRestartOptions(opts)
 	stage := func(event RestartStageEvent) {
 		if opts.OnStage != nil {
 			opts.OnStage(event)
@@ -150,10 +170,14 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 		LogPath:    startOpts.LogPath,
 	})
 	result := RestartResult{
-		Warnings: append([]string(nil), NetworkInterruptionWarnings...),
+		AppliedStrategy: opts.Strategy,
+		Warnings:        append([]string(nil), NetworkInterruptionWarnings...),
 		NextActions: []string{
 			"call runtime_status to verify the restarted Mihomo process",
 		},
+	}
+	if opts.Strategy == RestartStrategyHotReload {
+		return hotReload(ctx, opts, runOpts, result, stage, totalStarted)
 	}
 	if err := validateManagedCorePath(runOpts.CorePath); err != nil {
 		return result, err
@@ -237,6 +261,110 @@ func Restart(ctx context.Context, opts RestartOptions) (RestartResult, error) {
 	stage(RestartStageEvent{Stage: "status", Event: "done", DurationMS: result.Timings.StatusMS, PID: status.PID})
 	result.Restarted = start.Started
 	result.Timings.TotalMS = elapsedMS(totalStarted)
+	return result, nil
+}
+
+func normalizeRestartOptions(opts RestartOptions) RestartOptions {
+	opts.Strategy = strings.TrimSpace(opts.Strategy)
+	if opts.Strategy == "" {
+		opts.Strategy = RestartStrategyProcess
+	}
+	if opts.ReloadTimeout <= 0 {
+		opts.ReloadTimeout = 10 * time.Second
+	}
+	return opts
+}
+
+func hotReload(ctx context.Context, opts RestartOptions, runOpts Options, result RestartResult, stage func(RestartStageEvent), totalStarted time.Time) (RestartResult, error) {
+	if opts.ForceConfigTest {
+		result.Error = "force_config_test is not supported for hot_reload; call mihomo_config_test first"
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		return result, nil
+	}
+	if _, err := os.Stat(runOpts.ConfigPath); err != nil {
+		result.Error = fmt.Sprintf("config %q is not available: %v", runOpts.ConfigPath, err)
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		return result, nil
+	}
+	hashStarted := time.Now()
+	stage(RestartStageEvent{Stage: "hash_check", Event: "started"})
+	expected := strings.TrimSpace(opts.ConfigSHA256)
+	if expected == "" {
+		attestationPath := opts.AttestationPath
+		if strings.TrimSpace(attestationPath) == "" {
+			attestationPath = mihomotest.DefaultAttestationPath(runOpts.WorkDir)
+		}
+		attestation, err := mihomotest.ReadAttestation(attestationPath)
+		if err != nil {
+			result.Error = "cannot read mihomo_config_test attestation: " + err.Error()
+			result.Timings.TotalMS = elapsedMS(totalStarted)
+			stage(RestartStageEvent{Stage: "hash_check", Event: "error", DurationMS: elapsedMS(hashStarted), Error: result.Error})
+			return result, nil
+		}
+		expected = attestation.ConfigSHA256
+	}
+	actual, err := mihomotest.VerifyConfigHash(runOpts.ConfigPath, expected)
+	if err != nil {
+		result.ConfigSHA256 = actual
+		result.Error = err.Error()
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "hash_check", Event: "error", DurationMS: elapsedMS(hashStarted), Error: err.Error()})
+		return result, nil
+	}
+	result.ConfigSHA256 = actual
+	stage(RestartStageEvent{Stage: "hash_check", Event: "done", DurationMS: elapsedMS(hashStarted)})
+
+	statusStarted := time.Now()
+	stage(RestartStageEvent{Stage: "status", Event: "started"})
+	status := Status(StatusOptions{
+		CorePath:   runOpts.CorePath,
+		ConfigPath: runOpts.ConfigPath,
+		WorkDir:    runOpts.WorkDir,
+		LogPath:    runOpts.LogPath,
+	})
+	result.Status = status
+	result.Timings.StatusMS = elapsedMS(statusStarted)
+	if !status.Running {
+		result.Error = "runtime is not running; hot_reload requires an active Mihomo controller"
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "status", Event: "error", DurationMS: result.Timings.StatusMS, Error: result.Error})
+		return result, nil
+	}
+	stage(RestartStageEvent{Stage: "status", Event: "done", DurationMS: result.Timings.StatusMS, PID: status.PID})
+
+	reloadStarted := time.Now()
+	stage(RestartStageEvent{Stage: "hot_reload", Event: "started"})
+	client, err := mihomoapi.NewFromConfig(runOpts.ConfigPath)
+	if err != nil {
+		result.Error = err.Error()
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "hot_reload", Event: "error", DurationMS: elapsedMS(reloadStarted), Error: err.Error()})
+		return result, nil
+	}
+	configPath, err := filepath.Abs(runOpts.ConfigPath)
+	if err != nil {
+		result.Error = err.Error()
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "hot_reload", Event: "error", DurationMS: elapsedMS(reloadStarted), Error: err.Error()})
+		return result, nil
+	}
+	response, err := client.Request(ctx, mihomoapi.RequestOptions{
+		Method:  "PUT",
+		Path:    "/configs",
+		Query:   map[string]any{"force": true},
+		Body:    map[string]any{"path": configPath},
+		Timeout: opts.ReloadTimeout,
+	})
+	result.HotReload = &HotReloadResult{Config: configPath, StatusCode: response.StatusCode}
+	if err != nil {
+		result.Error = err.Error()
+		result.Timings.TotalMS = elapsedMS(totalStarted)
+		stage(RestartStageEvent{Stage: "hot_reload", Event: "error", DurationMS: elapsedMS(reloadStarted), Error: err.Error()})
+		return result, nil
+	}
+	result.Reloaded = true
+	result.Timings.TotalMS = elapsedMS(totalStarted)
+	stage(RestartStageEvent{Stage: "hot_reload", Event: "done", DurationMS: elapsedMS(reloadStarted), PID: status.PID})
 	return result, nil
 }
 

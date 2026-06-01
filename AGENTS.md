@@ -18,7 +18,8 @@ The local source checkout for the Mihomo Meta core is `/Volumes/Data/Github/miho
 - `rtk go run . mcp`: start the stdio MCP server.
 - `rtk go run . doctor` or `rtk go run . doctor --json`: inspect local runtime prerequisites and generated config health.
 - `rtk go run . core download --dry-run`: verify Mihomo release asset selection without writing binaries.
-- `rtk go run . config render --force`: render `generated/mihomo.yaml` from local subscription, policy-template intent, and pack inputs.
+- `rtk go run . config render --force`: render `.runtime/mihomo/config.yaml` from local subscription, policy-template intent, and pack inputs.
+- `rtk go run . mihomo config-test --json`: run explicit `mihomo -t` validation and record the config hash attestation used by hot reload.
 - `rtk scripts/test-mcp-callcopilot.sh`: run the end-to-end Copilot MCP smoke test when the local MCP registration is configured.
 
 ## Coding Style & Naming Conventions

@@ -630,7 +630,7 @@ func defaultRoutingPatchGuidance(target string) routingPatchGuidance {
 			"Call config_status or routing_explain again to verify the durable intent; restart_runtime only after user confirmation if the running Mihomo process should load the change.",
 		},
 		Notes: []string{
-			"Do not edit generated/mihomo.yaml directly; it is a build artifact.",
+			"Do not edit .runtime/mihomo/config.yaml directly; it is a build artifact.",
 			"Do not infer active routing from generated_summary.rules_sample alone because it is truncated.",
 		},
 	}

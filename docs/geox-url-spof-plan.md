@@ -41,7 +41,7 @@ one URL for each resource type.
 ## Boundaries
 
 localClash does not run a local HTTP mirror/proxy service for GEO data. The
-core-owned output is `generated/mihomo.yaml`; any mirror choice must be resolved
+core-owned output is `.runtime/mihomo/config.yaml`; any mirror choice must be resolved
 before writing that file.
 
 Mihomo behavior:

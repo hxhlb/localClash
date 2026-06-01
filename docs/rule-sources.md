@@ -68,4 +68,4 @@ go run . rules render --selection localclash-packs.gob
 `.runtime/rules/packs/index.gob`. `rules index-dump` exposes that runtime index
 for inspection. `rules render` reads the cache plus the selection gob and
 renders rule-provider, proxy-group, and rule fragments only. It does not modify
-`generated/mihomo.yaml`.
+`.runtime/mihomo/config.yaml`.

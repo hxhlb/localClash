@@ -224,7 +224,7 @@ func normalizeOptions(opts Options) Options {
 		opts.Paths.SubscriptionConfig = "localclash-subscriptions.json"
 	}
 	if opts.Paths.GeneratedConfig == "" {
-		opts.Paths.GeneratedConfig = "generated/mihomo.yaml"
+		opts.Paths.GeneratedConfig = filepath.Join(".runtime", "mihomo", "config.yaml")
 	}
 	if opts.Paths.MihomoRuntimeDir == "" {
 		opts.Paths.MihomoRuntimeDir = filepath.Join(opts.Paths.RuntimeRoot, "mihomo")
