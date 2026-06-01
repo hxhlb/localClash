@@ -1239,6 +1239,7 @@ func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
 		"usage_guidance": []string{
 			"config_status is the preferred tool for checking durable localClash patch registry state and generated overlay state.",
 			"By default config_status is lightweight and does not resolve subscription-node matches or inspect generated overlay details; pass detail=true when a full audit is needed.",
+			"generated_summary.rules_count may exclude localClash overlay rules; read generated_summary.rules_count_scope and generated_summary.rules_total_count before comparing rule totals.",
 			"generated_summary omits raw Mihomo rule/provider identifiers; use nl_file only when explicit generated config line evidence is needed.",
 			"Use intent.packs and overlay pack metadata to verify localClash-managed pack routing.",
 			"runtime_status only reports whether Mihomo is running; it does not prove that a pending config change is loaded by a running process.",

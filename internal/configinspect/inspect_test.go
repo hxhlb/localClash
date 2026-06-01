@@ -32,8 +32,17 @@ func TestInspectBaseReturnsBaseSummary(t *testing.T) {
 	if len(result.Summary.RuleProviders) != 1 {
 		t.Fatalf("rule providers = %+v, want limit 1", result.Summary.RuleProviders)
 	}
+	if result.Summary.Scope != "base_excluding_localclash_overlay" {
+		t.Fatalf("summary scope = %q, want base_excluding_localclash_overlay", result.Summary.Scope)
+	}
 	if result.Summary.RulesCount != 1 || len(result.Summary.RulesSample) != 1 {
 		t.Fatalf("rules summary = count %d sample %+v, want count 1 sample 1", result.Summary.RulesCount, result.Summary.RulesSample)
+	}
+	if result.Summary.RulesCountScope != "generated rules after excluding x-localclash.overlay.rules" {
+		t.Fatalf("rules count scope = %q, want explicit overlay exclusion", result.Summary.RulesCountScope)
+	}
+	if result.Summary.RulesTotalCount != 2 {
+		t.Fatalf("rules total count = %d, want 2", result.Summary.RulesTotalCount)
 	}
 	if result.Summary.RulesSample[0] != "RULE-SET,applications,DIRECT" {
 		t.Fatalf("rules sample = %+v, want base applications rule only", result.Summary.RulesSample)

@@ -2104,9 +2104,18 @@ func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 	if int(summary["proxies_count"].(float64)) != 1 {
 		t.Fatalf("summary = %+v, want one proxy", summary)
 	}
+	if summary["scope"] != "base_excluding_localclash_overlay" {
+		t.Fatalf("summary scope = %v, want base_excluding_localclash_overlay", summary["scope"])
+	}
+	if summary["rules_count_scope"] != "generated rules after excluding x-localclash.overlay.rules" {
+		t.Fatalf("rules_count_scope = %v, want explicit filtered scope", summary["rules_count_scope"])
+	}
+	if int(summary["rules_count"].(float64)) != 0 || int(summary["rules_total_count"].(float64)) != 1 {
+		t.Fatalf("summary rules counts = %+v, want filtered 0 and total 1", summary)
+	}
 	guidance := content["usage_guidance"].([]any)
-	if len(guidance) == 0 || !guidanceContains(guidance, "omits raw Mihomo rule/provider identifiers") {
-		t.Fatalf("usage_guidance = %+v, want raw identifier omission warning", guidance)
+	if len(guidance) == 0 || !guidanceContains(guidance, "rules_total_count") {
+		t.Fatalf("usage_guidance = %+v, want rule count scope warning", guidance)
 	}
 	assertNoStructuredCompositeStrings(t, result.StructuredContent, "blackmatrix7_OpenAI", "RULE-SET,")
 	if _, err := json.Marshal(result.StructuredContent); err != nil {
