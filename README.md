@@ -402,8 +402,12 @@ MCP runtime tool:
   or HTTP streaming without exposing the controller token.
 - `restart_runtime`: defaults to hot reload for MCP. It verifies the current
   `.runtime/mihomo/config.yaml` hash against a prior `mihomo_config_test`
-  attestation before calling Mihomo `PUT /configs`. Use
-  `strategy: process_restart` for an explicit stop/start restart.
+  attestation before calling Mihomo `PUT /configs`. Mihomo reload is
+  synchronous; request timeout is an indeterminate request result, not proof
+  that reload failed. Agents should use `mihomo_api_request` to perform
+  change-specific runtime verification, such as checking `/rules`,
+  `/providers/rules`, `/proxies`, or `/configs`. Use `strategy:
+  process_restart` for an explicit stop/start restart.
 - `stop_runtime`: stops Mihomo only when it is not still required by active
   router takeover. If `router_takeover_status.effective` is true, call
   `router_takeover_stop` first, or pass `force: true` only after explicit user
