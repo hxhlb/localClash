@@ -29,8 +29,9 @@ func TestTaskMonitorWritesDiagnosticsOnStageTimeout(t *testing.T) {
 
 	monitor.Record("stage_started", map[string]any{"stage": "slow_stage"})
 	snapshotPath := filepath.Join(diagnosticsDir, "task_snapshot.json")
+	requiredDiagnostics := []string{"task_snapshot.json", "cpu_samples.jsonl", "goroutine.txt", "heap.txt"}
 	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(snapshotPath); err == nil {
+		if diagnosticsExist(diagnosticsDir, requiredDiagnostics) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -44,7 +45,7 @@ func TestTaskMonitorWritesDiagnosticsOnStageTimeout(t *testing.T) {
 		t.Fatalf("summary = %+v, want slow_stage timeout reason", fields)
 	}
 
-	for _, name := range []string{"task_snapshot.json", "cpu_samples.jsonl", "goroutine.txt", "heap.txt"} {
+	for _, name := range requiredDiagnostics {
 		if _, err := os.Stat(filepath.Join(diagnosticsDir, name)); err != nil {
 			t.Fatalf("diagnostic %s missing: %v", name, err)
 		}
@@ -73,4 +74,13 @@ func TestTaskMonitorWritesDiagnosticsOnStageTimeout(t *testing.T) {
 		data, _ := os.ReadFile(logFile)
 		t.Fatalf("log = %s, want task_diagnostics_written", data)
 	}
+}
+
+func diagnosticsExist(dir string, names []string) bool {
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			return false
+		}
+	}
+	return true
 }
