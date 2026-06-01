@@ -62,7 +62,7 @@
 **6. 執行型工具**
 
 - `run_runtime`：啟動 Mihomo。
-- `restart_runtime`：stop/start/status，假設配置已由 `config_patch_apply` 或 `doctor` 驗證，適合 Agent 依賴代理路徑時使用。
+- `restart_runtime`：先用 Mihomo validation cache 驗證 generated config，再 stop/start/status。適合 Agent 依賴代理路徑時使用；`force_config_test=true` 可強制跳過 cache。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。
 - `router_takeover_apply`：套用 localClash 管理的 OpenWrt runtime 接管規則。
 - `router_takeover_stop`：撤銷 localClash 管理的接管規則，不停止 Mihomo。
@@ -78,7 +78,7 @@
 5. 用 `config_patch_draft` 產生 current draft
 6. 用 `config_patch_apply` 套用
 7. 用 `config_render` 或直接由 apply 產生 generated config
-8. 經用戶確認後 `restart_runtime`
+8. 經用戶確認後 `restart_runtime`；如果需要重新跑 Mihomo config test，傳 `force_config_test=true`
 9. 路由器接管只在明確確認後 `router_takeover_apply`
 
 長任務現在的觀測入口是：工具返回 `task_id`、`log_file`、`status_file`，Agent 應該用 `nl_file` 持續讀 log，而不是等待 MCP 一次性返回。
