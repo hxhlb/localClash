@@ -162,6 +162,30 @@ func TestRuntimeSchemasExposeForceConfigTest(t *testing.T) {
 	}
 }
 
+func TestRuntimeSchemasUseServerStatePaths(t *testing.T) {
+	for _, name := range []string{"run_runtime", "restart_runtime", "runtime_status", "router_takeover_status", "router_takeover_apply", "router_takeover_stop", "stop_runtime"} {
+		schema := inputSchemaForTool(name)
+		properties := schema["properties"].(map[string]any)
+		for _, forbidden := range []string{
+			"attestation",
+			"config",
+			"config_sha256",
+			"core",
+			"dns_port",
+			"log_file",
+			"redir_port",
+			"runtime_dir",
+			"runtime_profile",
+			"state_dir",
+			"tun_device",
+		} {
+			if _, ok := properties[forbidden]; ok {
+				t.Fatalf("%s schema exposes caller-managed %q: %+v", name, forbidden, properties)
+			}
+		}
+	}
+}
+
 func TestMihomoConfigTestSchemaUsesServerStatePaths(t *testing.T) {
 	schema := inputSchemaForTool("mihomo_config_test")
 	properties := schema["properties"].(map[string]any)

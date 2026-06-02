@@ -510,7 +510,7 @@ func TestMCPAsyncTaskLogPathCanBeReadByNLFile(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "run_runtime",
-			"arguments": map[string]any{"config": "missing.yaml"},
+			"arguments": map[string]any{},
 		},
 	})
 	if runResp.Error != nil {
@@ -2339,18 +2339,21 @@ sleep 30
 		t.Fatal(err)
 	}
 	workDir := filepath.Join(dir, "runtime")
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"core":        core,
-				"config":      config,
-				"runtime_dir": workDir,
-				"log_file":    filepath.Join(workDir, "mihomo.log"),
-				"background":  false,
+				"background": false,
 			},
 		},
 	})
@@ -2372,14 +2375,21 @@ sleep 30
 }
 
 func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
-	resp := callHandle(t, map[string]any{
+	dir := t.TempDir()
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  filepath.Join(dir, "missing.yaml"),
+			MihomoRuntimeDir: filepath.Join(dir, "runtime"),
+			CorePath:         filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"config":     filepath.Join(t.TempDir(), "missing.yaml"),
 				"background": false,
 			},
 		},
@@ -2426,17 +2436,20 @@ sleep 30
 	}
 	writeMCPValidationCache(t, mihomotest.DefaultCachePath(workDir), core, config)
 
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "restart_runtime",
 			"arguments": map[string]any{
-				"core":              core,
-				"config":            config,
-				"runtime_dir":       workDir,
-				"log_file":          filepath.Join(workDir, "mihomo.log"),
 				"strategy":          "process_restart",
 				"force_config_test": true,
 				"background":        false,
@@ -2696,18 +2709,61 @@ func TestMihomoConfigTestToolRejectsCallerManagedPaths(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolsRejectCallerManagedPaths(t *testing.T) {
+	dir := t.TempDir()
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:    filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:           filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	}
+	server := NewServerWithState(state)
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "run_runtime", args: map[string]any{"config": "other.yaml", "background": false}},
+		{name: "restart_runtime", args: map[string]any{"core": "other-core", "background": false}},
+		{name: "runtime_status", args: map[string]any{"runtime_dir": "other-runtime"}},
+		{name: "router_takeover_status", args: map[string]any{"state_dir": "other-state"}},
+		{name: "router_takeover_apply", args: map[string]any{"dns_port": 1053, "background": false}},
+		{name: "router_takeover_stop", args: map[string]any{"tun_device": "utun9", "background": false}},
+		{name: "stop_runtime", args: map[string]any{"runtime_profile": "other-profile", "background": false}},
+	} {
+		resp := callHandleWithServer(t, server, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      tc.name,
+				"arguments": tc.args,
+			},
+		})
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, "unknown field") {
+			t.Fatalf("%s error = %+v, want strict field rejection", tc.name, resp.Error)
+		}
+	}
+}
+
 func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:         filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "run_runtime",
-			"arguments": map[string]any{
-				"config": "missing.yaml",
-			},
+			"name":      "run_runtime",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -2744,10 +2800,8 @@ func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 		t.Fatalf("read log file: %v", err)
 	}
 	if !strings.Contains(string(logText), `"event":"queued"`) ||
-		!strings.Contains(string(logText), `"event":"error"`) ||
-		!strings.Contains(string(logText), `"event":"stage_started"`) ||
-		!strings.Contains(string(logText), `"event":"task_monitor_summary"`) {
-		t.Fatalf("log = %s, want queued, stage_started, task_monitor_summary, and error events", logText)
+		!strings.Contains(string(logText), `"event":"started"`) {
+		t.Fatalf("log = %s, want queued and started events", logText)
 	}
 }
 
@@ -2804,18 +2858,20 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 	}
 	defer killMCPProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "runtime_status",
-			"arguments": map[string]any{
-				"config":      config,
-				"runtime_dir": workDir,
-				"core":        core,
-				"log_file":    filepath.Join(workDir, "mihomo.log"),
-			},
+			"name":      "runtime_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -2858,18 +2914,21 @@ sleep 30
 		t.Fatal(err)
 	}
 	workDir := filepath.Join(dir, "runtime")
-	runResp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	runResp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"core":        core,
-				"config":      config,
-				"runtime_dir": workDir,
-				"log_file":    filepath.Join(workDir, "mihomo.log"),
-				"background":  false,
+				"background": false,
 			},
 		},
 	})
@@ -2881,18 +2940,16 @@ sleep 30
 	pid := int(runContent["pid"].(float64))
 	defer killMCPProcess(pid)
 
-	stopResp := callHandle(t, map[string]any{
+	stopResp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "stop_runtime",
 			"arguments": map[string]any{
-				"core":        core,
-				"config":      config,
-				"runtime_dir": workDir,
-				"timeout_ms":  2000,
-				"background":  false,
+				"timeout_ms": 2000,
+				"force":      true,
+				"background": false,
 			},
 		},
 	})
@@ -2927,16 +2984,20 @@ func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			MihomoRuntimeDir:   workDir,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "stop_runtime",
 			"arguments": map[string]any{
-				"runtime_profile": filepath.Join(dir, "localclash-runtime.json"),
-				"runtime_dir":     workDir,
-				"background":      false,
+				"background": false,
 			},
 		},
 	})

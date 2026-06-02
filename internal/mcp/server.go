@@ -2515,16 +2515,25 @@ func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessag
 }
 
 func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config          string `json:"config"`
-		RuntimeDir      string `json:"runtime_dir"`
-		Core            string `json:"core"`
-		Foreground      bool   `json:"foreground"`
-		LogFile         string `json:"log_file"`
-		ForceConfigTest bool   `json:"force_config_test"`
+	var req struct {
+		Foreground      bool  `json:"foreground"`
+		ForceConfigTest bool  `json:"force_config_test"`
+		Background      *bool `json:"background"`
+		Wait            *bool `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Config          string
+		RuntimeDir      string
+		Core            string
+		Foreground      bool
+		LogFile         string
+		ForceConfigTest bool
+	}{
+		Foreground:      req.Foreground,
+		ForceConfigTest: req.ForceConfigTest,
 	}
 	if s.state != nil {
 		if in.Config == "" {
@@ -2568,24 +2577,33 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 }
 
 func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config          string `json:"config"`
-		RuntimeDir      string `json:"runtime_dir"`
-		Core            string `json:"core"`
-		Foreground      bool   `json:"foreground"`
-		LogFile         string `json:"log_file"`
+	var req struct {
 		Strategy        string `json:"strategy"`
-		ConfigSHA256    string `json:"config_sha256"`
-		Attestation     string `json:"attestation"`
 		TimeoutMS       int    `json:"timeout_ms"`
 		Force           bool   `json:"force"`
 		ForceConfigTest bool   `json:"force_config_test"`
+		Background      *bool  `json:"background"`
+		Wait            *bool  `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
-	if in.Foreground {
-		return jsonToolResult(runtimeErrorResult("foreground=true is not supported by MCP restart_runtime; use the CLI restart command"))
+	in := struct {
+		Config          string
+		RuntimeDir      string
+		Core            string
+		LogFile         string
+		Strategy        string
+		ConfigSHA256    string
+		Attestation     string
+		TimeoutMS       int
+		Force           bool
+		ForceConfigTest bool
+	}{
+		Strategy:        req.Strategy,
+		TimeoutMS:       req.TimeoutMS,
+		Force:           req.Force,
+		ForceConfigTest: req.ForceConfigTest,
 	}
 	if s.state != nil {
 		if in.Config == "" {
@@ -3430,15 +3448,16 @@ func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, err
 }
 
 func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config     string `json:"config"`
-		RuntimeDir string `json:"runtime_dir"`
-		Core       string `json:"core"`
-		LogFile    string `json:"log_file"`
-	}
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct{}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct {
+		Config     string
+		RuntimeDir string
+		Core       string
+		LogFile    string
+	}{}
 	if s.state != nil {
 		if in.Config == "" {
 			in.Config = s.state.Paths.GeneratedConfig
@@ -3456,22 +3475,27 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 }
 
 type routerTakeoverInput struct {
-	RuntimeProfile string `json:"runtime_profile"`
-	Config         string `json:"config"`
-	RuntimeDir     string `json:"runtime_dir"`
-	LogFile        string `json:"log_file"`
-	StateDir       string `json:"state_dir"`
-	DNSPort        int    `json:"dns_port"`
-	RedirPort      int    `json:"redir_port"`
-	TunDevice      string `json:"tun_device"`
-	DryRun         bool   `json:"dry_run"`
+	RuntimeProfile string
+	Config         string
+	RuntimeDir     string
+	LogFile        string
+	StateDir       string
+	DNSPort        int
+	RedirPort      int
+	TunDevice      string
+	DryRun         bool
 }
 
 func (s *Server) routerTakeoverOptions(args json.RawMessage) (routertakeover.Options, error) {
-	var in routerTakeoverInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		DryRun     bool  `json:"dry_run"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return routertakeover.Options{}, err
 	}
+	in := routerTakeoverInput{DryRun: req.DryRun}
 	if s.state != nil {
 		if in.RuntimeProfile == "" {
 			in.RuntimeProfile = s.state.Paths.RuntimeProfilePath
@@ -3549,21 +3573,30 @@ func (s *Server) callRouterTakeoverStopSync(ctx context.Context, args json.RawMe
 }
 
 func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		RuntimeProfile string `json:"runtime_profile"`
-		Config         string `json:"config"`
-		Core           string `json:"core"`
-		RuntimeDir     string `json:"runtime_dir"`
-		LogFile        string `json:"log_file"`
-		StateDir       string `json:"state_dir"`
-		DNSPort        int    `json:"dns_port"`
-		RedirPort      int    `json:"redir_port"`
-		TunDevice      string `json:"tun_device"`
-		TimeoutMS      int    `json:"timeout_ms"`
-		Force          bool   `json:"force"`
+	var req struct {
+		TimeoutMS  int   `json:"timeout_ms"`
+		Force      bool  `json:"force"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		RuntimeProfile string
+		Config         string
+		Core           string
+		RuntimeDir     string
+		LogFile        string
+		StateDir       string
+		DNSPort        int
+		RedirPort      int
+		TunDevice      string
+		TimeoutMS      int
+		Force          bool
+	}{
+		TimeoutMS: req.TimeoutMS,
+		Force:     req.Force,
 	}
 	if s.state != nil {
 		if in.RuntimeProfile == "" {

@@ -338,11 +338,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":            map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":       map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Background runtime requires a localClash managed basename: lc-mihomo-meta or lc-mihomo-smart. Defaults to the active runtime profile core path."},
 				"foreground":        map[string]any{"type": "boolean", "description": "Foreground mode is not supported by MCP run_runtime; use CLI run for foreground execution."},
-				"log_file":          map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"force_config_test": map[string]any{"type": "boolean", "description": "Bypass the Mihomo config validation cache and run a fresh mihomo -t before starting."},
 				"background":        map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
 				"wait":              map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
@@ -407,13 +403,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":            map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":       map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Background restart requires a localClash managed basename: lc-mihomo-meta or lc-mihomo-smart. Defaults to the active runtime profile core path."},
-				"log_file":          map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"strategy":          map[string]any{"type": "string", "enum": []string{"hot_reload", "process_restart"}, "description": "Restart strategy. Defaults to hot_reload for MCP restart_runtime. Hot reload submits Mihomo PUT /configs and does not perform change-specific semantic verification."},
-				"config_sha256":     map[string]any{"type": "string", "description": "Expected config sha256 for hot_reload. If omitted, restart_runtime reads the last mihomo_config_test attestation."},
-				"attestation":       map[string]any{"type": "string", "description": "Passing mihomo_config_test attestation path for hot_reload. Defaults to .runtime/mihomo/config-test-attestation.json."},
 				"timeout_ms":        map[string]any{"type": "integer", "minimum": 0, "description": "For hot_reload, Mihomo PUT /configs request timeout in milliseconds; timeout means the reload result is indeterminate and the Agent should verify with mihomo_api_request. For process_restart, milliseconds to wait after SIGTERM. Defaults to 5000."},
 				"force":             map[string]any{"type": "boolean", "description": "Send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
 				"force_config_test": map[string]any{"type": "boolean", "description": "Only valid with strategy=process_restart. Hot reload requires a prior mihomo_config_test attestation instead."},
@@ -433,29 +423,16 @@ func inputSchemaForTool(name string) map[string]any {
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
-			"properties": map[string]any{
-				"config":      map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path used for output context. Runtime identity is based on localClash managed core process names."},
-				"log_file":    map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
-			},
+			"properties":           map[string]any{},
 		}
 	case "router_takeover_status", "router_takeover_apply", "router_takeover_stop":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"config":          map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"log_file":        map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
-				"state_dir":       map[string]any{"type": "string", "description": "localClash router takeover runtime state directory. Defaults to /tmp/localclash/router-takeover so reboot clears it."},
-				"dns_port":        map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo DNS listen port. Defaults to the router profile DNS listen port or 7874."},
-				"redir_port":      map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo redir-port. Defaults to the router profile redir-port or 7892."},
-				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device name. Defaults to the router profile TUN device or utun."},
-				"dry_run":         map[string]any{"type": "boolean", "description": "Return the shell script without applying changes. Supported by router_takeover_apply and router_takeover_stop."},
-				"background":      map[string]any{"type": "boolean", "description": "Run apply/stop as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools; ignored by router_takeover_status."},
-				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false; ignored by router_takeover_status."},
+				"dry_run":    map[string]any{"type": "boolean", "description": "Return the shell script without applying changes. Supported by router_takeover_apply and router_takeover_stop."},
+				"background": map[string]any{"type": "boolean", "description": "Run apply/stop as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools; ignored by router_takeover_status."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false; ignored by router_takeover_status."},
 			},
 		}
 	case "stop_runtime":
@@ -463,19 +440,10 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path used to detect router takeover. Defaults to localclash-runtime.json."},
-				"config":          map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"core":            map[string]any{"type": "string", "description": "Mihomo core binary path used for startup context. Runtime stop identity is based on localClash managed core process names."},
-				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"log_file":        map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
-				"state_dir":       map[string]any{"type": "string", "description": "localClash router takeover runtime state directory used for takeover detection. Defaults to /tmp/localclash/router-takeover."},
-				"dns_port":        map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo DNS listen port used for takeover detection. Defaults to router profile DNS listen port or 7874."},
-				"redir_port":      map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo redir-port used for takeover detection. Defaults to router profile redir-port or 7892."},
-				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device used for takeover detection. Defaults to router profile TUN device or utun."},
-				"timeout_ms":      map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
-				"force":           map[string]any{"type": "boolean", "description": "Bypass the active router takeover guard and send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
-				"background":      map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
-				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"timeout_ms": map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
+				"force":      map[string]any{"type": "boolean", "description": "Bypass the active router takeover guard and send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
+				"background": map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "subscriptions_status":
