@@ -229,3 +229,46 @@ func TestConfigPatchSchemasUseServerStatePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestQuerySchemasUseServerStatePaths(t *testing.T) {
+	for _, name := range []string{
+		"routing_explain",
+		"subscriptions_status",
+		"subscriptions_configure",
+		"subscriptions_refresh",
+		"subscription_nodes_list",
+		"subscription_nodes_search",
+		"packs_list",
+		"packs_get",
+		"pack_rules_read",
+		"pack_rules_prefetch",
+		"pack_rules_query",
+	} {
+		schema := inputSchemaForTool(name)
+		properties := schema["properties"].(map[string]any)
+		for _, forbidden := range []string{
+			"cache",
+			"config",
+			"localclash_config",
+			"merged",
+			"output",
+			"provider_cache",
+			"rule_sources",
+			"rules_cache",
+			"runtime_dir",
+			"runtime_profile",
+			"selection",
+			"sources",
+			"subscription",
+			"subscription_config",
+			"subscription_runtime",
+		} {
+			if name == "subscriptions_configure" && forbidden == "sources" {
+				continue
+			}
+			if _, ok := properties[forbidden]; ok {
+				t.Fatalf("%s schema exposes caller-managed %q: %+v", name, forbidden, properties)
+			}
+		}
+	}
+}
