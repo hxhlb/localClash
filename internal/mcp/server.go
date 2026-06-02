@@ -907,7 +907,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 
 func (s *Server) applyConfigIntentInspectDefaults(subscription, rulesCache, runtimeProfile, subscriptionConfig, subscriptionRuntime *string) {
 	setDefault := func(value *string, fallback string) {
-		if *value == "" && fallback != "" {
+		if value != nil && *value == "" && fallback != "" {
 			*value = fallback
 		}
 	}
@@ -926,31 +926,36 @@ func (s *Server) applyConfigIntentInspectDefaults(subscription, rulesCache, runt
 }
 
 func (s *Server) callProxyGroupBuild(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID                  string             `json:"id"`
-		Mode                string             `json:"mode"`
-		Match               *localconfig.Match `json:"match"`
-		Nodes               []string           `json:"nodes"`
-		Reason              string             `json:"reason"`
-		Boundary            string             `json:"boundary"`
-		Subscription        string             `json:"subscription"`
-		SubscriptionConfig  string             `json:"subscription_config"`
-		SubscriptionRuntime string             `json:"subscription_runtime"`
+	var req struct {
+		ID       string             `json:"id"`
+		Mode     string             `json:"mode"`
+		Match    *localconfig.Match `json:"match"`
+		Nodes    []string           `json:"nodes"`
+		Reason   string             `json:"reason"`
+		Boundary string             `json:"boundary"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil {
-		if in.Subscription == "" {
-			in.Subscription = s.state.Paths.SubscriptionPath
-		}
-		if in.SubscriptionConfig == "" {
-			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
-		}
-		if in.SubscriptionRuntime == "" {
-			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
-		}
+	in := struct {
+		ID                  string
+		Mode                string
+		Match               *localconfig.Match
+		Nodes               []string
+		Reason              string
+		Boundary            string
+		Subscription        string
+		SubscriptionConfig  string
+		SubscriptionRuntime string
+	}{
+		ID:       req.ID,
+		Mode:     req.Mode,
+		Match:    req.Match,
+		Nodes:    req.Nodes,
+		Reason:   req.Reason,
+		Boundary: req.Boundary,
 	}
+	s.applyConfigIntentInspectDefaults(&in.Subscription, nil, nil, &in.SubscriptionConfig, &in.SubscriptionRuntime)
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		return toolResult{}, fmt.Errorf("id is required")
@@ -2750,17 +2755,32 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 }
 
 func (s *Server) callMihomoAPIRequest(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Method    string         `json:"method"`
 		Path      string         `json:"path"`
 		Query     map[string]any `json:"query"`
 		Body      any            `json:"body"`
 		TimeoutMS int            `json:"timeout_ms"`
 		MaxBytes  int64          `json:"max_bytes"`
-		Config    string         `json:"config"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Method    string
+		Path      string
+		Query     map[string]any
+		Body      any
+		TimeoutMS int
+		MaxBytes  int64
+		Config    string
+	}{
+		Method:    req.Method,
+		Path:      req.Path,
+		Query:     req.Query,
+		Body:      req.Body,
+		TimeoutMS: req.TimeoutMS,
+		MaxBytes:  req.MaxBytes,
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.GeneratedConfig
@@ -2785,7 +2805,7 @@ func (s *Server) callMihomoAPIRequest(ctx context.Context, args json.RawMessage)
 }
 
 func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Mode           string `json:"mode"`
 		IntervalMS     int    `json:"interval_ms"`
 		DurationMS     int    `json:"duration_ms"`
@@ -2793,10 +2813,27 @@ func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMes
 		MaxConnections int    `json:"max_connections"`
 		MaxBytes       int    `json:"max_bytes"`
 		IncludeRaw     bool   `json:"include_raw"`
-		Config         string `json:"config"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Mode           string
+		IntervalMS     int
+		DurationMS     int
+		MaxFrames      int
+		MaxConnections int
+		MaxBytes       int
+		IncludeRaw     bool
+		Config         string
+	}{
+		Mode:           req.Mode,
+		IntervalMS:     req.IntervalMS,
+		DurationMS:     req.DurationMS,
+		MaxFrames:      req.MaxFrames,
+		MaxConnections: req.MaxConnections,
+		MaxBytes:       req.MaxBytes,
+		IncludeRaw:     req.IncludeRaw,
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.GeneratedConfig
@@ -2822,17 +2859,32 @@ func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMes
 }
 
 func (s *Server) callMihomoLogsRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Level      string `json:"level"`
 		Format     string `json:"format"`
 		Transport  string `json:"transport"`
 		DurationMS int    `json:"duration_ms"`
 		MaxLines   int    `json:"max_lines"`
 		MaxBytes   int    `json:"max_bytes"`
-		Config     string `json:"config"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Level      string
+		Format     string
+		Transport  string
+		DurationMS int
+		MaxLines   int
+		MaxBytes   int
+		Config     string
+	}{
+		Level:      req.Level,
+		Format:     req.Format,
+		Transport:  req.Transport,
+		DurationMS: req.DurationMS,
+		MaxLines:   req.MaxLines,
+		MaxBytes:   req.MaxBytes,
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.GeneratedConfig
@@ -3530,15 +3582,15 @@ func configConfigureNextActions(status runtimeprofile.Status, effectiveSubscript
 }
 
 func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config string `json:"config"`
-	}
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct{}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct{ Config string }{}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.RuntimeProfilePath
 	}
+	setDefault(&in.Config, workspacePath(s.workspaceRoot(), runtimeprofile.DefaultPath))
 	status, err := runtimeprofile.StatusFor(in.Config)
 	if err != nil {
 		return toolResult{}, err

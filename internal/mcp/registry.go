@@ -288,15 +288,12 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"id":                   map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
-				"match":                matchIntent,
-				"nodes":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
-				"reason":               map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
-				"boundary":             map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"id":       map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
+				"match":    matchIntent,
+				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
+				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
+				"reason":   map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
+				"boundary": map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
 			},
 			"required": []string{"id", "mode"},
 		}
@@ -348,7 +345,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"body":       map[string]any{"description": "JSON body for state-changing Mihomo API calls."},
 				"timeout_ms": map[string]any{"type": "integer", "minimum": 0, "description": "Request timeout in milliseconds. Defaults to 5000."},
 				"max_bytes":  map[string]any{"type": "integer", "minimum": 1, "description": "Maximum response bytes to return. Defaults to 262144."},
-				"config":     map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 			"required": []string{"path"},
 		}
@@ -364,7 +360,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"max_connections": map[string]any{"type": "integer", "minimum": 1, "description": "Maximum active connections to include per snapshot. Defaults to 200."},
 				"max_bytes":       map[string]any{"type": "integer", "minimum": 1, "description": "Maximum bytes to read from Mihomo. Defaults to 262144."},
 				"include_raw":     map[string]any{"type": "boolean", "description": "Include raw Mihomo connection snapshots in returned frames for field-level debugging. Defaults to false because raw snapshots are large."},
-				"config":          map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 		}
 	case "mihomo_logs_read":
@@ -378,7 +373,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"duration_ms": map[string]any{"type": "integer", "minimum": 1, "description": "Maximum collection duration. Defaults to 3000."},
 				"max_lines":   map[string]any{"type": "integer", "minimum": 1, "description": "Maximum log lines to return. Defaults to 200."},
 				"max_bytes":   map[string]any{"type": "integer", "minimum": 1, "description": "Maximum log bytes to return. Defaults to 131072."},
-				"config":      map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 		}
 	case "mihomo_config_test":
@@ -408,9 +402,7 @@ func inputSchemaForTool(name string) map[string]any {
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
-			"properties": map[string]any{
-				"config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-			},
+			"properties":           map[string]any{},
 		}
 	case "runtime_status":
 		return map[string]any{

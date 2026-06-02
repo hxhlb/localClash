@@ -1491,18 +1491,24 @@ func TestToolsCallConfigPatchDraftSupportsPolicyGroups(t *testing.T) {
 
 func TestToolsCallProxyGroupBuildReturnsReusableIntent(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionPath:    paths.subscription,
+			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.json"),
+			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "proxy_group_build",
 			"arguments": map[string]any{
-				"id":           "TempLine",
-				"mode":         "manual",
-				"subscription": paths.subscription,
-				"nodes":        []string{"SG 01"},
-				"reason":       "User explicitly selected this line.",
+				"id":     "TempLine",
+				"mode":   "manual",
+				"nodes":  []string{"SG 01"},
+				"reason": "User explicitly selected this line.",
 			},
 		},
 	})
@@ -2525,14 +2531,16 @@ func TestMihomoAPIRequestToolUsesConfiguredController(t *testing.T) {
 	defer api.Close()
 	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: test-secret\n")
 
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{GeneratedConfig: config},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_api_request",
 			"arguments": map[string]any{
-				"config": config,
 				"method": "GET",
 				"path":   "/proxies",
 				"query":  map[string]any{"name": "香港-Vmess-ARGO"},
@@ -2587,15 +2595,17 @@ func TestMihomoConnectionsReadToolReadsSnapshot(t *testing.T) {
 	defer api.Close()
 	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: conn-secret\n")
 
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{GeneratedConfig: config},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_connections_read",
 			"arguments": map[string]any{
-				"config": config,
-				"mode":   "snapshot",
+				"mode": "snapshot",
 			},
 		},
 	})
@@ -2630,14 +2640,16 @@ func TestMihomoLogsReadToolReadsBoundedHTTPStream(t *testing.T) {
 	defer api.Close()
 	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: log-secret\n")
 
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{GeneratedConfig: config},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_logs_read",
 			"arguments": map[string]any{
-				"config":    config,
 				"transport": "http_stream",
 				"level":     "info",
 				"max_lines": 1,
