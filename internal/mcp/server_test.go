@@ -585,6 +585,7 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	writeMCPPolicyTemplateFixture(t, templatesDir)
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:      dir,
 			RulesCacheDir:      cacheDir,
 			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 			SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
@@ -597,7 +598,7 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "config_configure",
-			"arguments": map[string]any{"config": configPath, "policy_templates_dir": templatesDir, "policy_template": "localclash-default", "core": "smart", "runtime_profile": "router"},
+			"arguments": map[string]any{"policy_template": "localclash-default", "core": "smart", "runtime_profile": "router"},
 		},
 	})
 	if resp.Error != nil {
@@ -1155,10 +1156,7 @@ packs:
 		"params": map[string]any{
 			"name": "config_status",
 			"arguments": map[string]any{
-				"config":       localClashConfig,
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"resolve":      true,
+				"resolve": true,
 			},
 		},
 	})
@@ -1190,6 +1188,7 @@ packs:
 
 func TestToolsCallConfigStatusRejectsInvalidUserProfile(t *testing.T) {
 	dir := t.TempDir()
+	t.Chdir(dir)
 	runtimePath := filepath.Join(dir, "localclash-runtime.json")
 	writeMCPFile(t, filepath.Join(dir, "localclash-user.json"), `rules:
   - MATCH,DIRECT
@@ -1200,13 +1199,8 @@ func TestToolsCallConfigStatusRejectsInvalidUserProfile(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_status",
-			"arguments": map[string]any{
-				"config":          filepath.Join(dir, "localclash-intent.json"),
-				"runtime_profile": runtimePath,
-				"subscription":    filepath.Join(dir, "subscription.gob"),
-				"rules_cache":     filepath.Join(dir, "rules"),
-			},
+			"name":      "config_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error == nil || !strings.Contains(resp.Error.Message, "rules") || !strings.Contains(resp.Error.Message, "localclash-user.json") {
@@ -1233,19 +1227,26 @@ packs:
     pack: OpenAI
     target: AI
 `)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			GeneratedConfig:     generated,
+			SubscriptionPath:    paths.subscription,
+			RulesCacheDir:       paths.cache,
+			PacksSelectionPath:  selection,
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "config_render",
 			"arguments": map[string]any{
-				"config":       localClashConfig,
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"selection":    selection,
-				"output":       generated,
-				"background":   false,
+				"background": false,
 			},
 		},
 	})
@@ -1676,7 +1677,7 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 }
 
 func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
-	paths := setupMCPPlanFixture(t)
+	setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -1684,11 +1685,8 @@ func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
 		"params": map[string]any{
 			"name": "config_patch_draft",
 			"arguments": map[string]any{
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         true,
-				"background":   false,
+				"test":       true,
+				"background": false,
 				"operations": []map[string]any{
 					{
 						"op":       "upsert_patch",
@@ -1713,7 +1711,7 @@ func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
 }
 
 func TestToolsCallConfigPatchDraftRejectsLegacyPackID(t *testing.T) {
-	paths := setupMCPPlanFixture(t)
+	setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -1721,11 +1719,8 @@ func TestToolsCallConfigPatchDraftRejectsLegacyPackID(t *testing.T) {
 		"params": map[string]any{
 			"name": "config_patch_draft",
 			"arguments": map[string]any{
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
+				"test":       false,
+				"background": false,
 				"operations": []map[string]any{
 					{
 						"op":       "upsert_patch",
@@ -2079,14 +2074,19 @@ func TestToolsCallPackRulesPrefetchRejectsLegacyIDs(t *testing.T) {
 
 func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 	config := setupMCPInspectConfig(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:    config,
+			RuntimeProfilePath: filepath.Join(filepath.Dir(config), "localclash-runtime.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "config_status",
 			"arguments": map[string]any{
-				"output": config,
 				"detail": true,
 			},
 		},
@@ -2148,14 +2148,19 @@ func guidanceContains(values []any, needle string) bool {
 
 func TestToolsCallConfigStatusReturnsOverlaySummary(t *testing.T) {
 	config := setupMCPInspectConfig(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:    config,
+			RuntimeProfilePath: filepath.Join(filepath.Dir(config), "localclash-runtime.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "config_status",
 			"arguments": map[string]any{
-				"output": config,
 				"detail": true,
 			},
 		},
@@ -2187,19 +2192,25 @@ func TestToolsCallConfigStatusWarnsWhenGeneratedSourceIsMissing(t *testing.T) {
 	writeMCPFile(t, selection, "version: 1\nproxy_groups: {}\nenabled_packs: []\n")
 	writeMCPFile(t, runtimeProfile, "version: 2\nmode: normal\ncore: meta\n")
 
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			GeneratedConfig:     generated,
+			SubscriptionPath:    subscription,
+			PacksSelectionPath:  selection,
+			RuntimeProfilePath:  runtimeProfile,
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+			RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_status",
-			"arguments": map[string]any{
-				"config":          missingConfig,
-				"subscription":    subscription,
-				"selection":       selection,
-				"runtime_profile": runtimeProfile,
-				"output":          generated,
-			},
+			"name":      "config_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -3137,6 +3148,7 @@ func callHandleWithServer(t *testing.T, server *Server, value any) *rpcResponse 
 
 func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanFixture, patchID string, overlay map[string]any, test bool) map[string]any {
 	t.Helper()
+	_ = paths
 	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -3144,12 +3156,9 @@ func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanF
 		"params": map[string]any{
 			"name": "config_patch_draft",
 			"arguments": map[string]any{
-				"draft_name":   patchID,
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         test,
-				"background":   false,
+				"draft_name": patchID,
+				"test":       test,
+				"background": false,
 				"operations": []map[string]any{
 					{
 						"op":       "upsert_patch",
@@ -3172,13 +3181,11 @@ func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanF
 
 func callConfigPatchApplyCurrentDraft(t *testing.T, server *Server, paths mcpPlanFixture, draft map[string]any) map[string]any {
 	t.Helper()
+	_ = paths
 	applyArgs := map[string]any{}
 	for key, value := range draft["apply_args"].(map[string]any) {
 		applyArgs[key] = value
 	}
-	applyArgs["patches_dir"] = paths.outputDir
-	applyArgs["subscription"] = paths.subscription
-	applyArgs["rules_cache"] = paths.cache
 	applyArgs["test"] = false
 	applyArgs["background"] = false
 	resp := callHandleWithServer(t, server, map[string]any{

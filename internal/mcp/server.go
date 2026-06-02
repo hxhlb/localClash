@@ -1190,9 +1190,20 @@ type configPatchSummary struct {
 }
 
 func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
-	var in configToolInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		Limit   int   `json:"limit"`
+		Patches bool  `json:"patches"`
+		Detail  bool  `json:"detail"`
+		Resolve *bool `json:"resolve"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := configToolInput{
+		Limit:   req.Limit,
+		Patches: req.Patches,
+		Detail:  req.Detail,
+		Resolve: req.Resolve,
 	}
 	s.applyConfigToolDefaults(&in)
 	limit := in.Limit
@@ -1356,10 +1367,15 @@ func configStatusNextActions(render configRenderState) []string {
 }
 
 func (s *Server) callConfigRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in configToolInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		Force      *bool `json:"force"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := configToolInput{Force: req.Force}
 	s.applyConfigToolDefaults(&in)
 	appendTaskStage(ctx, "stage_started", "validate_inputs", nil)
 	missing := missingRenderInputs(in)
@@ -1464,19 +1480,16 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 
 func (s *Server) callConfigPatchGet(args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PatchID        string `json:"patch_id"`
-		PatchesDir     string `json:"patches_dir"`
-		ConfigPath     string `json:"config"`
-		PolicyTemplate string `json:"policy_template"`
+		PatchID string `json:"patch_id"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	root := s.workspaceRoot()
-	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
-	setDefault(&in.ConfigPath, workspacePath(root, "localclash-intent.json"))
-	policyTemplate := firstNonEmpty(in.PolicyTemplate, policyTemplateFromConfig(in.ConfigPath))
-	result, err := configpatch.Get(in.PatchesDir, policyTemplate, in.PatchID)
+	patchesDir := workspacePath(root, configpatch.RegistryDirName)
+	configPath := workspacePath(root, "localclash-intent.json")
+	policyTemplate := policyTemplateFromConfig(configPath)
+	result, err := configpatch.Get(patchesDir, policyTemplate, in.PatchID)
 	if err != nil {
 		return toolResult{}, err
 	}
@@ -1484,26 +1497,37 @@ func (s *Server) callConfigPatchGet(args json.RawMessage) (toolResult, error) {
 }
 
 func (s *Server) callConfigPatchDraft(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		DraftName            string                  `json:"draft_name"`
-		Operations           []configpatch.Operation `json:"operations"`
-		PatchesDir           string                  `json:"patches_dir"`
-		PolicyTemplate       string                  `json:"policy_template"`
-		Subscription         string                  `json:"subscription"`
-		RulesCache           string                  `json:"rules_cache"`
-		RuntimeProfileConfig string                  `json:"runtime_profile"`
-		ConfigPath           string                  `json:"config"`
-		SubscriptionConfig   string                  `json:"subscription_config"`
-		SubscriptionRuntime  string                  `json:"subscription_runtime"`
-		Selection            string                  `json:"selection"`
-		Output               string                  `json:"output"`
-		ValidationCache      string                  `json:"validation_cache"`
-		Test                 *bool                   `json:"test"`
-		Core                 string                  `json:"core"`
-		RuntimeDir           string                  `json:"runtime_dir"`
+	var req struct {
+		DraftName  string                  `json:"draft_name"`
+		Operations []configpatch.Operation `json:"operations"`
+		Test       *bool                   `json:"test"`
+		Background *bool                   `json:"background"`
+		Wait       *bool                   `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		DraftName            string
+		Operations           []configpatch.Operation
+		PatchesDir           string
+		PolicyTemplate       string
+		Subscription         string
+		RulesCache           string
+		RuntimeProfileConfig string
+		ConfigPath           string
+		SubscriptionConfig   string
+		SubscriptionRuntime  string
+		Selection            string
+		Output               string
+		ValidationCache      string
+		Test                 *bool
+		Core                 string
+		RuntimeDir           string
+	}{
+		DraftName:  req.DraftName,
+		Operations: req.Operations,
+		Test:       req.Test,
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
@@ -1590,29 +1614,46 @@ func (s *Server) callConfigPatchDraft(ctx context.Context, args json.RawMessage)
 }
 
 func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		UseCurrentDraft      bool                    `json:"use_current_draft"`
-		Generation           int64                   `json:"generation"`
-		Operations           []configpatch.Operation `json:"operations"`
-		BaseHashes           map[string]string       `json:"base_hashes"`
-		BaseRegistryHash     string                  `json:"base_registry_hash"`
-		PatchesDir           string                  `json:"patches_dir"`
-		PolicyTemplate       string                  `json:"policy_template"`
-		Subscription         string                  `json:"subscription"`
-		RulesCache           string                  `json:"rules_cache"`
-		RuntimeProfileConfig string                  `json:"runtime_profile"`
-		ConfigPath           string                  `json:"config"`
-		SubscriptionConfig   string                  `json:"subscription_config"`
-		SubscriptionRuntime  string                  `json:"subscription_runtime"`
-		Selection            string                  `json:"selection"`
-		Output               string                  `json:"output"`
-		BackupDir            string                  `json:"backup_dir"`
-		Test                 *bool                   `json:"test"`
-		Core                 string                  `json:"core"`
-		RuntimeDir           string                  `json:"runtime_dir"`
+	var req struct {
+		UseCurrentDraft  bool                    `json:"use_current_draft"`
+		Generation       int64                   `json:"generation"`
+		Operations       []configpatch.Operation `json:"operations"`
+		BaseHashes       map[string]string       `json:"base_hashes"`
+		BaseRegistryHash string                  `json:"base_registry_hash"`
+		Test             *bool                   `json:"test"`
+		Background       *bool                   `json:"background"`
+		Wait             *bool                   `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		UseCurrentDraft      bool
+		Generation           int64
+		Operations           []configpatch.Operation
+		BaseHashes           map[string]string
+		BaseRegistryHash     string
+		PatchesDir           string
+		PolicyTemplate       string
+		Subscription         string
+		RulesCache           string
+		RuntimeProfileConfig string
+		ConfigPath           string
+		SubscriptionConfig   string
+		SubscriptionRuntime  string
+		Selection            string
+		Output               string
+		BackupDir            string
+		Test                 *bool
+		Core                 string
+		RuntimeDir           string
+	}{
+		UseCurrentDraft:  req.UseCurrentDraft,
+		Generation:       req.Generation,
+		Operations:       req.Operations,
+		BaseHashes:       req.BaseHashes,
+		BaseRegistryHash: req.BaseRegistryHash,
+		Test:             req.Test,
 	}
 	test := true
 	if in.Test != nil {
@@ -3077,26 +3118,37 @@ func (s *Server) clearConfigPatchDraft(generation int64) {
 }
 
 func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config               string `json:"config"`
-		PatchesDir           string `json:"patches_dir"`
-		RuntimeProfileConfig string `json:"runtime_profile_config"`
-		RuntimeProfile       string `json:"runtime_profile"`
-		Core                 string `json:"core"`
-		PolicyTemplate       string `json:"policy_template"`
-		PolicyTemplatesDir   string `json:"policy_templates_dir"`
-		ResetPatches         bool   `json:"reset_patches"`
-		Selection            string `json:"selection"`
-		Output               string `json:"output"`
-		ValidationCache      string `json:"validation_cache"`
-		RulesCache           string `json:"rules_cache"`
-		SubscriptionConfig   string `json:"subscription_config"`
-		Subscription         string `json:"subscription"`
-		SubscriptionRuntime  string `json:"subscription_runtime"`
-		RuntimeDir           string `json:"runtime_dir"`
+	var req struct {
+		RuntimeProfile string `json:"runtime_profile"`
+		Core           string `json:"core"`
+		PolicyTemplate string `json:"policy_template"`
+		ResetPatches   bool   `json:"reset_patches"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Config               string
+		PatchesDir           string
+		RuntimeProfileConfig string
+		RuntimeProfile       string
+		Core                 string
+		PolicyTemplate       string
+		PolicyTemplatesDir   string
+		ResetPatches         bool
+		Selection            string
+		Output               string
+		ValidationCache      string
+		RulesCache           string
+		SubscriptionConfig   string
+		Subscription         string
+		SubscriptionRuntime  string
+		RuntimeDir           string
+	}{
+		RuntimeProfile: req.RuntimeProfile,
+		Core:           req.Core,
+		PolicyTemplate: req.PolicyTemplate,
+		ResetPatches:   req.ResetPatches,
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
