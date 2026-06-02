@@ -161,3 +161,18 @@ func TestRuntimeSchemasExposeForceConfigTest(t *testing.T) {
 		}
 	}
 }
+
+func TestMihomoConfigTestSchemaUsesServerStatePaths(t *testing.T) {
+	schema := inputSchemaForTool("mihomo_config_test")
+	properties := schema["properties"].(map[string]any)
+	for _, forbidden := range []string{"config", "runtime_dir", "core", "record", "attestation", "promoted_config"} {
+		if _, ok := properties[forbidden]; ok {
+			t.Fatalf("mihomo_config_test schema exposes caller-managed %q: %+v", forbidden, properties)
+		}
+	}
+	for _, allowed := range []string{"timeout_ms", "background", "wait"} {
+		if _, ok := properties[allowed]; !ok {
+			t.Fatalf("mihomo_config_test schema missing %q: %+v", allowed, properties)
+		}
+	}
+}
