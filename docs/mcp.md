@@ -1,5 +1,11 @@
 目前 localClash MCP 工具可以理解成 6 組，核心目標是讓 Agent 能「先觀察、再規劃、再生成、最後執行」，避免一上來就動路由器網路。
 
+MCP 產品工具的傳入原則：Agent 傳「意圖、查詢、操作」，不傳本地 artifact
+位置。`config`、`subscription`、`runtime_dir`、`cache`、`provider_cache`、
+`output`、`core`、attestation 等路徑由 MCP server bootstrap state 和 workspace
+defaults 決定。需要檢查非標準位置時，應走 CLI/SSH/diagnostic 路徑，而不是讓
+Agent 在 MCP 參數裡整理一批路徑。
+
 **1. 自我發現與環境診斷**
 
 - `tools_list`：給不會展示 MCP registry 的 Agent 自己查工具清單。
@@ -19,6 +25,9 @@
 - `subscription_nodes_search`：按名稱搜尋節點。
 
 服務場景：小白給訂閱 URL 後，Agent 建立節點池，並能查 HK/JP/US 等節點候選。
+這組工具不要求 Agent 傳 `localclash-subscriptions.json`、`.runtime/subscriptions`
+或 `subscription.gob` 的位置；Agent 只傳訂閱來源、可選 source ids、節點 query
+或 limit。
 
 **3. 規則包與規則證據**
 
@@ -34,6 +43,8 @@
 的 `tool_args`。`sukkaw_ai`、`syncnext_SyncnextProxy` 這類 composite provider
 或 renderer 名稱不是 MCP selector，只能出現在明確讀取 generated config/file 的
 原始 Mihomo 內容裡。
+這組工具也不要求 Agent 傳 pack cache 或 provider-cache 目錄；cache 位置由
+server state 決定。
 
 **4. 配置狀態、構建與 Patch 工作流**
 
@@ -49,6 +60,9 @@
 - `config_render`：從 durable patch registry 或 compiled intent 重新渲染 `.runtime/mihomo/config.yaml`。
 
 服務場景：這是現在的「patch registry first」模型。Agent 先構建候選 overlay，再 draft patch operation 給用戶/自己審核，最後 apply，不直接亂改 compiled artifacts。
+這組工具的 MCP 參數不包含 `patches_dir`、compiled intent path、generated output
+path、subscription artifact path、runtime dir 或 core binary path。Agent 只能傳
+產品意圖、查詢開關與 reviewed operations。
 
 **5. 路由解釋與可理解性**
 
@@ -58,14 +72,17 @@
 - `router_takeover_status`：看 OpenWrt firewall/nft/DNS hijack/fwmark/TUN 接管狀態。
 
 服務場景：回答「現在 Telegram 為什麼不走代理」、「Steam 最終落到哪個出口」、「是否已接管路由器網路」。
+`routing_explain`、`runtime_profile_status`、`runtime_status` 和
+`router_takeover_status` 都從 server state 讀取本地位置，不要求 Agent 傳 config
+或 runtime path。
 
 **6. Mihomo Runtime API 與執行型工具**
 
 - `run_runtime`：啟動 Mihomo。
 - `mihomo_config_test`：顯式驗證 server state 中的 generated config，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。MCP caller 不傳 config path、runtime dir、core binary 或 attestation path；非標準路徑檢查應走 CLI/SSH 診斷。
-- `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。推薦用 `/version`、`/configs`、`/rules`、`/providers/rules`、`/proxies` 查 loaded runtime evidence；`/connections/` 存在，但 active connection 摘要優先用 `mihomo_connections_read`。
+- `mihomo_api_request`：只通過 server state 中 generated config 解析到的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。推薦用 `/version`、`/configs`、`/rules`、`/providers/rules`、`/proxies` 查 loaded runtime evidence；`/connections/` 存在，但 active connection 摘要優先用 `mihomo_connections_read`。
 - `mihomo_connections_read`：讀取 bounded Mihomo active connection snapshot；預設用 `GET /connections/` 做一次性觀測，`mode=stream` 才使用 WebSocket `/connections/` 讀取有限幀。用於回答「當前活躍連接」的命中規則與 selected proxy chain；沒有某個 domain 的 active connection，不代表未來連接不會匹配該規則。
-- `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token，也不輸出 token。
+- `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token 或 config path，也不輸出 token。
 - `restart_runtime`：MCP 預設 hot reload。它只校對已通過 `mihomo_config_test` 的 config hash，然後呼叫 Mihomo `PUT /configs`。Mihomo reload 是同步長操作；request timeout 只能表示結果不確定，不等於 reload 失敗。工具不做配置語義驗證，Agent 應根據本次改動用 `mihomo_api_request` 查 `/rules`、`/providers/rules`、`/proxies` 或 `/configs`。若要 stop/start，必須顯式傳 `strategy=process_restart`。
 - `stop_runtime`：停止 Mihomo；如果 router takeover 生效，預設拒絕，避免斷網。
 - `router_takeover_apply`：套用 localClash 管理的 OpenWrt runtime 接管規則。

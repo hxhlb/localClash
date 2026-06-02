@@ -154,20 +154,10 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"core":                   map[string]any{"type": "string", "enum": []string{"meta", "smart"}, "description": "Optional Mihomo core flavor to activate."},
-				"runtime_profile":        map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Optional runtime profile mode to activate."},
-				"policy_template":        map[string]any{"type": "string", "description": "Optional policy template id loaded from policy-templates/. Built-ins include minimal and localclash-default."},
-				"policy_templates_dir":   map[string]any{"type": "string", "description": "Directory containing policy template YAML files. Defaults to policy-templates."},
-				"reset_patches":          map[string]any{"type": "boolean", "description": "Replace patches/*.json with policy-template defaults before compiling. Use to restore default strategies."},
-				"patches_dir":            map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
-				"config":                 map[string]any{"type": "string", "description": "Compiled localClash intent path. Defaults to localclash-intent.json."},
-				"selection":              map[string]any{"type": "string", "description": "Compiled packs selection path. Defaults to localclash-packs.gob."},
-				"output":                 map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_profile_config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"rules_cache":            map[string]any{"type": "string", "description": "Pack cache directory used to validate policy_template pack references. Defaults to .runtime/rules/packs."},
-				"subscription":           map[string]any{"type": "string", "description": "Subscription gob path for readiness reporting. Defaults to subscription.gob."},
-				"subscription_config":    map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime":   map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"core":            map[string]any{"type": "string", "enum": []string{"meta", "smart"}, "description": "Optional Mihomo core flavor to activate."},
+				"runtime_profile": map[string]any{"type": "string", "enum": []string{"normal", "router"}, "description": "Optional runtime profile mode to activate."},
+				"policy_template": map[string]any{"type": "string", "description": "Optional policy template id loaded from policy-templates/. Built-ins include minimal and localclash-default."},
+				"reset_patches":   map[string]any{"type": "boolean", "description": "Replace patches/*.json with policy-template defaults before compiling. Use to restore default strategies."},
 			},
 		}
 	case "config_status":
@@ -175,18 +165,10 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":               map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash-intent.json."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
-				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.gob."},
-				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to .runtime/mihomo/config.yaml."},
-				"patches_dir":          map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
-				"patches":              map[string]any{"type": "boolean", "description": "Include compact patch inventory, registry_hash, and artifact paths."},
-				"policy_template":      map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
-				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum summary entries per section. Defaults to 20."},
+				"patches": map[string]any{"type": "boolean", "description": "Include compact patch inventory, registry_hash, and artifact paths."},
+				"detail":  map[string]any{"type": "boolean", "description": "Include generated-summary and overlay audit details."},
+				"resolve": map[string]any{"type": "boolean", "description": "Resolve selected subscription nodes. Defaults to detail."},
+				"limit":   map[string]any{"type": "integer", "minimum": 1, "description": "Maximum summary entries per section. Defaults to 20."},
 			},
 		}
 	case "config_render":
@@ -194,17 +176,9 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":               map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash-intent.json."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
-				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"selection":            map[string]any{"type": "string", "description": "Derived packs selection path. Defaults to localclash-packs.gob."},
-				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to .runtime/mihomo/config.yaml."},
-				"force":                map[string]any{"type": "boolean", "description": "Overwrite generated output. Defaults to true because .runtime/mihomo/config.yaml is a build artifact."},
-				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
-				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"force":      map[string]any{"type": "boolean", "description": "Overwrite generated output. Defaults to true because .runtime/mihomo/config.yaml is a build artifact."},
+				"background": map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "routing_explain":
@@ -214,13 +188,6 @@ func inputSchemaForTool(name string) map[string]any {
 			"required":             []string{"query"},
 			"properties": map[string]any{
 				"query":                map[string]any{"type": "string", "description": "Service, app, domain, exact pack name/source, policy group, or exit to explain, for example Steam, ChatGPT, openai.com, or Singapore."},
-				"config":               map[string]any{"type": "string", "description": "Durable localClash source-of-truth config path. Defaults to localclash-intent.json."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path used only for optional selector resolution. Defaults to subscription.gob."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
-				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"rule_sources":         map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be adapted. Defaults to rule-sources."},
-				"provider_cache":       map[string]any{"type": "string", "description": "Local provider-cache directory for optional domain/rule matching. Defaults to .runtime/rules/provider-cache."},
 				"include_rule_matches": map[string]any{"type": "boolean", "description": "Search cached rule/provider contents for the query. Defaults to true; does not download missing provider rules."},
 				"limit":                map[string]any{"type": "integer", "minimum": 1, "description": "Maximum matches per section. Defaults to 20."},
 			},
@@ -231,10 +198,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"required":             []string{"patch_id"},
 			"properties": map[string]any{
-				"patch_id":        map[string]any{"type": "string", "description": "Durable patch registry id from config_status(patches=true)."},
-				"patches_dir":     map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
-				"config":          map[string]any{"type": "string", "description": "Compiled localClash intent path used to infer policy_template. Defaults to localclash-intent.json."},
-				"policy_template": map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
+				"patch_id": map[string]any{"type": "string", "description": "Durable patch registry id from config_status(patches=true)."},
 			},
 		}
 	case "config_patch_draft":
@@ -244,23 +208,11 @@ func inputSchemaForTool(name string) map[string]any {
 			"additionalProperties": false,
 			"required":             []string{"operations"},
 			"properties": map[string]any{
-				"draft_name":           map[string]any{"type": "string", "description": "Optional display name for the single in-memory current draft. Not persisted and not used as an id."},
-				"operations":           map[string]any{"type": "array", "minItems": 1, "items": operation, "description": "Reviewed patch-registry operations. A new config_patch_draft call replaces the current in-memory draft slot."},
-				"patches_dir":          map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
-				"policy_template":      map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
-				"config":               map[string]any{"type": "string", "description": "Compiled localClash intent path. Defaults to localclash-intent.json."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
-				"rules_cache":          map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"runtime_profile":      map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"selection":            map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.gob."},
-				"output":               map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to .runtime/mihomo/config.yaml."},
-				"test":                 map[string]any{"type": "boolean", "description": "Resolve and render the draft for validation. Defaults to false for lightweight preview."},
-				"core":                 map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
-				"runtime_dir":          map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
-				"background":           map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
-				"wait":                 map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"draft_name": map[string]any{"type": "string", "description": "Optional display name for the single in-memory current draft. Not persisted and not used as an id."},
+				"operations": map[string]any{"type": "array", "minItems": 1, "items": operation, "description": "Reviewed patch-registry operations. A new config_patch_draft call replaces the current in-memory draft slot."},
+				"test":       map[string]any{"type": "boolean", "description": "Resolve and render the draft for validation. Defaults to false for lightweight preview."},
+				"background": map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "config_patch_apply":
@@ -269,30 +221,14 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"use_current_draft":   map[string]any{"type": "boolean", "description": "Apply the current in-memory draft created by config_patch_draft. Requires generation."},
-				"generation":          map[string]any{"type": "integer", "minimum": 1, "description": "Reviewed in-memory draft generation returned by config_patch_draft."},
-				"operations":          map[string]any{"type": "array", "minItems": 1, "items": operation, "description": "Explicit patch-registry operations to apply instead of use_current_draft."},
-				"base_hashes":         map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optimistic patch-content hashes returned by config_patch_draft."},
-				"base_registry_hash":  map[string]any{"type": "string", "description": "Registry hash returned by config_patch_draft; required for explicit operations."},
-				"patches_dir":         map[string]any{"type": "string", "description": "Durable patch registry directory. Defaults to patches/."},
-				"policy_template":     map[string]any{"type": "string", "description": "Optional policy template id used in registry_hash calculation."},
-				"config":              map[string]any{"type": "string", "description": "Compiled localClash intent path. Defaults to localclash-intent.json."},
-				"subscription":        map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"subscription_config": map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{
-					"type":        "string",
-					"description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions.",
-				},
-				"rules_cache":     map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"selection":       map[string]any{"type": "string", "description": "Persistent packs selection path. Defaults to localclash-packs.gob."},
-				"output":          map[string]any{"type": "string", "description": "Generated Mihomo config path. Defaults to .runtime/mihomo/config.yaml."},
-				"backup_dir":      map[string]any{"type": "string", "description": "Backup root for overwritten local artifacts. Defaults to .runtime/backups/config-patch-apply."},
-				"test":            map[string]any{"type": "boolean", "description": "Run Mihomo config test before committing. Defaults to true; test=false skips only the external core validation."},
-				"core":            map[string]any{"type": "string", "description": "Mihomo core path for config test. Defaults to the active runtime profile core path."},
-				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime artifact source for isolated config test. Defaults to .runtime/mihomo; live cache.db is not copied."},
-				"background":      map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
-				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"use_current_draft":  map[string]any{"type": "boolean", "description": "Apply the current in-memory draft created by config_patch_draft. Requires generation."},
+				"generation":         map[string]any{"type": "integer", "minimum": 1, "description": "Reviewed in-memory draft generation returned by config_patch_draft."},
+				"operations":         map[string]any{"type": "array", "minItems": 1, "items": operation, "description": "Explicit patch-registry operations to apply instead of use_current_draft."},
+				"base_hashes":        map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": "Optimistic patch-content hashes returned by config_patch_draft."},
+				"base_registry_hash": map[string]any{"type": "string", "description": "Registry hash returned by config_patch_draft; required for explicit operations."},
+				"test":               map[string]any{"type": "boolean", "description": "Run Mihomo config test before committing. Defaults to true; test=false skips only the external core validation."},
+				"background":         map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may render or test Mihomo config."},
+				"wait":               map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "nl_file":
@@ -352,15 +288,12 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"id":                   map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
-				"match":                matchIntent,
-				"nodes":                map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
-				"mode":                 map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
-				"reason":               map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
-				"boundary":             map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
-				"subscription":         map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"subscription_config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"subscription_runtime": map[string]any{"type": "string", "description": "Per-source subscription artifact directory. Defaults to .runtime/subscriptions."},
+				"id":       map[string]any{"type": "string", "description": "Reusable proxy group id, for example TempLine or SteamHK."},
+				"match":    matchIntent,
+				"nodes":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Exact subscription proxy names for a user-specified line. Use either match or nodes, not both."},
+				"mode":     map[string]any{"type": "string", "enum": []string{"manual", "auto", "smart", "direct"}, "description": "Desired proxy-group mode. manual becomes select; auto becomes url-test; smart becomes smart; direct becomes a named DIRECT-only exit."},
+				"reason":   map[string]any{"type": "string", "description": "Short durable reason used if selector repair needs user involvement."},
+				"boundary": map[string]any{"type": "string", "description": "Boundary note, for example name_based_hint_only."},
 			},
 			"required": []string{"id", "mode"},
 		}
@@ -395,11 +328,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":            map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":       map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Background runtime requires a localClash managed basename: lc-mihomo-meta or lc-mihomo-smart. Defaults to the active runtime profile core path."},
 				"foreground":        map[string]any{"type": "boolean", "description": "Foreground mode is not supported by MCP run_runtime; use CLI run for foreground execution."},
-				"log_file":          map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"force_config_test": map[string]any{"type": "boolean", "description": "Bypass the Mihomo config validation cache and run a fresh mihomo -t before starting."},
 				"background":        map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
 				"wait":              map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
@@ -416,7 +345,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"body":       map[string]any{"description": "JSON body for state-changing Mihomo API calls."},
 				"timeout_ms": map[string]any{"type": "integer", "minimum": 0, "description": "Request timeout in milliseconds. Defaults to 5000."},
 				"max_bytes":  map[string]any{"type": "integer", "minimum": 1, "description": "Maximum response bytes to return. Defaults to 262144."},
-				"config":     map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 			"required": []string{"path"},
 		}
@@ -432,7 +360,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"max_connections": map[string]any{"type": "integer", "minimum": 1, "description": "Maximum active connections to include per snapshot. Defaults to 200."},
 				"max_bytes":       map[string]any{"type": "integer", "minimum": 1, "description": "Maximum bytes to read from Mihomo. Defaults to 262144."},
 				"include_raw":     map[string]any{"type": "boolean", "description": "Include raw Mihomo connection snapshots in returned frames for field-level debugging. Defaults to false because raw snapshots are large."},
-				"config":          map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 		}
 	case "mihomo_logs_read":
@@ -446,7 +373,6 @@ func inputSchemaForTool(name string) map[string]any {
 				"duration_ms": map[string]any{"type": "integer", "minimum": 1, "description": "Maximum collection duration. Defaults to 3000."},
 				"max_lines":   map[string]any{"type": "integer", "minimum": 1, "description": "Maximum log lines to return. Defaults to 200."},
 				"max_bytes":   map[string]any{"type": "integer", "minimum": 1, "description": "Maximum log bytes to return. Defaults to 131072."},
-				"config":      map[string]any{"type": "string", "description": "Mihomo config path used to resolve external-controller and secret. Defaults to .runtime/mihomo/config.yaml."},
 			},
 		}
 	case "mihomo_config_test":
@@ -464,13 +390,7 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":            map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":       map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":              map[string]any{"type": "string", "description": "Mihomo core binary path. Background restart requires a localClash managed basename: lc-mihomo-meta or lc-mihomo-smart. Defaults to the active runtime profile core path."},
-				"log_file":          map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
 				"strategy":          map[string]any{"type": "string", "enum": []string{"hot_reload", "process_restart"}, "description": "Restart strategy. Defaults to hot_reload for MCP restart_runtime. Hot reload submits Mihomo PUT /configs and does not perform change-specific semantic verification."},
-				"config_sha256":     map[string]any{"type": "string", "description": "Expected config sha256 for hot_reload. If omitted, restart_runtime reads the last mihomo_config_test attestation."},
-				"attestation":       map[string]any{"type": "string", "description": "Passing mihomo_config_test attestation path for hot_reload. Defaults to .runtime/mihomo/config-test-attestation.json."},
 				"timeout_ms":        map[string]any{"type": "integer", "minimum": 0, "description": "For hot_reload, Mihomo PUT /configs request timeout in milliseconds; timeout means the reload result is indeterminate and the Agent should verify with mihomo_api_request. For process_restart, milliseconds to wait after SIGTERM. Defaults to 5000."},
 				"force":             map[string]any{"type": "boolean", "description": "Send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
 				"force_config_test": map[string]any{"type": "boolean", "description": "Only valid with strategy=process_restart. Hot reload requires a prior mihomo_config_test attestation instead."},
@@ -482,37 +402,22 @@ func inputSchemaForTool(name string) map[string]any {
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
-			"properties": map[string]any{
-				"config": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-			},
+			"properties":           map[string]any{},
 		}
 	case "runtime_status":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
-			"properties": map[string]any{
-				"config":      map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":        map[string]any{"type": "string", "description": "Mihomo core binary path used for output context. Runtime identity is based on localClash managed core process names."},
-				"log_file":    map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
-			},
+			"properties":           map[string]any{},
 		}
 	case "router_takeover_status", "router_takeover_apply", "router_takeover_stop":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path. Defaults to localclash-runtime.json."},
-				"config":          map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"log_file":        map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
-				"state_dir":       map[string]any{"type": "string", "description": "localClash router takeover runtime state directory. Defaults to /tmp/localclash/router-takeover so reboot clears it."},
-				"dns_port":        map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo DNS listen port. Defaults to the router profile DNS listen port or 7874."},
-				"redir_port":      map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo redir-port. Defaults to the router profile redir-port or 7892."},
-				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device name. Defaults to the router profile TUN device or utun."},
-				"dry_run":         map[string]any{"type": "boolean", "description": "Return the shell script without applying changes. Supported by router_takeover_apply and router_takeover_stop."},
-				"background":      map[string]any{"type": "boolean", "description": "Run apply/stop as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools; ignored by router_takeover_status."},
-				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false; ignored by router_takeover_status."},
+				"dry_run":    map[string]any{"type": "boolean", "description": "Return the shell script without applying changes. Supported by router_takeover_apply and router_takeover_stop."},
+				"background": map[string]any{"type": "boolean", "description": "Run apply/stop as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools; ignored by router_takeover_status."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false; ignored by router_takeover_status."},
 			},
 		}
 	case "stop_runtime":
@@ -520,38 +425,24 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"runtime_profile": map[string]any{"type": "string", "description": "Runtime profile YAML path used to detect router takeover. Defaults to localclash-runtime.json."},
-				"config":          map[string]any{"type": "string", "description": "Mihomo generated config path. Defaults to .runtime/mihomo/config.yaml."},
-				"core":            map[string]any{"type": "string", "description": "Mihomo core binary path used for startup context. Runtime stop identity is based on localClash managed core process names."},
-				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"log_file":        map[string]any{"type": "string", "description": "Runtime log file. Defaults to .runtime/mihomo/mihomo.log."},
-				"state_dir":       map[string]any{"type": "string", "description": "localClash router takeover runtime state directory used for takeover detection. Defaults to /tmp/localclash/router-takeover."},
-				"dns_port":        map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo DNS listen port used for takeover detection. Defaults to router profile DNS listen port or 7874."},
-				"redir_port":      map[string]any{"type": "integer", "minimum": 1, "description": "Mihomo redir-port used for takeover detection. Defaults to router profile redir-port or 7892."},
-				"tun_device":      map[string]any{"type": "string", "description": "Mihomo TUN device used for takeover detection. Defaults to router profile TUN device or utun."},
-				"timeout_ms":      map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
-				"force":           map[string]any{"type": "boolean", "description": "Bypass the active router takeover guard and send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
-				"background":      map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
-				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"timeout_ms": map[string]any{"type": "integer", "minimum": 0, "description": "Milliseconds to wait after SIGTERM before reporting timeout. Defaults to 5000."},
+				"force":      map[string]any{"type": "boolean", "description": "Bypass the active router takeover guard and send SIGKILL if the runtime does not exit before timeout. Defaults to false."},
+				"background": map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for MCP execution tools."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "subscriptions_status":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
-			"properties": map[string]any{
-				"config":      map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"merged":      map[string]any{"type": "string", "description": "Effective merged subscription path. Defaults to subscription.gob."},
-				"runtime_dir": map[string]any{"type": "string", "description": "Runtime source artifact directory. Defaults to .runtime/subscriptions."},
-			},
+			"properties":           map[string]any{},
 		}
 	case "subscription_nodes_list":
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"subscription": map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
-				"limit":        map[string]any{"type": "integer", "minimum": 0, "description": "Maximum returned proxy summaries. Defaults to 100."},
+				"limit": map[string]any{"type": "integer", "minimum": 0, "description": "Maximum returned proxy summaries. Defaults to 100."},
 			},
 		}
 	case "subscription_nodes_search":
@@ -559,7 +450,6 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"subscription":   map[string]any{"type": "string", "description": "Subscription gob path. Defaults to subscription.gob."},
 				"query":          map[string]any{"type": "string", "description": "Literal substring to match against subscription proxy names."},
 				"patterns":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Regular expressions to match against subscription proxy names."},
 				"case_sensitive": map[string]any{"type": "boolean", "description": "Use case-sensitive query and pattern matching. Defaults to false."},
@@ -579,7 +469,6 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":  map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
 				"sources": map[string]any{"type": "array", "items": source, "description": "Complete subscription source list to write."},
 				"replace": map[string]any{"type": "boolean", "description": "Replace existing sources. Defaults to true; false is not supported in the first version."},
 			},
@@ -590,19 +479,11 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":            map[string]any{"type": "string", "description": "Subscription sources config path. Defaults to localclash-subscriptions.json."},
-				"ids":               map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional source ids to refresh. Defaults to all."},
-				"runtime_dir":       map[string]any{"type": "string", "description": "Runtime source artifact directory. Defaults to .runtime/subscriptions."},
-				"merged":            map[string]any{"type": "string", "description": "Effective merged subscription path. Defaults to subscription.gob."},
-				"force":             map[string]any{"type": "boolean", "description": "Reserved compatibility flag. Existing artifacts are replaced."},
-				"user_agent":        map[string]any{"type": "string", "description": "Subscription request User-Agent. Defaults to a Clash/Mihomo-like user agent."},
-				"localclash_config": map[string]any{"type": "string", "description": "Durable localClash selector config path. Defaults to localclash-intent.json."},
-				"selection":         map[string]any{"type": "string", "description": "Derived pack selection path. Defaults to localclash-packs.gob."},
-				"rules_cache":       map[string]any{"type": "string", "description": "Rule pack cache directory used when auto-rendering after selector refresh."},
-				"runtime_profile":   map[string]any{"type": "string", "description": "Runtime profile YAML path used when auto-rendering after selector refresh. Defaults to localclash-runtime.json."},
-				"output":            map[string]any{"type": "string", "description": "Generated Mihomo config path to update when selector refresh succeeds. Defaults to .runtime/mihomo/config.yaml."},
-				"background":        map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may perform network downloads."},
-				"wait":              map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional source ids to refresh. Defaults to all."},
+				"force":      map[string]any{"type": "boolean", "description": "Reserved compatibility flag. Existing artifacts are replaced."},
+				"user_agent": map[string]any{"type": "string", "description": "Subscription request User-Agent. Defaults to a Clash/Mihomo-like user agent."},
+				"background": map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may perform network downloads."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "packs_list":
@@ -621,10 +502,8 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"source":      map[string]any{"type": "string", "description": "Exact pack source from packs_list[].source or tool_args, for example blackmatrix7 or v2fly-dlc."},
-				"pack":        map[string]any{"type": "string", "description": "Exact upstream pack name from packs_list[].pack or tool_args, for example OpenAI or geolocation-!cn."},
-				"cache":       map[string]any{"type": "string", "description": "Pack cache directory. Defaults to .runtime/rules/packs."},
-				"runtime_dir": map[string]any{"type": "string", "description": "Mihomo runtime data directory used to resolve provider paths. Defaults to .runtime/mihomo."},
+				"source": map[string]any{"type": "string", "description": "Exact pack source from packs_list[].source or tool_args, for example blackmatrix7 or v2fly-dlc."},
+				"pack":   map[string]any{"type": "string", "description": "Exact upstream pack name from packs_list[].pack or tool_args, for example OpenAI or geolocation-!cn."},
 			},
 			"required": []string{"source", "pack"},
 		}
@@ -633,14 +512,11 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"source":         map[string]any{"type": "string", "description": "Exact pack source from packs_list[].source or tool_args, for example sukkaw, blackmatrix7, or v2fly-dlc."},
-				"pack":           map[string]any{"type": "string", "description": "Exact upstream pack name from packs_list[].pack or tool_args, for example ai, OpenAI, or geolocation-!cn."},
-				"component":      map[string]any{"type": "string", "description": "Optional component id such as domainset, non_ip, ip, or mixed provider id."},
-				"limit":          map[string]any{"type": "integer", "minimum": 0, "description": "Maximum sample rules per component. Defaults to 120. Use 0 to omit samples."},
-				"refresh":        map[string]any{"type": "boolean", "description": "Force refetching provider rules instead of using provider-cache."},
-				"cache":          map[string]any{"type": "string", "description": "Pack catalog cache directory. Defaults to .runtime/rules/packs."},
-				"sources":        map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be ensured. Defaults to rule-sources."},
-				"provider_cache": map[string]any{"type": "string", "description": "Provider rules cache directory. Defaults to .runtime/rules/provider-cache."},
+				"source":    map[string]any{"type": "string", "description": "Exact pack source from packs_list[].source or tool_args, for example sukkaw, blackmatrix7, or v2fly-dlc."},
+				"pack":      map[string]any{"type": "string", "description": "Exact upstream pack name from packs_list[].pack or tool_args, for example ai, OpenAI, or geolocation-!cn."},
+				"component": map[string]any{"type": "string", "description": "Optional component id such as domainset, non_ip, ip, or mixed provider id."},
+				"limit":     map[string]any{"type": "integer", "minimum": 0, "description": "Maximum sample rules per component. Defaults to 120. Use 0 to omit samples."},
+				"refresh":   map[string]any{"type": "boolean", "description": "Force refetching provider rules instead of using provider-cache."},
 			},
 			"required": []string{"source", "pack"},
 		}
@@ -658,15 +534,12 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"packs":          map[string]any{"type": "array", "items": packSelector, "description": "Explicit source/pack pairs to prefetch."},
-				"source":         map[string]any{"type": "string", "description": "Exact pack source filter, for example sukkaw or blackmatrix7."},
-				"name":           map[string]any{"type": "string", "description": "Case-insensitive substring filter for pack name or exact upstream pack value."},
-				"target":         map[string]any{"type": "string", "description": "Exact target filter."},
-				"limit":          map[string]any{"type": "integer", "minimum": 1, "description": "Maximum packs selected by filters. Defaults to 20."},
-				"refresh":        map[string]any{"type": "boolean", "description": "Force refetching provider rules instead of using provider-cache."},
-				"cache":          map[string]any{"type": "string", "description": "Pack catalog cache directory. Defaults to .runtime/rules/packs."},
-				"sources":        map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be ensured. Defaults to rule-sources."},
-				"provider_cache": map[string]any{"type": "string", "description": "Provider rules cache directory. Defaults to .runtime/rules/provider-cache."},
+				"packs":   map[string]any{"type": "array", "items": packSelector, "description": "Explicit source/pack pairs to prefetch."},
+				"source":  map[string]any{"type": "string", "description": "Exact pack source filter, for example sukkaw or blackmatrix7."},
+				"name":    map[string]any{"type": "string", "description": "Case-insensitive substring filter for pack name or exact upstream pack value."},
+				"target":  map[string]any{"type": "string", "description": "Exact target filter."},
+				"limit":   map[string]any{"type": "integer", "minimum": 1, "description": "Maximum packs selected by filters. Defaults to 20."},
+				"refresh": map[string]any{"type": "boolean", "description": "Force refetching provider rules instead of using provider-cache."},
 			},
 		}
 	case "pack_rules_query":
@@ -674,14 +547,11 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"query":          map[string]any{"type": "string", "description": "Domain or keyword to search in locally cached provider rules, for example huggingface.co."},
-				"source":         map[string]any{"type": "string", "description": "Optional exact pack source filter."},
-				"name":           map[string]any{"type": "string", "description": "Optional case-insensitive pack name or exact upstream pack filter."},
-				"target":         map[string]any{"type": "string", "description": "Optional exact target filter."},
-				"limit":          map[string]any{"type": "integer", "minimum": 1, "description": "Maximum returned matches. Defaults to 20."},
-				"cache":          map[string]any{"type": "string", "description": "Pack catalog cache directory. Defaults to .runtime/rules/packs."},
-				"sources":        map[string]any{"type": "string", "description": "Rule sources directory used if pack catalog must be ensured. Defaults to rule-sources."},
-				"provider_cache": map[string]any{"type": "string", "description": "Provider rules cache directory. Defaults to .runtime/rules/provider-cache."},
+				"query":  map[string]any{"type": "string", "description": "Domain or keyword to search in locally cached provider rules, for example huggingface.co."},
+				"source": map[string]any{"type": "string", "description": "Optional exact pack source filter."},
+				"name":   map[string]any{"type": "string", "description": "Optional case-insensitive pack name or exact upstream pack filter."},
+				"target": map[string]any{"type": "string", "description": "Optional exact target filter."},
+				"limit":  map[string]any{"type": "integer", "minimum": 1, "description": "Maximum returned matches. Defaults to 20."},
 			},
 			"required": []string{"query"},
 		}

@@ -510,7 +510,7 @@ func TestMCPAsyncTaskLogPathCanBeReadByNLFile(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "run_runtime",
-			"arguments": map[string]any{"config": "missing.yaml"},
+			"arguments": map[string]any{},
 		},
 	})
 	if runResp.Error != nil {
@@ -585,6 +585,7 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 	writeMCPPolicyTemplateFixture(t, templatesDir)
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:      dir,
 			RulesCacheDir:      cacheDir,
 			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
 			SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
@@ -597,7 +598,7 @@ func TestToolsCallConfigConfigureWritesLocalClashDefaultTemplate(t *testing.T) {
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name":      "config_configure",
-			"arguments": map[string]any{"config": configPath, "policy_templates_dir": templatesDir, "policy_template": "localclash-default", "core": "smart", "runtime_profile": "router"},
+			"arguments": map[string]any{"policy_template": "localclash-default", "core": "smart", "runtime_profile": "router"},
 		},
 	})
 	if resp.Error != nil {
@@ -687,6 +688,7 @@ packs:
 	})
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
 			RulesCacheDir:       cacheDir,
 			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
 			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
@@ -702,7 +704,6 @@ packs:
 			"name": "routing_explain",
 			"arguments": map[string]any{
 				"query":                "Steam",
-				"config":               configPath,
 				"include_rule_matches": false,
 			},
 		},
@@ -930,17 +931,20 @@ func TestToolsCallSedFileCanWrite(t *testing.T) {
 
 func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "subscriptions_status",
-			"arguments": map[string]any{
-				"config":      filepath.Join(dir, "localclash-subscriptions.json"),
-				"merged":      filepath.Join(dir, "subscription.gob"),
-				"runtime_dir": filepath.Join(dir, ".runtime", "subscriptions"),
-			},
+			"name":      "subscriptions_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -958,14 +962,18 @@ func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
 
 func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_configure",
 			"arguments": map[string]any{
-				"config": filepath.Join(dir, "localclash-subscriptions.json"),
 				"sources": []map[string]any{
 					{"url": "https://example.com/sub?token=secret-token"},
 				},
@@ -991,14 +999,18 @@ func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) 
 
 func TestToolsCallSubscriptionsConfigureRejectsSourceID(t *testing.T) {
 	dir := t.TempDir()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_configure",
 			"arguments": map[string]any{
-				"config": filepath.Join(dir, "localclash-subscriptions.json"),
 				"sources": []map[string]any{
 					{"id": "primary", "url": "https://example.com/sub?token=secret-token"},
 				},
@@ -1012,17 +1024,21 @@ func TestToolsCallSubscriptionsConfigureRejectsSourceID(t *testing.T) {
 
 func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
 	paths := setupMCPSubscriptionsFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig:  paths.config,
+			SubscriptionRuntime: paths.runtimeDir,
+			SubscriptionPath:    paths.merged,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_refresh",
 			"arguments": map[string]any{
-				"config":      paths.config,
-				"runtime_dir": paths.runtimeDir,
-				"merged":      paths.merged,
-				"background":  false,
+				"background": false,
 			},
 		},
 	})
@@ -1088,21 +1104,26 @@ packs:
     pack: OpenAI
     target: AI
 `)
-	resp := callHandle(t, map[string]any{
+	refreshServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			SubscriptionConfig:  subConfig,
+			SubscriptionRuntime: runtimeDir,
+			SubscriptionPath:    paths.subscription,
+			PacksSelectionPath:  filepath.Join(dir, "localclash-packs.gob"),
+			RulesCacheDir:       paths.cache,
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:     generated,
+		},
+	})
+	resp := callHandleWithServer(t, refreshServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_refresh",
 			"arguments": map[string]any{
-				"config":            subConfig,
-				"runtime_dir":       runtimeDir,
-				"merged":            paths.subscription,
-				"localclash_config": localClashConfig,
-				"selection":         filepath.Join(dir, "localclash-packs.gob"),
-				"rules_cache":       paths.cache,
-				"output":            generated,
-				"background":        false,
+				"background": false,
 			},
 		},
 	})
@@ -1155,10 +1176,7 @@ packs:
 		"params": map[string]any{
 			"name": "config_status",
 			"arguments": map[string]any{
-				"config":       localClashConfig,
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"resolve":      true,
+				"resolve": true,
 			},
 		},
 	})
@@ -1190,6 +1208,7 @@ packs:
 
 func TestToolsCallConfigStatusRejectsInvalidUserProfile(t *testing.T) {
 	dir := t.TempDir()
+	t.Chdir(dir)
 	runtimePath := filepath.Join(dir, "localclash-runtime.json")
 	writeMCPFile(t, filepath.Join(dir, "localclash-user.json"), `rules:
   - MATCH,DIRECT
@@ -1200,13 +1219,8 @@ func TestToolsCallConfigStatusRejectsInvalidUserProfile(t *testing.T) {
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_status",
-			"arguments": map[string]any{
-				"config":          filepath.Join(dir, "localclash-intent.json"),
-				"runtime_profile": runtimePath,
-				"subscription":    filepath.Join(dir, "subscription.gob"),
-				"rules_cache":     filepath.Join(dir, "rules"),
-			},
+			"name":      "config_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error == nil || !strings.Contains(resp.Error.Message, "rules") || !strings.Contains(resp.Error.Message, "localclash-user.json") {
@@ -1233,19 +1247,26 @@ packs:
     pack: OpenAI
     target: AI
 `)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			GeneratedConfig:     generated,
+			SubscriptionPath:    paths.subscription,
+			RulesCacheDir:       paths.cache,
+			PacksSelectionPath:  selection,
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "config_render",
 			"arguments": map[string]any{
-				"config":       localClashConfig,
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"selection":    selection,
-				"output":       generated,
-				"background":   false,
+				"background": false,
 			},
 		},
 	})
@@ -1303,21 +1324,26 @@ packs:
     target: AI
 `)
 	writeMCPFile(t, generated, "sentinel: keep\n")
-	resp := callHandle(t, map[string]any{
+	refreshServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			SubscriptionConfig:  subConfig,
+			SubscriptionRuntime: runtimeDir,
+			SubscriptionPath:    paths.subscription,
+			PacksSelectionPath:  filepath.Join(dir, "localclash-packs.gob"),
+			RulesCacheDir:       paths.cache,
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:     generated,
+		},
+	})
+	resp := callHandleWithServer(t, refreshServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_refresh",
 			"arguments": map[string]any{
-				"config":            subConfig,
-				"runtime_dir":       runtimeDir,
-				"merged":            paths.subscription,
-				"localclash_config": localClashConfig,
-				"selection":         filepath.Join(dir, "localclash-packs.gob"),
-				"rules_cache":       paths.cache,
-				"output":            generated,
-				"background":        false,
+				"background": false,
 			},
 		},
 	})
@@ -1341,15 +1367,17 @@ packs:
 
 func TestToolsCallSubscriptionNodesListReturnsSafeSummaries(t *testing.T) {
 	subscription := setupMCPSubscriptionNodesFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{SubscriptionPath: subscription},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscription_nodes_list",
 			"arguments": map[string]any{
-				"subscription": subscription,
-				"limit":        1,
+				"limit": 1,
 			},
 		},
 	})
@@ -1375,15 +1403,17 @@ func TestToolsCallSubscriptionNodesListReturnsSafeSummaries(t *testing.T) {
 
 func TestToolsCallSubscriptionNodesSearchReturnsNameMatches(t *testing.T) {
 	subscription := setupMCPSubscriptionNodesFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{SubscriptionPath: subscription},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscription_nodes_search",
 			"arguments": map[string]any{
-				"subscription": subscription,
-				"query":        "香港",
+				"query": "香港",
 			},
 		},
 	})
@@ -1461,18 +1491,24 @@ func TestToolsCallConfigPatchDraftSupportsPolicyGroups(t *testing.T) {
 
 func TestToolsCallProxyGroupBuildReturnsReusableIntent(t *testing.T) {
 	paths := setupMCPPlanFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionPath:    paths.subscription,
+			SubscriptionConfig:  filepath.Join(filepath.Dir(paths.subscription), "localclash-subscriptions.json"),
+			SubscriptionRuntime: filepath.Join(filepath.Dir(paths.subscription), ".runtime", "subscriptions"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "proxy_group_build",
 			"arguments": map[string]any{
-				"id":           "TempLine",
-				"mode":         "manual",
-				"subscription": paths.subscription,
-				"nodes":        []string{"SG 01"},
-				"reason":       "User explicitly selected this line.",
+				"id":     "TempLine",
+				"mode":   "manual",
+				"nodes":  []string{"SG 01"},
+				"reason": "User explicitly selected this line.",
 			},
 		},
 	})
@@ -1676,7 +1712,7 @@ func TestToolsCallConfigPatchApplyPersistsSelectionAndGeneratedConfig(t *testing
 }
 
 func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
-	paths := setupMCPPlanFixture(t)
+	setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -1684,11 +1720,8 @@ func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
 		"params": map[string]any{
 			"name": "config_patch_draft",
 			"arguments": map[string]any{
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         true,
-				"background":   false,
+				"test":       true,
+				"background": false,
 				"operations": []map[string]any{
 					{
 						"op":       "upsert_patch",
@@ -1713,7 +1746,7 @@ func TestToolsCallConfigPatchDraftInvalidInputReturnsError(t *testing.T) {
 }
 
 func TestToolsCallConfigPatchDraftRejectsLegacyPackID(t *testing.T) {
-	paths := setupMCPPlanFixture(t)
+	setupMCPPlanFixture(t)
 	resp := callHandle(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -1721,11 +1754,8 @@ func TestToolsCallConfigPatchDraftRejectsLegacyPackID(t *testing.T) {
 		"params": map[string]any{
 			"name": "config_patch_draft",
 			"arguments": map[string]any{
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         false,
-				"background":   false,
+				"test":       false,
+				"background": false,
 				"operations": []map[string]any{
 					{
 						"op":       "upsert_patch",
@@ -1972,18 +2002,22 @@ func TestToolsCallPacksGetReadsCurrentCatalogWhenServerStateIsStale(t *testing.T
 func TestToolsCallPackRulesReadReturnsRuleSamples(t *testing.T) {
 	cache, providerCache, server := setupMCPPackRulesFixture(t, "DOMAIN-SUFFIX,openai.com\nDOMAIN-SUFFIX,chatgpt.com\n")
 	defer server.Close()
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir: cache,
+			RuntimeRoot:   filepath.Dir(filepath.Dir(providerCache)),
+		},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "pack_rules_read",
 			"arguments": map[string]any{
-				"source":         "sukkaw",
-				"pack":           "ai",
-				"cache":          cache,
-				"provider_cache": providerCache,
-				"limit":          1,
+				"source": "sukkaw",
+				"pack":   "ai",
+				"limit":  1,
 			},
 		},
 	})
@@ -2010,32 +2044,34 @@ func TestToolsCallPackRulesReadReturnsRuleSamples(t *testing.T) {
 func TestToolsCallPackRulesPrefetchThenQuery(t *testing.T) {
 	cache, providerCache, server := setupMCPPackRulesFixture(t, "DOMAIN-SUFFIX,huggingface.co\n")
 	defer server.Close()
-	prefetch := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir: cache,
+			RuntimeRoot:   filepath.Dir(filepath.Dir(providerCache)),
+		},
+	})
+	prefetch := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "pack_rules_prefetch",
 			"arguments": map[string]any{
-				"packs":          []map[string]any{{"source": "sukkaw", "pack": "ai"}},
-				"cache":          cache,
-				"provider_cache": providerCache,
+				"packs": []map[string]any{{"source": "sukkaw", "pack": "ai"}},
 			},
 		},
 	})
 	if prefetch.Error != nil {
 		t.Fatalf("pack_rules_prefetch returned JSON-RPC error: %+v", prefetch.Error)
 	}
-	query := callHandle(t, map[string]any{
+	query := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "pack_rules_query",
 			"arguments": map[string]any{
-				"query":          "cdn.huggingface.co",
-				"cache":          cache,
-				"provider_cache": providerCache,
+				"query": "cdn.huggingface.co",
 			},
 		},
 	})
@@ -2079,14 +2115,19 @@ func TestToolsCallPackRulesPrefetchRejectsLegacyIDs(t *testing.T) {
 
 func TestToolsCallConfigStatusReturnsGeneratedSummary(t *testing.T) {
 	config := setupMCPInspectConfig(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:    config,
+			RuntimeProfilePath: filepath.Join(filepath.Dir(config), "localclash-runtime.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "config_status",
 			"arguments": map[string]any{
-				"output": config,
 				"detail": true,
 			},
 		},
@@ -2148,14 +2189,19 @@ func guidanceContains(values []any, needle string) bool {
 
 func TestToolsCallConfigStatusReturnsOverlaySummary(t *testing.T) {
 	config := setupMCPInspectConfig(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:    config,
+			RuntimeProfilePath: filepath.Join(filepath.Dir(config), "localclash-runtime.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "config_status",
 			"arguments": map[string]any{
-				"output": config,
 				"detail": true,
 			},
 		},
@@ -2187,19 +2233,25 @@ func TestToolsCallConfigStatusWarnsWhenGeneratedSourceIsMissing(t *testing.T) {
 	writeMCPFile(t, selection, "version: 1\nproxy_groups: {}\nenabled_packs: []\n")
 	writeMCPFile(t, runtimeProfile, "version: 2\nmode: normal\ncore: meta\n")
 
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			GeneratedConfig:     generated,
+			SubscriptionPath:    subscription,
+			PacksSelectionPath:  selection,
+			RuntimeProfilePath:  runtimeProfile,
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+			RulesCacheDir:       filepath.Join(dir, ".runtime", "rules", "packs"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "config_status",
-			"arguments": map[string]any{
-				"config":          missingConfig,
-				"subscription":    subscription,
-				"selection":       selection,
-				"runtime_profile": runtimeProfile,
-				"output":          generated,
-			},
+			"name":      "config_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -2328,18 +2380,21 @@ sleep 30
 		t.Fatal(err)
 	}
 	workDir := filepath.Join(dir, "runtime")
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"core":        core,
-				"config":      config,
-				"runtime_dir": workDir,
-				"log_file":    filepath.Join(workDir, "mihomo.log"),
-				"background":  false,
+				"background": false,
 			},
 		},
 	})
@@ -2361,14 +2416,21 @@ sleep 30
 }
 
 func TestRunRuntimeToolPreflightErrorReturnsToolResult(t *testing.T) {
-	resp := callHandle(t, map[string]any{
+	dir := t.TempDir()
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  filepath.Join(dir, "missing.yaml"),
+			MihomoRuntimeDir: filepath.Join(dir, "runtime"),
+			CorePath:         filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"config":     filepath.Join(t.TempDir(), "missing.yaml"),
 				"background": false,
 			},
 		},
@@ -2415,17 +2477,20 @@ sleep 30
 	}
 	writeMCPValidationCache(t, mihomotest.DefaultCachePath(workDir), core, config)
 
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "restart_runtime",
 			"arguments": map[string]any{
-				"core":              core,
-				"config":            config,
-				"runtime_dir":       workDir,
-				"log_file":          filepath.Join(workDir, "mihomo.log"),
 				"strategy":          "process_restart",
 				"force_config_test": true,
 				"background":        false,
@@ -2466,14 +2531,16 @@ func TestMihomoAPIRequestToolUsesConfiguredController(t *testing.T) {
 	defer api.Close()
 	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: test-secret\n")
 
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{GeneratedConfig: config},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_api_request",
 			"arguments": map[string]any{
-				"config": config,
 				"method": "GET",
 				"path":   "/proxies",
 				"query":  map[string]any{"name": "香港-Vmess-ARGO"},
@@ -2528,15 +2595,17 @@ func TestMihomoConnectionsReadToolReadsSnapshot(t *testing.T) {
 	defer api.Close()
 	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: conn-secret\n")
 
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{GeneratedConfig: config},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_connections_read",
 			"arguments": map[string]any{
-				"config": config,
-				"mode":   "snapshot",
+				"mode": "snapshot",
 			},
 		},
 	})
@@ -2571,14 +2640,16 @@ func TestMihomoLogsReadToolReadsBoundedHTTPStream(t *testing.T) {
 	defer api.Close()
 	writeMCPFile(t, config, "external-controller: "+api.URL+"\nsecret: log-secret\n")
 
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{GeneratedConfig: config},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_logs_read",
 			"arguments": map[string]any{
-				"config":    config,
 				"transport": "http_stream",
 				"level":     "info",
 				"max_lines": 1,
@@ -2685,18 +2756,104 @@ func TestMihomoConfigTestToolRejectsCallerManagedPaths(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolsRejectCallerManagedPaths(t *testing.T) {
+	dir := t.TempDir()
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:    filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:           filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	}
+	server := NewServerWithState(state)
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "run_runtime", args: map[string]any{"config": "other.yaml", "background": false}},
+		{name: "restart_runtime", args: map[string]any{"core": "other-core", "background": false}},
+		{name: "runtime_status", args: map[string]any{"runtime_dir": "other-runtime"}},
+		{name: "router_takeover_status", args: map[string]any{"state_dir": "other-state"}},
+		{name: "router_takeover_apply", args: map[string]any{"dns_port": 1053, "background": false}},
+		{name: "router_takeover_stop", args: map[string]any{"tun_device": "utun9", "background": false}},
+		{name: "stop_runtime", args: map[string]any{"runtime_profile": "other-profile", "background": false}},
+	} {
+		resp := callHandleWithServer(t, server, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      tc.name,
+				"arguments": tc.args,
+			},
+		})
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, "unknown field") {
+			t.Fatalf("%s error = %+v, want strict field rejection", tc.name, resp.Error)
+		}
+	}
+}
+
+func TestAsyncToolsRejectUnknownFieldsBeforeQueue(t *testing.T) {
+	dir := t.TempDir()
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:    filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:           filepath.Join(dir, "lc-mihomo-meta"),
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+		},
+	}
+	server := NewServerWithState(state)
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "config_render", args: map[string]any{"config": "other.yaml"}},
+		{name: "config_patch_draft", args: map[string]any{"config": "other.yaml"}},
+		{name: "config_patch_apply", args: map[string]any{"config": "other.yaml"}},
+		{name: "mihomo_config_test", args: map[string]any{"config": "other.yaml"}},
+		{name: "subscriptions_refresh", args: map[string]any{"config": "other.yaml"}},
+		{name: "run_runtime", args: map[string]any{"config": "other.yaml"}},
+		{name: "restart_runtime", args: map[string]any{"config": "other.yaml"}},
+		{name: "router_takeover_apply", args: map[string]any{"config": "other.yaml"}},
+		{name: "router_takeover_stop", args: map[string]any{"config": "other.yaml"}},
+		{name: "stop_runtime", args: map[string]any{"config": "other.yaml"}},
+	} {
+		resp := callHandleWithServer(t, server, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      tc.name,
+				"arguments": tc.args,
+			},
+		})
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, `unknown field "config"`) {
+			t.Fatalf("%s error = %+v, want config field rejection before async queue", tc.name, resp.Error)
+		}
+	}
+}
+
 func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:         filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "run_runtime",
-			"arguments": map[string]any{
-				"config": "missing.yaml",
-			},
+			"name":      "run_runtime",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -2733,10 +2890,8 @@ func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 		t.Fatalf("read log file: %v", err)
 	}
 	if !strings.Contains(string(logText), `"event":"queued"`) ||
-		!strings.Contains(string(logText), `"event":"error"`) ||
-		!strings.Contains(string(logText), `"event":"stage_started"`) ||
-		!strings.Contains(string(logText), `"event":"task_monitor_summary"`) {
-		t.Fatalf("log = %s, want queued, stage_started, task_monitor_summary, and error events", logText)
+		!strings.Contains(string(logText), `"event":"started"`) {
+		t.Fatalf("log = %s, want queued and started events", logText)
 	}
 }
 
@@ -2793,18 +2948,20 @@ func TestRuntimeStatusToolReturnsSerializableResult(t *testing.T) {
 	}
 	defer killMCPProcess(cmd.Process.Pid)
 	go func() { _ = cmd.Wait() }()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "runtime_status",
-			"arguments": map[string]any{
-				"config":      config,
-				"runtime_dir": workDir,
-				"core":        core,
-				"log_file":    filepath.Join(workDir, "mihomo.log"),
-			},
+			"name":      "runtime_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -2847,18 +3004,21 @@ sleep 30
 		t.Fatal(err)
 	}
 	workDir := filepath.Join(dir, "runtime")
-	runResp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  config,
+			MihomoRuntimeDir: workDir,
+			CorePath:         core,
+		},
+	})
+	runResp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "run_runtime",
 			"arguments": map[string]any{
-				"core":        core,
-				"config":      config,
-				"runtime_dir": workDir,
-				"log_file":    filepath.Join(workDir, "mihomo.log"),
-				"background":  false,
+				"background": false,
 			},
 		},
 	})
@@ -2870,18 +3030,16 @@ sleep 30
 	pid := int(runContent["pid"].(float64))
 	defer killMCPProcess(pid)
 
-	stopResp := callHandle(t, map[string]any{
+	stopResp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "stop_runtime",
 			"arguments": map[string]any{
-				"core":        core,
-				"config":      config,
-				"runtime_dir": workDir,
-				"timeout_ms":  2000,
-				"background":  false,
+				"timeout_ms": 2000,
+				"force":      true,
+				"background": false,
 			},
 		},
 	})
@@ -2916,16 +3074,20 @@ func TestStopRuntimeRefusesWhenRouterTakeoverIsEffective(t *testing.T) {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			MihomoRuntimeDir:   workDir,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "stop_runtime",
 			"arguments": map[string]any{
-				"runtime_profile": filepath.Join(dir, "localclash-runtime.json"),
-				"runtime_dir":     workDir,
-				"background":      false,
+				"background": false,
 			},
 		},
 	})
@@ -3137,6 +3299,7 @@ func callHandleWithServer(t *testing.T, server *Server, value any) *rpcResponse 
 
 func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanFixture, patchID string, overlay map[string]any, test bool) map[string]any {
 	t.Helper()
+	_ = paths
 	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
@@ -3144,12 +3307,9 @@ func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanF
 		"params": map[string]any{
 			"name": "config_patch_draft",
 			"arguments": map[string]any{
-				"draft_name":   patchID,
-				"subscription": paths.subscription,
-				"rules_cache":  paths.cache,
-				"patches_dir":  paths.outputDir,
-				"test":         test,
-				"background":   false,
+				"draft_name": patchID,
+				"test":       test,
+				"background": false,
 				"operations": []map[string]any{
 					{
 						"op":       "upsert_patch",
@@ -3172,13 +3332,11 @@ func callConfigPatchDraftForOverlay(t *testing.T, server *Server, paths mcpPlanF
 
 func callConfigPatchApplyCurrentDraft(t *testing.T, server *Server, paths mcpPlanFixture, draft map[string]any) map[string]any {
 	t.Helper()
+	_ = paths
 	applyArgs := map[string]any{}
 	for key, value := range draft["apply_args"].(map[string]any) {
 		applyArgs[key] = value
 	}
-	applyArgs["patches_dir"] = paths.outputDir
-	applyArgs["subscription"] = paths.subscription
-	applyArgs["rules_cache"] = paths.cache
 	applyArgs["test"] = false
 	applyArgs["background"] = false
 	resp := callHandleWithServer(t, server, map[string]any{
@@ -3451,7 +3609,7 @@ func setupMCPPackRulesFixture(t *testing.T, providerBody string) (string, string
 	t.Helper()
 	dir := t.TempDir()
 	cacheDir := filepath.Join(dir, "packs")
-	providerCache := filepath.Join(dir, "provider-cache")
+	providerCache := filepath.Join(dir, ".runtime", "rules", "provider-cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
