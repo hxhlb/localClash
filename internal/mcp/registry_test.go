@@ -176,3 +176,32 @@ func TestMihomoConfigTestSchemaUsesServerStatePaths(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigPatchSchemasUseServerStatePaths(t *testing.T) {
+	for _, name := range []string{"config_configure", "config_status", "config_render", "config_patch_get", "config_patch_draft", "config_patch_apply"} {
+		schema := inputSchemaForTool(name)
+		properties := schema["properties"].(map[string]any)
+		for _, forbidden := range []string{
+			"backup_dir",
+			"config",
+			"core",
+			"output",
+			"patches_dir",
+			"policy_templates_dir",
+			"rules_cache",
+			"runtime_dir",
+			"runtime_profile_config",
+			"selection",
+			"subscription",
+			"subscription_config",
+			"subscription_runtime",
+		} {
+			if name == "config_configure" && forbidden == "core" {
+				continue
+			}
+			if _, ok := properties[forbidden]; ok {
+				t.Fatalf("%s schema exposes caller-managed %q: %+v", name, forbidden, properties)
+			}
+		}
+	}
+}
