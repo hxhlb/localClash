@@ -232,6 +232,7 @@ func TestConfigPatchSchemasUseServerStatePaths(t *testing.T) {
 
 func TestQuerySchemasUseServerStatePaths(t *testing.T) {
 	for _, name := range []string{
+		"proxy_group_build",
 		"routing_explain",
 		"subscriptions_status",
 		"subscriptions_configure",
@@ -269,6 +270,55 @@ func TestQuerySchemasUseServerStatePaths(t *testing.T) {
 			if _, ok := properties[forbidden]; ok {
 				t.Fatalf("%s schema exposes caller-managed %q: %+v", name, forbidden, properties)
 			}
+		}
+	}
+}
+
+func TestProductSchemasDoNotExposeCallerManagedArtifactPaths(t *testing.T) {
+	allowed := map[string]map[string]bool{
+		"config_configure":    {"core": true, "runtime_profile": true},
+		"mihomo_api_request":  {"path": true},
+		"nl_file":             {"path": true},
+		"rule_provider_build": {"path": true},
+		"sed_file":            {"path": true},
+	}
+	for _, tool := range Registry() {
+		schema := inputSchemaForTool(tool.Name)
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, field := range []string{
+			"attestation",
+			"backup_dir",
+			"cache",
+			"config",
+			"config_sha256",
+			"core",
+			"localclash_config",
+			"merged",
+			"output",
+			"patches_dir",
+			"provider_cache",
+			"rule_sources",
+			"rules_cache",
+			"runtime_dir",
+			"runtime_profile",
+			"runtime_profile_config",
+			"selection",
+			"subscription",
+			"subscription_config",
+			"subscription_runtime",
+		} {
+			if allowed[tool.Name][field] {
+				continue
+			}
+			if _, ok := properties[field]; ok {
+				t.Fatalf("%s schema exposes caller-managed artifact field %q: %+v", tool.Name, field, properties)
+			}
+		}
+		if _, ok := properties["path"]; ok && !allowed[tool.Name]["path"] {
+			t.Fatalf("%s schema exposes caller-managed path field: %+v", tool.Name, properties)
 		}
 	}
 }

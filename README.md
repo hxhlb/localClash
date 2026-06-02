@@ -201,6 +201,13 @@ Use `tools_list` when an MCP client does not expose registry metadata directly.
 It returns the current tool names, safety levels, descriptions, and schemas as
 ordinary tool output.
 
+Product MCP tools use the server bootstrap state for local artifact locations.
+Agents should not pass `config`, `subscription`, `runtime_dir`, `cache`,
+`provider_cache`, `output`, `core`, or attestation paths for normal workflows.
+Those paths are owned by localClash startup state and workspace defaults; if an
+unusual path must be inspected, use CLI/SSH diagnostics rather than widening MCP
+tool arguments.
+
 MCP discovery and diagnostic tools:
 
 - `environment_inspect`: inspect host, network evidence, localClash state, and
@@ -235,6 +242,12 @@ MCP subscription bootstrap tools:
   `subscription.gob`. It also returns proxy-node diffs and, when
   `localclash-intent.json` exists, reevaluates saved selectors against the refreshed
   node list.
+
+Subscription tools do not ask the agent for subscription config, runtime
+artifact, or merged output paths. The caller supplies only subscription source
+URIs for `subscriptions_configure`, optional source `ids`, `user_agent`, and
+task execution flags for `subscriptions_refresh`, plus query/limit fields for
+node discovery.
 
 From a clean setup, an agent should call `subscriptions_status` first. If no
 sources are configured, it should ask the user for one or more subscription
@@ -292,6 +305,8 @@ maintenance packs are exposed as `{"source":"syncnext","pack":"SyncnextProxy"}`
 and `{"source":"syncnext","pack":"SyncnextUnbreak"}`. Composite renderer or
 provider names such as `syncnext_SyncnextProxy` are generated-config internals,
 not MCP pack selectors.
+Pack tools do not accept cache directory or provider-cache path arguments; the
+server reads those from bootstrap state.
 
 MCP config model:
 
@@ -342,6 +357,11 @@ MCP config tools:
 - `config_patch_apply`: apply reviewed operations by mutating `patches/*.json`,
   compiling `localclash-intent.json`, deriving `localclash-packs.gob`, and
   regenerating `.runtime/mihomo/config.yaml`.
+
+Config and patch tools expose product intent parameters and reviewed operations,
+not artifact paths. MCP callers do not choose `patches_dir`, compiled intent
+path, generated config output path, runtime directory, subscription artifacts,
+or Mihomo core binary path.
 
 Config render writes `x-localclash` metadata into generated configs so agents
 can distinguish immutable base config from localClash-managed overlay config.
@@ -428,8 +448,9 @@ with `mihomo_api_request`, `mihomo_connections_read`, or `mihomo_logs_read`.
 MCP runtime tool:
 
 - `run_runtime`: starts Mihomo from `.runtime/mihomo/config.yaml` in the background.
-  If the effective subscription exists but the generated config is missing,
-  localClash renders `.runtime/mihomo/config.yaml` before starting runtime.
+  If the generated config is missing or bootstrap diagnostics say it is not
+  runnable, localClash returns explicit `config_render` guidance instead of
+  inventing or accepting an alternate config path.
 - `mihomo_config_test`: runs explicit `mihomo -t` validation for the server
   state's generated config and records the passing config hash used by hot
   reload. MCP callers do not choose the config path, runtime directory, core
