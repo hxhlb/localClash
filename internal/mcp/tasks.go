@@ -105,6 +105,9 @@ func (s *Server) callMaybeAsyncTool(ctx context.Context, tool string, args json.
 	if !backgroundToolRequested(args) {
 		return s.runLoggedSyncTool(ctx, tool, args, run)
 	}
+	if err := validateToolArgumentKeys(tool, args); err != nil {
+		return toolResult{}, err
+	}
 	task, err := s.queueAsyncTool(tool, args, run)
 	if err != nil {
 		return toolResult{}, err
@@ -184,6 +187,27 @@ func backgroundToolRequested(args json.RawMessage) bool {
 		return !*in.Wait
 	}
 	return true
+}
+
+func validateToolArgumentKeys(tool string, args json.RawMessage) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return err
+	}
+	schema := inputSchemaForTool(tool)
+	if schema["additionalProperties"] != false {
+		return nil
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		properties = map[string]any{}
+	}
+	for field := range fields {
+		if _, ok := properties[field]; !ok {
+			return fmt.Errorf("json: unknown field %q", field)
+		}
+	}
+	return nil
 }
 
 func (s *Server) queueAsyncTool(tool string, args json.RawMessage, run asyncToolFunc) (asyncTaskResult, error) {

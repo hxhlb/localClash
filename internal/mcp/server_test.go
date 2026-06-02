@@ -2794,6 +2794,49 @@ func TestRuntimeToolsRejectCallerManagedPaths(t *testing.T) {
 	}
 }
 
+func TestAsyncToolsRejectUnknownFieldsBeforeQueue(t *testing.T) {
+	dir := t.TempDir()
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:    filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir:   filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:           filepath.Join(dir, "lc-mihomo-meta"),
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionPath:   filepath.Join(dir, "subscription.gob"),
+		},
+	}
+	server := NewServerWithState(state)
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "config_render", args: map[string]any{"config": "other.yaml"}},
+		{name: "config_patch_draft", args: map[string]any{"config": "other.yaml"}},
+		{name: "config_patch_apply", args: map[string]any{"config": "other.yaml"}},
+		{name: "mihomo_config_test", args: map[string]any{"config": "other.yaml"}},
+		{name: "subscriptions_refresh", args: map[string]any{"config": "other.yaml"}},
+		{name: "run_runtime", args: map[string]any{"config": "other.yaml"}},
+		{name: "restart_runtime", args: map[string]any{"config": "other.yaml"}},
+		{name: "router_takeover_apply", args: map[string]any{"config": "other.yaml"}},
+		{name: "router_takeover_stop", args: map[string]any{"config": "other.yaml"}},
+		{name: "stop_runtime", args: map[string]any{"config": "other.yaml"}},
+	} {
+		resp := callHandleWithServer(t, server, map[string]any{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      tc.name,
+				"arguments": tc.args,
+			},
+		})
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, `unknown field "config"`) {
+			t.Fatalf("%s error = %+v, want config field rejection before async queue", tc.name, resp.Error)
+		}
+	}
+}
+
 func TestExecutionToolReturnsAsyncTaskLogByDefault(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
