@@ -129,9 +129,18 @@ type routingPatchGuidance struct {
 }
 
 func (s *Server) callRoutingExplain(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in routingExplainInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		Query              string `json:"query"`
+		IncludeRuleMatches *bool  `json:"include_rule_matches"`
+		Limit              int    `json:"limit"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := routingExplainInput{
+		Query:              req.Query,
+		IncludeRuleMatches: req.IncludeRuleMatches,
+		Limit:              req.Limit,
 	}
 	if strings.TrimSpace(in.Query) == "" {
 		return toolResult{}, fmt.Errorf("query is required")

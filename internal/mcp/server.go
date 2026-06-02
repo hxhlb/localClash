@@ -907,7 +907,7 @@ func renderConfigIntentPreview(result *configIntentInspectContextResult, in conf
 
 func (s *Server) applyConfigIntentInspectDefaults(subscription, rulesCache, runtimeProfile, subscriptionConfig, subscriptionRuntime *string) {
 	setDefault := func(value *string, fallback string) {
-		if *value == "" && fallback != "" {
+		if value != nil && *value == "" && fallback != "" {
 			*value = fallback
 		}
 	}
@@ -926,31 +926,36 @@ func (s *Server) applyConfigIntentInspectDefaults(subscription, rulesCache, runt
 }
 
 func (s *Server) callProxyGroupBuild(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID                  string             `json:"id"`
-		Mode                string             `json:"mode"`
-		Match               *localconfig.Match `json:"match"`
-		Nodes               []string           `json:"nodes"`
-		Reason              string             `json:"reason"`
-		Boundary            string             `json:"boundary"`
-		Subscription        string             `json:"subscription"`
-		SubscriptionConfig  string             `json:"subscription_config"`
-		SubscriptionRuntime string             `json:"subscription_runtime"`
+	var req struct {
+		ID       string             `json:"id"`
+		Mode     string             `json:"mode"`
+		Match    *localconfig.Match `json:"match"`
+		Nodes    []string           `json:"nodes"`
+		Reason   string             `json:"reason"`
+		Boundary string             `json:"boundary"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil {
-		if in.Subscription == "" {
-			in.Subscription = s.state.Paths.SubscriptionPath
-		}
-		if in.SubscriptionConfig == "" {
-			in.SubscriptionConfig = s.state.Paths.SubscriptionConfig
-		}
-		if in.SubscriptionRuntime == "" {
-			in.SubscriptionRuntime = s.state.Paths.SubscriptionRuntime
-		}
+	in := struct {
+		ID                  string
+		Mode                string
+		Match               *localconfig.Match
+		Nodes               []string
+		Reason              string
+		Boundary            string
+		Subscription        string
+		SubscriptionConfig  string
+		SubscriptionRuntime string
+	}{
+		ID:       req.ID,
+		Mode:     req.Mode,
+		Match:    req.Match,
+		Nodes:    req.Nodes,
+		Reason:   req.Reason,
+		Boundary: req.Boundary,
 	}
+	s.applyConfigIntentInspectDefaults(&in.Subscription, nil, nil, &in.SubscriptionConfig, &in.SubscriptionRuntime)
 	id := strings.TrimSpace(in.ID)
 	if id == "" {
 		return toolResult{}, fmt.Errorf("id is required")
@@ -1190,9 +1195,20 @@ type configPatchSummary struct {
 }
 
 func (s *Server) callConfigStatus(args json.RawMessage) (toolResult, error) {
-	var in configToolInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		Limit   int   `json:"limit"`
+		Patches bool  `json:"patches"`
+		Detail  bool  `json:"detail"`
+		Resolve *bool `json:"resolve"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := configToolInput{
+		Limit:   req.Limit,
+		Patches: req.Patches,
+		Detail:  req.Detail,
+		Resolve: req.Resolve,
 	}
 	s.applyConfigToolDefaults(&in)
 	limit := in.Limit
@@ -1356,10 +1372,15 @@ func configStatusNextActions(render configRenderState) []string {
 }
 
 func (s *Server) callConfigRender(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in configToolInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		Force      *bool `json:"force"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := configToolInput{Force: req.Force}
 	s.applyConfigToolDefaults(&in)
 	appendTaskStage(ctx, "stage_started", "validate_inputs", nil)
 	missing := missingRenderInputs(in)
@@ -1464,19 +1485,16 @@ func renderCurrentConfig(ctx context.Context, in configToolInput, force bool) (m
 
 func (s *Server) callConfigPatchGet(args json.RawMessage) (toolResult, error) {
 	var in struct {
-		PatchID        string `json:"patch_id"`
-		PatchesDir     string `json:"patches_dir"`
-		ConfigPath     string `json:"config"`
-		PolicyTemplate string `json:"policy_template"`
+		PatchID string `json:"patch_id"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
 	root := s.workspaceRoot()
-	setDefault(&in.PatchesDir, workspacePath(root, configpatch.RegistryDirName))
-	setDefault(&in.ConfigPath, workspacePath(root, "localclash-intent.json"))
-	policyTemplate := firstNonEmpty(in.PolicyTemplate, policyTemplateFromConfig(in.ConfigPath))
-	result, err := configpatch.Get(in.PatchesDir, policyTemplate, in.PatchID)
+	patchesDir := workspacePath(root, configpatch.RegistryDirName)
+	configPath := workspacePath(root, "localclash-intent.json")
+	policyTemplate := policyTemplateFromConfig(configPath)
+	result, err := configpatch.Get(patchesDir, policyTemplate, in.PatchID)
 	if err != nil {
 		return toolResult{}, err
 	}
@@ -1484,26 +1502,37 @@ func (s *Server) callConfigPatchGet(args json.RawMessage) (toolResult, error) {
 }
 
 func (s *Server) callConfigPatchDraft(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		DraftName            string                  `json:"draft_name"`
-		Operations           []configpatch.Operation `json:"operations"`
-		PatchesDir           string                  `json:"patches_dir"`
-		PolicyTemplate       string                  `json:"policy_template"`
-		Subscription         string                  `json:"subscription"`
-		RulesCache           string                  `json:"rules_cache"`
-		RuntimeProfileConfig string                  `json:"runtime_profile"`
-		ConfigPath           string                  `json:"config"`
-		SubscriptionConfig   string                  `json:"subscription_config"`
-		SubscriptionRuntime  string                  `json:"subscription_runtime"`
-		Selection            string                  `json:"selection"`
-		Output               string                  `json:"output"`
-		ValidationCache      string                  `json:"validation_cache"`
-		Test                 *bool                   `json:"test"`
-		Core                 string                  `json:"core"`
-		RuntimeDir           string                  `json:"runtime_dir"`
+	var req struct {
+		DraftName  string                  `json:"draft_name"`
+		Operations []configpatch.Operation `json:"operations"`
+		Test       *bool                   `json:"test"`
+		Background *bool                   `json:"background"`
+		Wait       *bool                   `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		DraftName            string
+		Operations           []configpatch.Operation
+		PatchesDir           string
+		PolicyTemplate       string
+		Subscription         string
+		RulesCache           string
+		RuntimeProfileConfig string
+		ConfigPath           string
+		SubscriptionConfig   string
+		SubscriptionRuntime  string
+		Selection            string
+		Output               string
+		ValidationCache      string
+		Test                 *bool
+		Core                 string
+		RuntimeDir           string
+	}{
+		DraftName:  req.DraftName,
+		Operations: req.Operations,
+		Test:       req.Test,
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
@@ -1590,29 +1619,46 @@ func (s *Server) callConfigPatchDraft(ctx context.Context, args json.RawMessage)
 }
 
 func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		UseCurrentDraft      bool                    `json:"use_current_draft"`
-		Generation           int64                   `json:"generation"`
-		Operations           []configpatch.Operation `json:"operations"`
-		BaseHashes           map[string]string       `json:"base_hashes"`
-		BaseRegistryHash     string                  `json:"base_registry_hash"`
-		PatchesDir           string                  `json:"patches_dir"`
-		PolicyTemplate       string                  `json:"policy_template"`
-		Subscription         string                  `json:"subscription"`
-		RulesCache           string                  `json:"rules_cache"`
-		RuntimeProfileConfig string                  `json:"runtime_profile"`
-		ConfigPath           string                  `json:"config"`
-		SubscriptionConfig   string                  `json:"subscription_config"`
-		SubscriptionRuntime  string                  `json:"subscription_runtime"`
-		Selection            string                  `json:"selection"`
-		Output               string                  `json:"output"`
-		BackupDir            string                  `json:"backup_dir"`
-		Test                 *bool                   `json:"test"`
-		Core                 string                  `json:"core"`
-		RuntimeDir           string                  `json:"runtime_dir"`
+	var req struct {
+		UseCurrentDraft  bool                    `json:"use_current_draft"`
+		Generation       int64                   `json:"generation"`
+		Operations       []configpatch.Operation `json:"operations"`
+		BaseHashes       map[string]string       `json:"base_hashes"`
+		BaseRegistryHash string                  `json:"base_registry_hash"`
+		Test             *bool                   `json:"test"`
+		Background       *bool                   `json:"background"`
+		Wait             *bool                   `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		UseCurrentDraft      bool
+		Generation           int64
+		Operations           []configpatch.Operation
+		BaseHashes           map[string]string
+		BaseRegistryHash     string
+		PatchesDir           string
+		PolicyTemplate       string
+		Subscription         string
+		RulesCache           string
+		RuntimeProfileConfig string
+		ConfigPath           string
+		SubscriptionConfig   string
+		SubscriptionRuntime  string
+		Selection            string
+		Output               string
+		BackupDir            string
+		Test                 *bool
+		Core                 string
+		RuntimeDir           string
+	}{
+		UseCurrentDraft:  req.UseCurrentDraft,
+		Generation:       req.Generation,
+		Operations:       req.Operations,
+		BaseHashes:       req.BaseHashes,
+		BaseRegistryHash: req.BaseRegistryHash,
+		Test:             req.Test,
 	}
 	test := true
 	if in.Test != nil {
@@ -1709,21 +1755,28 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 }
 
 func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Source string `json:"source"`
 		Name   string `json:"name"`
 		Target string `json:"target"`
 		Limit  int    `json:"limit"`
-		Cache  string `json:"cache"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil {
-		if in.Cache == "" {
-			in.Cache = s.state.Paths.RulesCacheDir
-		}
+	in := struct {
+		Source string
+		Name   string
+		Target string
+		Limit  int
+		Cache  string
+	}{
+		Source: req.Source,
+		Name:   req.Name,
+		Target: req.Target,
+		Limit:  req.Limit,
 	}
+	s.applyPackRulesDefaults(&in.Cache, nil, nil)
 	if in.Limit == 0 {
 		in.Limit = 50
 	}
@@ -1741,15 +1794,24 @@ func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 }
 
 func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID         *string `json:"id"`
-		Source     string  `json:"source"`
-		Pack       string  `json:"pack"`
-		Cache      string  `json:"cache"`
-		RuntimeDir string  `json:"runtime_dir"`
+	var req struct {
+		ID     *string `json:"id"`
+		Source string  `json:"source"`
+		Pack   string  `json:"pack"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		ID         *string
+		Source     string
+		Pack       string
+		Cache      string
+		RuntimeDir string
+	}{
+		ID:     req.ID,
+		Source: req.Source,
+		Pack:   req.Pack,
 	}
 	if s.state != nil {
 		if in.Cache == "" {
@@ -1759,6 +1821,8 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
 	}
+	s.applyPackRulesDefaults(&in.Cache, nil, nil)
+	setDefault(&in.RuntimeDir, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo")))
 	if in.ID != nil {
 		return toolResult{}, legacyPackIDError("pack id", *in.ID, in.Cache)
 	}
@@ -1770,19 +1834,34 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 }
 
 func (s *Server) callPackRulesRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID            *string `json:"id"`
-		Source        string  `json:"source"`
-		Pack          string  `json:"pack"`
-		Component     string  `json:"component"`
-		Limit         int     `json:"limit"`
-		Refresh       bool    `json:"refresh"`
-		Cache         string  `json:"cache"`
-		Sources       string  `json:"sources"`
-		ProviderCache string  `json:"provider_cache"`
+	var req struct {
+		ID        *string `json:"id"`
+		Source    string  `json:"source"`
+		Pack      string  `json:"pack"`
+		Component string  `json:"component"`
+		Limit     int     `json:"limit"`
+		Refresh   bool    `json:"refresh"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		ID            *string
+		Source        string
+		Pack          string
+		Component     string
+		Limit         int
+		Refresh       bool
+		Cache         string
+		Sources       string
+		ProviderCache string
+	}{
+		ID:        req.ID,
+		Source:    req.Source,
+		Pack:      req.Pack,
+		Component: req.Component,
+		Limit:     req.Limit,
+		Refresh:   req.Refresh,
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
 	if in.ID != nil {
@@ -1807,20 +1886,37 @@ func (s *Server) callPackRulesRead(ctx context.Context, args json.RawMessage) (t
 }
 
 func (s *Server) callPackRulesPrefetch(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		IDs           []string             `json:"ids"`
-		Packs         []rules.PackSelector `json:"packs"`
-		Source        string               `json:"source"`
-		Name          string               `json:"name"`
-		Target        string               `json:"target"`
-		Limit         int                  `json:"limit"`
-		Refresh       bool                 `json:"refresh"`
-		Cache         string               `json:"cache"`
-		Sources       string               `json:"sources"`
-		ProviderCache string               `json:"provider_cache"`
+	var req struct {
+		IDs     []string             `json:"ids"`
+		Packs   []rules.PackSelector `json:"packs"`
+		Source  string               `json:"source"`
+		Name    string               `json:"name"`
+		Target  string               `json:"target"`
+		Limit   int                  `json:"limit"`
+		Refresh bool                 `json:"refresh"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		IDs           []string
+		Packs         []rules.PackSelector
+		Source        string
+		Name          string
+		Target        string
+		Limit         int
+		Refresh       bool
+		Cache         string
+		Sources       string
+		ProviderCache string
+	}{
+		IDs:     req.IDs,
+		Packs:   req.Packs,
+		Source:  req.Source,
+		Name:    req.Name,
+		Target:  req.Target,
+		Limit:   req.Limit,
+		Refresh: req.Refresh,
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
 	if len(in.IDs) > 0 {
@@ -1846,18 +1942,31 @@ func (s *Server) callPackRulesPrefetch(ctx context.Context, args json.RawMessage
 }
 
 func (s *Server) callPackRulesQuery(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Query         string `json:"query"`
-		Source        string `json:"source"`
-		Name          string `json:"name"`
-		Target        string `json:"target"`
-		Limit         int    `json:"limit"`
-		Cache         string `json:"cache"`
-		Sources       string `json:"sources"`
-		ProviderCache string `json:"provider_cache"`
+	var req struct {
+		Query  string `json:"query"`
+		Source string `json:"source"`
+		Name   string `json:"name"`
+		Target string `json:"target"`
+		Limit  int    `json:"limit"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Query         string
+		Source        string
+		Name          string
+		Target        string
+		Limit         int
+		Cache         string
+		Sources       string
+		ProviderCache string
+	}{
+		Query:  req.Query,
+		Source: req.Source,
+		Name:   req.Name,
+		Target: req.Target,
+		Limit:  req.Limit,
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -1927,33 +2036,41 @@ func packRefExample(source, pack string) string {
 }
 
 func (s *Server) applyPackRulesDefaults(cache, sources, providerCache *string) {
-	if s.state == nil {
-		return
-	}
-	if *cache == "" {
+	root := s.workspaceRoot()
+	if cache != nil && strings.TrimSpace(*cache) == "" && s.state != nil {
 		*cache = s.state.Paths.RulesCacheDir
 	}
-	if *sources == "" {
+	if sources != nil && strings.TrimSpace(*sources) == "" && s.state != nil {
 		*sources = s.state.Paths.RuleSourcesDir
 	}
-	if *providerCache == "" {
+	if providerCache != nil && strings.TrimSpace(*providerCache) == "" && s.state != nil {
 		runtimeRoot := s.state.Paths.RuntimeRoot
 		if runtimeRoot == "" {
 			runtimeRoot = ".runtime"
 		}
 		*providerCache = filepath.Join(runtimeRoot, "rules", "provider-cache")
 	}
+	if cache != nil {
+		setDefault(cache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	}
+	if sources != nil {
+		setDefault(sources, workspacePath(root, "rule-sources"))
+	}
+	if providerCache != nil {
+		setDefault(providerCache, workspacePath(root, filepath.Join(".runtime", "rules", "provider-cache")))
+	}
 }
 
 func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config     string `json:"config"`
-		Merged     string `json:"merged"`
-		RuntimeDir string `json:"runtime_dir"`
-	}
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct{}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct {
+		Config     string
+		Merged     string
+		RuntimeDir string
+	}{}
 	if s.state != nil {
 		if in.Config == "" {
 			in.Config = s.state.Paths.SubscriptionConfig
@@ -1977,16 +2094,20 @@ func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, erro
 }
 
 func (s *Server) callSubscriptionNodesList(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Subscription string `json:"subscription"`
-		Limit        int    `json:"limit"`
+	var req struct {
+		Limit int `json:"limit"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct {
+		Subscription string
+		Limit        int
+	}{Limit: req.Limit}
 	if s.state != nil && in.Subscription == "" {
 		in.Subscription = s.state.Paths.SubscriptionPath
 	}
+	setDefault(&in.Subscription, workspacePath(s.workspaceRoot(), "subscription.gob"))
 	result, err := rules.ListSubscriptionNodes(rules.SubscriptionNodesListOptions{
 		Subscription: in.Subscription,
 		Limit:        in.Limit,
@@ -1998,19 +2119,31 @@ func (s *Server) callSubscriptionNodesList(args json.RawMessage) (toolResult, er
 }
 
 func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Subscription  string   `json:"subscription"`
+	var req struct {
 		Query         string   `json:"query"`
 		Patterns      []string `json:"patterns"`
 		CaseSensitive bool     `json:"case_sensitive"`
 		Limit         int      `json:"limit"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Subscription  string
+		Query         string
+		Patterns      []string
+		CaseSensitive bool
+		Limit         int
+	}{
+		Query:         req.Query,
+		Patterns:      req.Patterns,
+		CaseSensitive: req.CaseSensitive,
+		Limit:         req.Limit,
 	}
 	if s.state != nil && in.Subscription == "" {
 		in.Subscription = s.state.Paths.SubscriptionPath
 	}
+	setDefault(&in.Subscription, workspacePath(s.workspaceRoot(), "subscription.gob"))
 	result, err := rules.SearchSubscriptionNodes(rules.SubscriptionNodesSearchOptions{
 		Subscription:  in.Subscription,
 		Query:         in.Query,
@@ -2030,7 +2163,6 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 		URL string `json:"url"`
 	}
 	var in struct {
-		Config  string                             `json:"config"`
 		Sources []subscriptionConfigureSourceInput `json:"sources"`
 		Replace *bool                              `json:"replace"`
 	}
@@ -2039,9 +2171,11 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 	if err := decoder.Decode(&in); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil && in.Config == "" {
-		in.Config = s.state.Paths.SubscriptionConfig
+	config := ""
+	if s.state != nil {
+		config = s.state.Paths.SubscriptionConfig
 	}
+	setDefault(&config, workspacePath(s.workspaceRoot(), "localclash-subscriptions.json"))
 	uris := make([]string, 0, len(in.Sources))
 	for _, source := range in.Sources {
 		if strings.TrimSpace(source.URI) != "" {
@@ -2051,7 +2185,7 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 		uris = append(uris, source.URL)
 	}
 	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
-		ConfigPath: in.Config,
+		ConfigPath: config,
 		URIs:       uris,
 		Replace:    in.Replace,
 	})
@@ -2062,21 +2196,32 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 }
 
 func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config               string   `json:"config"`
-		IDs                  []string `json:"ids"`
-		RuntimeDir           string   `json:"runtime_dir"`
-		Merged               string   `json:"merged"`
-		Force                bool     `json:"force"`
-		UserAgent            string   `json:"user_agent"`
-		LocalClashConfig     string   `json:"localclash_config"`
-		Selection            string   `json:"selection"`
-		RulesCache           string   `json:"rules_cache"`
-		RuntimeProfileConfig string   `json:"runtime_profile"`
-		Output               string   `json:"output"`
+	var req struct {
+		IDs        []string `json:"ids"`
+		Force      bool     `json:"force"`
+		UserAgent  string   `json:"user_agent"`
+		Background *bool    `json:"background"`
+		Wait       *bool    `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Config               string
+		IDs                  []string
+		RuntimeDir           string
+		Merged               string
+		Force                bool
+		UserAgent            string
+		LocalClashConfig     string
+		Selection            string
+		RulesCache           string
+		RuntimeProfileConfig string
+		Output               string
+	}{
+		IDs:       req.IDs,
+		Force:     req.Force,
+		UserAgent: req.UserAgent,
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
@@ -2474,16 +2619,25 @@ func (s *Server) callEnvironmentInspect(ctx context.Context, args json.RawMessag
 }
 
 func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config          string `json:"config"`
-		RuntimeDir      string `json:"runtime_dir"`
-		Core            string `json:"core"`
-		Foreground      bool   `json:"foreground"`
-		LogFile         string `json:"log_file"`
-		ForceConfigTest bool   `json:"force_config_test"`
+	var req struct {
+		Foreground      bool  `json:"foreground"`
+		ForceConfigTest bool  `json:"force_config_test"`
+		Background      *bool `json:"background"`
+		Wait            *bool `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Config          string
+		RuntimeDir      string
+		Core            string
+		Foreground      bool
+		LogFile         string
+		ForceConfigTest bool
+	}{
+		Foreground:      req.Foreground,
+		ForceConfigTest: req.ForceConfigTest,
 	}
 	if s.state != nil {
 		if in.Config == "" {
@@ -2527,24 +2681,33 @@ func (s *Server) callRunRuntimeSync(ctx context.Context, args json.RawMessage) (
 }
 
 func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config          string `json:"config"`
-		RuntimeDir      string `json:"runtime_dir"`
-		Core            string `json:"core"`
-		Foreground      bool   `json:"foreground"`
-		LogFile         string `json:"log_file"`
+	var req struct {
 		Strategy        string `json:"strategy"`
-		ConfigSHA256    string `json:"config_sha256"`
-		Attestation     string `json:"attestation"`
 		TimeoutMS       int    `json:"timeout_ms"`
 		Force           bool   `json:"force"`
 		ForceConfigTest bool   `json:"force_config_test"`
+		Background      *bool  `json:"background"`
+		Wait            *bool  `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
-	if in.Foreground {
-		return jsonToolResult(runtimeErrorResult("foreground=true is not supported by MCP restart_runtime; use the CLI restart command"))
+	in := struct {
+		Config          string
+		RuntimeDir      string
+		Core            string
+		LogFile         string
+		Strategy        string
+		ConfigSHA256    string
+		Attestation     string
+		TimeoutMS       int
+		Force           bool
+		ForceConfigTest bool
+	}{
+		Strategy:        req.Strategy,
+		TimeoutMS:       req.TimeoutMS,
+		Force:           req.Force,
+		ForceConfigTest: req.ForceConfigTest,
 	}
 	if s.state != nil {
 		if in.Config == "" {
@@ -2592,17 +2755,32 @@ func (s *Server) callRestartRuntimeSync(ctx context.Context, args json.RawMessag
 }
 
 func (s *Server) callMihomoAPIRequest(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Method    string         `json:"method"`
 		Path      string         `json:"path"`
 		Query     map[string]any `json:"query"`
 		Body      any            `json:"body"`
 		TimeoutMS int            `json:"timeout_ms"`
 		MaxBytes  int64          `json:"max_bytes"`
-		Config    string         `json:"config"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Method    string
+		Path      string
+		Query     map[string]any
+		Body      any
+		TimeoutMS int
+		MaxBytes  int64
+		Config    string
+	}{
+		Method:    req.Method,
+		Path:      req.Path,
+		Query:     req.Query,
+		Body:      req.Body,
+		TimeoutMS: req.TimeoutMS,
+		MaxBytes:  req.MaxBytes,
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.GeneratedConfig
@@ -2627,7 +2805,7 @@ func (s *Server) callMihomoAPIRequest(ctx context.Context, args json.RawMessage)
 }
 
 func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Mode           string `json:"mode"`
 		IntervalMS     int    `json:"interval_ms"`
 		DurationMS     int    `json:"duration_ms"`
@@ -2635,10 +2813,27 @@ func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMes
 		MaxConnections int    `json:"max_connections"`
 		MaxBytes       int    `json:"max_bytes"`
 		IncludeRaw     bool   `json:"include_raw"`
-		Config         string `json:"config"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Mode           string
+		IntervalMS     int
+		DurationMS     int
+		MaxFrames      int
+		MaxConnections int
+		MaxBytes       int
+		IncludeRaw     bool
+		Config         string
+	}{
+		Mode:           req.Mode,
+		IntervalMS:     req.IntervalMS,
+		DurationMS:     req.DurationMS,
+		MaxFrames:      req.MaxFrames,
+		MaxConnections: req.MaxConnections,
+		MaxBytes:       req.MaxBytes,
+		IncludeRaw:     req.IncludeRaw,
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.GeneratedConfig
@@ -2664,17 +2859,32 @@ func (s *Server) callMihomoConnectionsRead(ctx context.Context, args json.RawMes
 }
 
 func (s *Server) callMihomoLogsRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Level      string `json:"level"`
 		Format     string `json:"format"`
 		Transport  string `json:"transport"`
 		DurationMS int    `json:"duration_ms"`
 		MaxLines   int    `json:"max_lines"`
 		MaxBytes   int    `json:"max_bytes"`
-		Config     string `json:"config"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Level      string
+		Format     string
+		Transport  string
+		DurationMS int
+		MaxLines   int
+		MaxBytes   int
+		Config     string
+	}{
+		Level:      req.Level,
+		Format:     req.Format,
+		Transport:  req.Transport,
+		DurationMS: req.DurationMS,
+		MaxLines:   req.MaxLines,
+		MaxBytes:   req.MaxBytes,
 	}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.GeneratedConfig
@@ -3077,26 +3287,37 @@ func (s *Server) clearConfigPatchDraft(generation int64) {
 }
 
 func (s *Server) callConfigConfigure(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config               string `json:"config"`
-		PatchesDir           string `json:"patches_dir"`
-		RuntimeProfileConfig string `json:"runtime_profile_config"`
-		RuntimeProfile       string `json:"runtime_profile"`
-		Core                 string `json:"core"`
-		PolicyTemplate       string `json:"policy_template"`
-		PolicyTemplatesDir   string `json:"policy_templates_dir"`
-		ResetPatches         bool   `json:"reset_patches"`
-		Selection            string `json:"selection"`
-		Output               string `json:"output"`
-		ValidationCache      string `json:"validation_cache"`
-		RulesCache           string `json:"rules_cache"`
-		SubscriptionConfig   string `json:"subscription_config"`
-		Subscription         string `json:"subscription"`
-		SubscriptionRuntime  string `json:"subscription_runtime"`
-		RuntimeDir           string `json:"runtime_dir"`
+	var req struct {
+		RuntimeProfile string `json:"runtime_profile"`
+		Core           string `json:"core"`
+		PolicyTemplate string `json:"policy_template"`
+		ResetPatches   bool   `json:"reset_patches"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Config               string
+		PatchesDir           string
+		RuntimeProfileConfig string
+		RuntimeProfile       string
+		Core                 string
+		PolicyTemplate       string
+		PolicyTemplatesDir   string
+		ResetPatches         bool
+		Selection            string
+		Output               string
+		ValidationCache      string
+		RulesCache           string
+		SubscriptionConfig   string
+		Subscription         string
+		SubscriptionRuntime  string
+		RuntimeDir           string
+	}{
+		RuntimeProfile: req.RuntimeProfile,
+		Core:           req.Core,
+		PolicyTemplate: req.PolicyTemplate,
+		ResetPatches:   req.ResetPatches,
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
@@ -3361,15 +3582,15 @@ func configConfigureNextActions(status runtimeprofile.Status, effectiveSubscript
 }
 
 func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config string `json:"config"`
-	}
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct{}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct{ Config string }{}
 	if s.state != nil && in.Config == "" {
 		in.Config = s.state.Paths.RuntimeProfilePath
 	}
+	setDefault(&in.Config, workspacePath(s.workspaceRoot(), runtimeprofile.DefaultPath))
 	status, err := runtimeprofile.StatusFor(in.Config)
 	if err != nil {
 		return toolResult{}, err
@@ -3378,15 +3599,16 @@ func (s *Server) callRuntimeProfileStatus(args json.RawMessage) (toolResult, err
 }
 
 func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config     string `json:"config"`
-		RuntimeDir string `json:"runtime_dir"`
-		Core       string `json:"core"`
-		LogFile    string `json:"log_file"`
-	}
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct{}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct {
+		Config     string
+		RuntimeDir string
+		Core       string
+		LogFile    string
+	}{}
 	if s.state != nil {
 		if in.Config == "" {
 			in.Config = s.state.Paths.GeneratedConfig
@@ -3404,22 +3626,27 @@ func (s *Server) callRuntimeStatus(args json.RawMessage) (toolResult, error) {
 }
 
 type routerTakeoverInput struct {
-	RuntimeProfile string `json:"runtime_profile"`
-	Config         string `json:"config"`
-	RuntimeDir     string `json:"runtime_dir"`
-	LogFile        string `json:"log_file"`
-	StateDir       string `json:"state_dir"`
-	DNSPort        int    `json:"dns_port"`
-	RedirPort      int    `json:"redir_port"`
-	TunDevice      string `json:"tun_device"`
-	DryRun         bool   `json:"dry_run"`
+	RuntimeProfile string
+	Config         string
+	RuntimeDir     string
+	LogFile        string
+	StateDir       string
+	DNSPort        int
+	RedirPort      int
+	TunDevice      string
+	DryRun         bool
 }
 
 func (s *Server) routerTakeoverOptions(args json.RawMessage) (routertakeover.Options, error) {
-	var in routerTakeoverInput
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct {
+		DryRun     bool  `json:"dry_run"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
+	}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return routertakeover.Options{}, err
 	}
+	in := routerTakeoverInput{DryRun: req.DryRun}
 	if s.state != nil {
 		if in.RuntimeProfile == "" {
 			in.RuntimeProfile = s.state.Paths.RuntimeProfilePath
@@ -3497,21 +3724,30 @@ func (s *Server) callRouterTakeoverStopSync(ctx context.Context, args json.RawMe
 }
 
 func (s *Server) callStopRuntimeSync(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		RuntimeProfile string `json:"runtime_profile"`
-		Config         string `json:"config"`
-		Core           string `json:"core"`
-		RuntimeDir     string `json:"runtime_dir"`
-		LogFile        string `json:"log_file"`
-		StateDir       string `json:"state_dir"`
-		DNSPort        int    `json:"dns_port"`
-		RedirPort      int    `json:"redir_port"`
-		TunDevice      string `json:"tun_device"`
-		TimeoutMS      int    `json:"timeout_ms"`
-		Force          bool   `json:"force"`
+	var req struct {
+		TimeoutMS  int   `json:"timeout_ms"`
+		Force      bool  `json:"force"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		RuntimeProfile string
+		Config         string
+		Core           string
+		RuntimeDir     string
+		LogFile        string
+		StateDir       string
+		DNSPort        int
+		RedirPort      int
+		TunDevice      string
+		TimeoutMS      int
+		Force          bool
+	}{
+		TimeoutMS: req.TimeoutMS,
+		Force:     req.Force,
 	}
 	if s.state != nil {
 		if in.RuntimeProfile == "" {
