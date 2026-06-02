@@ -62,7 +62,7 @@
 **6. Mihomo Runtime API 與執行型工具**
 
 - `run_runtime`：啟動 Mihomo。
-- `mihomo_config_test`：顯式執行 `mihomo -t`，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。
+- `mihomo_config_test`：顯式驗證 server state 中的 generated config，通過後記錄 config SHA256 attestation，供 hot reload 校對使用。MCP caller 不傳 config path、runtime dir、core binary 或 attestation path；非標準路徑檢查應走 CLI/SSH 診斷。
 - `mihomo_api_request`：只通過本地已配置的 Mihomo controller 呼叫 bounded API path；拒絕完整 URL，不能作為通用 HTTP client。推薦用 `/version`、`/configs`、`/rules`、`/providers/rules`、`/proxies` 查 loaded runtime evidence；`/connections/` 存在，但 active connection 摘要優先用 `mihomo_connections_read`。
 - `mihomo_connections_read`：讀取 bounded Mihomo active connection snapshot；預設用 `GET /connections/` 做一次性觀測，`mode=stream` 才使用 WebSocket `/connections/` 讀取有限幀。用於回答「當前活躍連接」的命中規則與 selected proxy chain；沒有某個 domain 的 active connection，不代表未來連接不會匹配該規則。
 - `mihomo_logs_read`：從 Mihomo controller 讀取 bounded WebSocket/HTTP stream logs，不要求 caller 傳 token，也不輸出 token。

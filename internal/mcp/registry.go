@@ -81,7 +81,7 @@ func Registry() []Tool {
 		{Name: "proxy_group_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable proxy group target from subscription node selectors or exact nodes. This does not persist state; copy the returned proxy_group into config_patch_draft.operations[].overlay.proxy_groups when a patch should use it."},
 		{Name: "rule_provider_build", SafetyLevel: SafeWrite, Description: "Build and validate a reusable external rule-provider intent for user-supplied Mihomo rule-provider URLs before adding it to config_patch_draft.operations[].overlay.rule_providers."},
 		{Name: "mihomo_api_request", SafetyLevel: SafeWrite, Description: "Call a bounded Mihomo controller API path using the active local runtime endpoint and secret; rejects full URLs and is not a generic HTTP client. Prefer read paths such as /version, /configs, /rules, /providers/rules, and /proxies for loaded-runtime evidence. /connections/ exists, but prefer mihomo_connections_read for active connection summaries."},
-		{Name: "mihomo_config_test", SafetyLevel: SafeWrite, Description: "Run explicit mihomo -t validation for a config and record a passing config hash attestation for hot reload."},
+		{Name: "mihomo_config_test", SafetyLevel: SafeWrite, Description: "Run explicit mihomo -t validation for the server state's generated config and record a passing config hash attestation for hot reload. MCP callers do not provide config/runtime/core paths."},
 		{Name: "subscriptions_configure", SafetyLevel: SafeWrite, Description: "Write local subscription source configuration without refreshing."},
 		{Name: "subscriptions_refresh", SafetyLevel: SafeWrite, Description: "Refresh configured subscription sources into local artifacts and effective subscription.gob."},
 		{Name: "run_runtime", SafetyLevel: ConfirmRequired, Description: "Start the Mihomo runtime from .runtime/mihomo/config.yaml, assuming the config has already been validated by config_patch_apply, mihomo_config_test, or doctor. Requires external Agent/MCP client confirmation; starting the proxy runtime may temporarily interrupt network connectivity, and the Agent itself may be disconnected if it depends on the current network/proxy path."},
@@ -454,15 +454,9 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"config":          map[string]any{"type": "string", "description": "Config path to validate. Defaults to .runtime/mihomo/config.yaml."},
-				"runtime_dir":     map[string]any{"type": "string", "description": "Mihomo runtime data directory. Defaults to .runtime/mihomo."},
-				"core":            map[string]any{"type": "string", "description": "Mihomo core path. Defaults to the active runtime profile core path."},
-				"record":          map[string]any{"type": "boolean", "description": "Write passing config hash attestation. Defaults to true."},
-				"attestation":     map[string]any{"type": "string", "description": "Attestation path. Defaults to .runtime/mihomo/config-test-attestation.json."},
-				"promoted_config": map[string]any{"type": "string", "description": "Promoted config path to record in the attestation."},
-				"timeout_ms":      map[string]any{"type": "integer", "minimum": 0, "description": "Validation timeout in milliseconds. Defaults to 90000."},
-				"background":      map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may run external validation."},
-				"wait":            map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
+				"timeout_ms": map[string]any{"type": "integer", "minimum": 0, "description": "Validation timeout in milliseconds. Defaults to 90000."},
+				"background": map[string]any{"type": "boolean", "description": "Run as a background task and immediately return task_id/log_file. Defaults to true for write tools that may run external validation."},
+				"wait":       map[string]any{"type": "boolean", "description": "Set true to wait synchronously for completion. Equivalent to background=false."},
 			},
 		}
 	case "restart_runtime":

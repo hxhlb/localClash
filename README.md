@@ -430,8 +430,10 @@ MCP runtime tool:
 - `run_runtime`: starts Mihomo from `.runtime/mihomo/config.yaml` in the background.
   If the effective subscription exists but the generated config is missing,
   localClash renders `.runtime/mihomo/config.yaml` before starting runtime.
-- `mihomo_config_test`: runs explicit `mihomo -t` validation and records the
-  passing config hash used by hot reload.
+- `mihomo_config_test`: runs explicit `mihomo -t` validation for the server
+  state's generated config and records the passing config hash used by hot
+  reload. MCP callers do not choose the config path, runtime directory, core
+  binary, or attestation path; use CLI/SSH diagnostics for non-standard paths.
 - `mihomo_api_request`: calls a bounded Mihomo controller API path through the
   configured local controller endpoint and secret. It rejects full URLs. Use
   `/version`, `/configs`, `/rules`, `/providers/rules`, and `/proxies` for

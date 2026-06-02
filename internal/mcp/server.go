@@ -605,6 +605,18 @@ func decodeToolInput(args json.RawMessage, out any) error {
 	return json.Unmarshal(args, out)
 }
 
+func decodeStrictToolInput(args json.RawMessage, out any) error {
+	if len(bytes.TrimSpace(args)) == 0 {
+		args = []byte("{}")
+	}
+	if !isJSONObject(args) {
+		return fmt.Errorf("tool arguments must be a JSON object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(args))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(out)
+}
+
 func (s *Server) callNLFile(args json.RawMessage) (toolResult, error) {
 	var in struct {
 		Path       string `json:"path"`
@@ -2688,36 +2700,27 @@ func (s *Server) callMihomoLogsRead(ctx context.Context, args json.RawMessage) (
 
 func (s *Server) callMihomoConfigTest(ctx context.Context, args json.RawMessage) (toolResult, error) {
 	var in struct {
-		Config         string `json:"config"`
-		RuntimeDir     string `json:"runtime_dir"`
-		Core           string `json:"core"`
-		Record         *bool  `json:"record"`
-		Attestation    string `json:"attestation"`
-		PromotedConfig string `json:"promoted_config"`
-		TimeoutMS      int    `json:"timeout_ms"`
+		TimeoutMS  int   `json:"timeout_ms"`
+		Background *bool `json:"background"`
+		Wait       *bool `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &in); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil {
-		if in.Config == "" {
-			in.Config = s.state.Paths.GeneratedConfig
-		}
-		if in.RuntimeDir == "" {
-			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
-		}
-		if in.Core == "" {
-			in.Core = normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath)
-		}
+	if s.state == nil {
+		return toolResult{}, fmt.Errorf("mihomo_config_test requires initialized localClash server state")
 	}
-	setDefault(&in.Config, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo", "config.yaml")))
-	setDefault(&in.RuntimeDir, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo")))
-	if in.Core == "" {
-		in.Core = workspacePath(s.workspaceRoot(), runtimeprofile.MetaCorePath)
+	config := strings.TrimSpace(s.state.Paths.GeneratedConfig)
+	runtimeDir := strings.TrimSpace(s.state.Paths.MihomoRuntimeDir)
+	core := strings.TrimSpace(normalizeMCPStateCorePath(s.state, s.state.Paths.CorePath))
+	if config == "" {
+		return toolResult{}, fmt.Errorf("mihomo_config_test requires server state generated config path")
 	}
-	record := true
-	if in.Record != nil {
-		record = *in.Record
+	if runtimeDir == "" {
+		return toolResult{}, fmt.Errorf("mihomo_config_test requires server state mihomo runtime dir")
+	}
+	if core == "" {
+		return toolResult{}, fmt.Errorf("mihomo_config_test requires server state core path")
 	}
 	timeout := 90 * time.Second
 	if in.TimeoutMS > 0 {
@@ -2725,16 +2728,14 @@ func (s *Server) callMihomoConfigTest(ctx context.Context, args json.RawMessage)
 	}
 	result, err := mihomotest.Test(ctx, mihomotest.TestOptions{
 		ValidationOptions: mihomotest.ValidationOptions{
-			CorePath:   in.Core,
-			ConfigPath: in.Config,
-			WorkDir:    in.RuntimeDir,
-			CachePath:  validationCachePath("", in.RuntimeDir),
+			CorePath:   core,
+			ConfigPath: config,
+			WorkDir:    runtimeDir,
+			CachePath:  validationCachePath("", runtimeDir),
 			Timeout:    timeout,
 			Force:      true,
 		},
-		Record:             record,
-		AttestationPath:    in.Attestation,
-		PromotedConfigPath: in.PromotedConfig,
+		Record: true,
 	})
 	if err != nil {
 		return jsonToolResult(result)

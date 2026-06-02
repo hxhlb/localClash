@@ -2615,22 +2615,27 @@ done
 exit 9
 `)
 	runtimeDir := filepath.Join(dir, ".runtime", "mihomo")
-	config := filepath.Join(runtimeDir, "config.candidate.yaml")
+	config := filepath.Join(runtimeDir, "config.yaml")
 	attestation := filepath.Join(runtimeDir, "config-test-attestation.json")
 	writeMCPFile(t, config, "external-controller: 127.0.0.1:9090\n")
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:      dir,
+			GeneratedConfig:    config,
+			MihomoRuntimeDir:   runtimeDir,
+			CorePath:           core,
+			RuntimeProfilePath: filepath.Join(dir, "localclash-runtime.json"),
+		},
+	}
 
-	resp := callHandle(t, map[string]any{
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "mihomo_config_test",
 			"arguments": map[string]any{
-				"background":  false,
-				"core":        core,
-				"config":      config,
-				"runtime_dir": runtimeDir,
-				"attestation": attestation,
+				"wait": true,
 			},
 		},
 	})
@@ -2642,8 +2647,41 @@ exit 9
 	if content["passed"] != true || content["recorded"] != true || content["config_sha256"] == "" {
 		t.Fatalf("content = %+v, want passing recorded config test", content)
 	}
-	if _, err := mihomotest.ReadAttestation(attestation); err != nil {
+	if content["config_path"] != config {
+		t.Fatalf("config_path = %v, want server state generated config %q", content["config_path"], config)
+	}
+	recorded, err := mihomotest.ReadAttestation(attestation)
+	if err != nil {
 		t.Fatalf("read attestation: %v", err)
+	}
+	if recorded.Config != config || recorded.WorkDir != runtimeDir || recorded.Core != core {
+		t.Fatalf("attestation = %+v, want server state paths", recorded)
+	}
+}
+
+func TestMihomoConfigTestToolRejectsCallerManagedPaths(t *testing.T) {
+	dir := t.TempDir()
+	state := appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			GeneratedConfig:  filepath.Join(dir, ".runtime", "mihomo", "config.yaml"),
+			MihomoRuntimeDir: filepath.Join(dir, ".runtime", "mihomo"),
+			CorePath:         filepath.Join(dir, "lc-mihomo-meta"),
+		},
+	}
+	resp := callHandleWithServer(t, NewServerWithState(state), map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "mihomo_config_test",
+			"arguments": map[string]any{
+				"config": ".runtime/mihomo/config.yaml",
+				"wait":   true,
+			},
+		},
+	})
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, `unknown field "config"`) {
+		t.Fatalf("error = %+v, want config field rejection", resp.Error)
 	}
 }
 
