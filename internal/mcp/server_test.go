@@ -688,6 +688,7 @@ packs:
 	})
 	server := NewServerWithState(appinit.RuntimeState{
 		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
 			RulesCacheDir:       cacheDir,
 			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
 			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
@@ -703,7 +704,6 @@ packs:
 			"name": "routing_explain",
 			"arguments": map[string]any{
 				"query":                "Steam",
-				"config":               configPath,
 				"include_rule_matches": false,
 			},
 		},
@@ -931,17 +931,20 @@ func TestToolsCallSedFileCanWrite(t *testing.T) {
 
 func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig:  filepath.Join(dir, "localclash-subscriptions.json"),
+			SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
+			SubscriptionRuntime: filepath.Join(dir, ".runtime", "subscriptions"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name": "subscriptions_status",
-			"arguments": map[string]any{
-				"config":      filepath.Join(dir, "localclash-subscriptions.json"),
-				"merged":      filepath.Join(dir, "subscription.gob"),
-				"runtime_dir": filepath.Join(dir, ".runtime", "subscriptions"),
-			},
+			"name":      "subscriptions_status",
+			"arguments": map[string]any{},
 		},
 	})
 	if resp.Error != nil {
@@ -959,14 +962,18 @@ func TestToolsCallSubscriptionsStatusReturnsSerializableResult(t *testing.T) {
 
 func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) {
 	dir := t.TempDir()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_configure",
 			"arguments": map[string]any{
-				"config": filepath.Join(dir, "localclash-subscriptions.json"),
 				"sources": []map[string]any{
 					{"url": "https://example.com/sub?token=secret-token"},
 				},
@@ -992,14 +999,18 @@ func TestToolsCallSubscriptionsConfigureReturnsSerializableResult(t *testing.T) 
 
 func TestToolsCallSubscriptionsConfigureRejectsSourceID(t *testing.T) {
 	dir := t.TempDir()
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig: filepath.Join(dir, "localclash-subscriptions.json"),
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_configure",
 			"arguments": map[string]any{
-				"config": filepath.Join(dir, "localclash-subscriptions.json"),
 				"sources": []map[string]any{
 					{"id": "primary", "url": "https://example.com/sub?token=secret-token"},
 				},
@@ -1013,17 +1024,21 @@ func TestToolsCallSubscriptionsConfigureRejectsSourceID(t *testing.T) {
 
 func TestToolsCallSubscriptionsRefreshReturnsSerializableResult(t *testing.T) {
 	paths := setupMCPSubscriptionsFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			SubscriptionConfig:  paths.config,
+			SubscriptionRuntime: paths.runtimeDir,
+			SubscriptionPath:    paths.merged,
+		},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_refresh",
 			"arguments": map[string]any{
-				"config":      paths.config,
-				"runtime_dir": paths.runtimeDir,
-				"merged":      paths.merged,
-				"background":  false,
+				"background": false,
 			},
 		},
 	})
@@ -1089,21 +1104,26 @@ packs:
     pack: OpenAI
     target: AI
 `)
-	resp := callHandle(t, map[string]any{
+	refreshServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			SubscriptionConfig:  subConfig,
+			SubscriptionRuntime: runtimeDir,
+			SubscriptionPath:    paths.subscription,
+			PacksSelectionPath:  filepath.Join(dir, "localclash-packs.gob"),
+			RulesCacheDir:       paths.cache,
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:     generated,
+		},
+	})
+	resp := callHandleWithServer(t, refreshServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_refresh",
 			"arguments": map[string]any{
-				"config":            subConfig,
-				"runtime_dir":       runtimeDir,
-				"merged":            paths.subscription,
-				"localclash_config": localClashConfig,
-				"selection":         filepath.Join(dir, "localclash-packs.gob"),
-				"rules_cache":       paths.cache,
-				"output":            generated,
-				"background":        false,
+				"background": false,
 			},
 		},
 	})
@@ -1304,21 +1324,26 @@ packs:
     target: AI
 `)
 	writeMCPFile(t, generated, "sentinel: keep\n")
-	resp := callHandle(t, map[string]any{
+	refreshServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			WorkspaceRoot:       dir,
+			SubscriptionConfig:  subConfig,
+			SubscriptionRuntime: runtimeDir,
+			SubscriptionPath:    paths.subscription,
+			PacksSelectionPath:  filepath.Join(dir, "localclash-packs.gob"),
+			RulesCacheDir:       paths.cache,
+			RuntimeProfilePath:  filepath.Join(dir, "localclash-runtime.json"),
+			GeneratedConfig:     generated,
+		},
+	})
+	resp := callHandleWithServer(t, refreshServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscriptions_refresh",
 			"arguments": map[string]any{
-				"config":            subConfig,
-				"runtime_dir":       runtimeDir,
-				"merged":            paths.subscription,
-				"localclash_config": localClashConfig,
-				"selection":         filepath.Join(dir, "localclash-packs.gob"),
-				"rules_cache":       paths.cache,
-				"output":            generated,
-				"background":        false,
+				"background": false,
 			},
 		},
 	})
@@ -1342,15 +1367,17 @@ packs:
 
 func TestToolsCallSubscriptionNodesListReturnsSafeSummaries(t *testing.T) {
 	subscription := setupMCPSubscriptionNodesFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{SubscriptionPath: subscription},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscription_nodes_list",
 			"arguments": map[string]any{
-				"subscription": subscription,
-				"limit":        1,
+				"limit": 1,
 			},
 		},
 	})
@@ -1376,15 +1403,17 @@ func TestToolsCallSubscriptionNodesListReturnsSafeSummaries(t *testing.T) {
 
 func TestToolsCallSubscriptionNodesSearchReturnsNameMatches(t *testing.T) {
 	subscription := setupMCPSubscriptionNodesFixture(t)
-	resp := callHandle(t, map[string]any{
+	server := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{SubscriptionPath: subscription},
+	})
+	resp := callHandleWithServer(t, server, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "subscription_nodes_search",
 			"arguments": map[string]any{
-				"subscription": subscription,
-				"query":        "香港",
+				"query": "香港",
 			},
 		},
 	})
@@ -1967,18 +1996,22 @@ func TestToolsCallPacksGetReadsCurrentCatalogWhenServerStateIsStale(t *testing.T
 func TestToolsCallPackRulesReadReturnsRuleSamples(t *testing.T) {
 	cache, providerCache, server := setupMCPPackRulesFixture(t, "DOMAIN-SUFFIX,openai.com\nDOMAIN-SUFFIX,chatgpt.com\n")
 	defer server.Close()
-	resp := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir: cache,
+			RuntimeRoot:   filepath.Dir(filepath.Dir(providerCache)),
+		},
+	})
+	resp := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "pack_rules_read",
 			"arguments": map[string]any{
-				"source":         "sukkaw",
-				"pack":           "ai",
-				"cache":          cache,
-				"provider_cache": providerCache,
-				"limit":          1,
+				"source": "sukkaw",
+				"pack":   "ai",
+				"limit":  1,
 			},
 		},
 	})
@@ -2005,32 +2038,34 @@ func TestToolsCallPackRulesReadReturnsRuleSamples(t *testing.T) {
 func TestToolsCallPackRulesPrefetchThenQuery(t *testing.T) {
 	cache, providerCache, server := setupMCPPackRulesFixture(t, "DOMAIN-SUFFIX,huggingface.co\n")
 	defer server.Close()
-	prefetch := callHandle(t, map[string]any{
+	mcpServer := NewServerWithState(appinit.RuntimeState{
+		Paths: appinit.RuntimePaths{
+			RulesCacheDir: cache,
+			RuntimeRoot:   filepath.Dir(filepath.Dir(providerCache)),
+		},
+	})
+	prefetch := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "pack_rules_prefetch",
 			"arguments": map[string]any{
-				"packs":          []map[string]any{{"source": "sukkaw", "pack": "ai"}},
-				"cache":          cache,
-				"provider_cache": providerCache,
+				"packs": []map[string]any{{"source": "sukkaw", "pack": "ai"}},
 			},
 		},
 	})
 	if prefetch.Error != nil {
 		t.Fatalf("pack_rules_prefetch returned JSON-RPC error: %+v", prefetch.Error)
 	}
-	query := callHandle(t, map[string]any{
+	query := callHandleWithServer(t, mcpServer, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/call",
 		"params": map[string]any{
 			"name": "pack_rules_query",
 			"arguments": map[string]any{
-				"query":          "cdn.huggingface.co",
-				"cache":          cache,
-				"provider_cache": providerCache,
+				"query": "cdn.huggingface.co",
 			},
 		},
 	})
@@ -3519,7 +3554,7 @@ func setupMCPPackRulesFixture(t *testing.T, providerBody string) (string, string
 	t.Helper()
 	dir := t.TempDir()
 	cacheDir := filepath.Join(dir, "packs")
-	providerCache := filepath.Join(dir, "provider-cache")
+	providerCache := filepath.Join(dir, ".runtime", "rules", "provider-cache")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

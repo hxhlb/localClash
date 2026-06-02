@@ -1750,21 +1750,28 @@ func (s *Server) callConfigPatchApply(ctx context.Context, args json.RawMessage)
 }
 
 func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
-	var in struct {
+	var req struct {
 		Source string `json:"source"`
 		Name   string `json:"name"`
 		Target string `json:"target"`
 		Limit  int    `json:"limit"`
-		Cache  string `json:"cache"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil {
-		if in.Cache == "" {
-			in.Cache = s.state.Paths.RulesCacheDir
-		}
+	in := struct {
+		Source string
+		Name   string
+		Target string
+		Limit  int
+		Cache  string
+	}{
+		Source: req.Source,
+		Name:   req.Name,
+		Target: req.Target,
+		Limit:  req.Limit,
 	}
+	s.applyPackRulesDefaults(&in.Cache, nil, nil)
 	if in.Limit == 0 {
 		in.Limit = 50
 	}
@@ -1782,15 +1789,24 @@ func (s *Server) callPacksList(args json.RawMessage) (toolResult, error) {
 }
 
 func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID         *string `json:"id"`
-		Source     string  `json:"source"`
-		Pack       string  `json:"pack"`
-		Cache      string  `json:"cache"`
-		RuntimeDir string  `json:"runtime_dir"`
+	var req struct {
+		ID     *string `json:"id"`
+		Source string  `json:"source"`
+		Pack   string  `json:"pack"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		ID         *string
+		Source     string
+		Pack       string
+		Cache      string
+		RuntimeDir string
+	}{
+		ID:     req.ID,
+		Source: req.Source,
+		Pack:   req.Pack,
 	}
 	if s.state != nil {
 		if in.Cache == "" {
@@ -1800,6 +1816,8 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 			in.RuntimeDir = s.state.Paths.MihomoRuntimeDir
 		}
 	}
+	s.applyPackRulesDefaults(&in.Cache, nil, nil)
+	setDefault(&in.RuntimeDir, workspacePath(s.workspaceRoot(), filepath.Join(".runtime", "mihomo")))
 	if in.ID != nil {
 		return toolResult{}, legacyPackIDError("pack id", *in.ID, in.Cache)
 	}
@@ -1811,19 +1829,34 @@ func (s *Server) callPacksGet(args json.RawMessage) (toolResult, error) {
 }
 
 func (s *Server) callPackRulesRead(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		ID            *string `json:"id"`
-		Source        string  `json:"source"`
-		Pack          string  `json:"pack"`
-		Component     string  `json:"component"`
-		Limit         int     `json:"limit"`
-		Refresh       bool    `json:"refresh"`
-		Cache         string  `json:"cache"`
-		Sources       string  `json:"sources"`
-		ProviderCache string  `json:"provider_cache"`
+	var req struct {
+		ID        *string `json:"id"`
+		Source    string  `json:"source"`
+		Pack      string  `json:"pack"`
+		Component string  `json:"component"`
+		Limit     int     `json:"limit"`
+		Refresh   bool    `json:"refresh"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		ID            *string
+		Source        string
+		Pack          string
+		Component     string
+		Limit         int
+		Refresh       bool
+		Cache         string
+		Sources       string
+		ProviderCache string
+	}{
+		ID:        req.ID,
+		Source:    req.Source,
+		Pack:      req.Pack,
+		Component: req.Component,
+		Limit:     req.Limit,
+		Refresh:   req.Refresh,
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
 	if in.ID != nil {
@@ -1848,20 +1881,37 @@ func (s *Server) callPackRulesRead(ctx context.Context, args json.RawMessage) (t
 }
 
 func (s *Server) callPackRulesPrefetch(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		IDs           []string             `json:"ids"`
-		Packs         []rules.PackSelector `json:"packs"`
-		Source        string               `json:"source"`
-		Name          string               `json:"name"`
-		Target        string               `json:"target"`
-		Limit         int                  `json:"limit"`
-		Refresh       bool                 `json:"refresh"`
-		Cache         string               `json:"cache"`
-		Sources       string               `json:"sources"`
-		ProviderCache string               `json:"provider_cache"`
+	var req struct {
+		IDs     []string             `json:"ids"`
+		Packs   []rules.PackSelector `json:"packs"`
+		Source  string               `json:"source"`
+		Name    string               `json:"name"`
+		Target  string               `json:"target"`
+		Limit   int                  `json:"limit"`
+		Refresh bool                 `json:"refresh"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		IDs           []string
+		Packs         []rules.PackSelector
+		Source        string
+		Name          string
+		Target        string
+		Limit         int
+		Refresh       bool
+		Cache         string
+		Sources       string
+		ProviderCache string
+	}{
+		IDs:     req.IDs,
+		Packs:   req.Packs,
+		Source:  req.Source,
+		Name:    req.Name,
+		Target:  req.Target,
+		Limit:   req.Limit,
+		Refresh: req.Refresh,
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
 	if len(in.IDs) > 0 {
@@ -1887,18 +1937,31 @@ func (s *Server) callPackRulesPrefetch(ctx context.Context, args json.RawMessage
 }
 
 func (s *Server) callPackRulesQuery(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Query         string `json:"query"`
-		Source        string `json:"source"`
-		Name          string `json:"name"`
-		Target        string `json:"target"`
-		Limit         int    `json:"limit"`
-		Cache         string `json:"cache"`
-		Sources       string `json:"sources"`
-		ProviderCache string `json:"provider_cache"`
+	var req struct {
+		Query  string `json:"query"`
+		Source string `json:"source"`
+		Name   string `json:"name"`
+		Target string `json:"target"`
+		Limit  int    `json:"limit"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Query         string
+		Source        string
+		Name          string
+		Target        string
+		Limit         int
+		Cache         string
+		Sources       string
+		ProviderCache string
+	}{
+		Query:  req.Query,
+		Source: req.Source,
+		Name:   req.Name,
+		Target: req.Target,
+		Limit:  req.Limit,
 	}
 	s.applyPackRulesDefaults(&in.Cache, &in.Sources, &in.ProviderCache)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -1968,33 +2031,41 @@ func packRefExample(source, pack string) string {
 }
 
 func (s *Server) applyPackRulesDefaults(cache, sources, providerCache *string) {
-	if s.state == nil {
-		return
-	}
-	if *cache == "" {
+	root := s.workspaceRoot()
+	if cache != nil && strings.TrimSpace(*cache) == "" && s.state != nil {
 		*cache = s.state.Paths.RulesCacheDir
 	}
-	if *sources == "" {
+	if sources != nil && strings.TrimSpace(*sources) == "" && s.state != nil {
 		*sources = s.state.Paths.RuleSourcesDir
 	}
-	if *providerCache == "" {
+	if providerCache != nil && strings.TrimSpace(*providerCache) == "" && s.state != nil {
 		runtimeRoot := s.state.Paths.RuntimeRoot
 		if runtimeRoot == "" {
 			runtimeRoot = ".runtime"
 		}
 		*providerCache = filepath.Join(runtimeRoot, "rules", "provider-cache")
 	}
+	if cache != nil {
+		setDefault(cache, workspacePath(root, filepath.Join(".runtime", "rules", "packs")))
+	}
+	if sources != nil {
+		setDefault(sources, workspacePath(root, "rule-sources"))
+	}
+	if providerCache != nil {
+		setDefault(providerCache, workspacePath(root, filepath.Join(".runtime", "rules", "provider-cache")))
+	}
 }
 
 func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config     string `json:"config"`
-		Merged     string `json:"merged"`
-		RuntimeDir string `json:"runtime_dir"`
-	}
-	if err := decodeToolInput(args, &in); err != nil {
+	var req struct{}
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct {
+		Config     string
+		Merged     string
+		RuntimeDir string
+	}{}
 	if s.state != nil {
 		if in.Config == "" {
 			in.Config = s.state.Paths.SubscriptionConfig
@@ -2018,16 +2089,20 @@ func (s *Server) callSubscriptionsStatus(args json.RawMessage) (toolResult, erro
 }
 
 func (s *Server) callSubscriptionNodesList(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Subscription string `json:"subscription"`
-		Limit        int    `json:"limit"`
+	var req struct {
+		Limit int `json:"limit"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
 	}
+	in := struct {
+		Subscription string
+		Limit        int
+	}{Limit: req.Limit}
 	if s.state != nil && in.Subscription == "" {
 		in.Subscription = s.state.Paths.SubscriptionPath
 	}
+	setDefault(&in.Subscription, workspacePath(s.workspaceRoot(), "subscription.gob"))
 	result, err := rules.ListSubscriptionNodes(rules.SubscriptionNodesListOptions{
 		Subscription: in.Subscription,
 		Limit:        in.Limit,
@@ -2039,19 +2114,31 @@ func (s *Server) callSubscriptionNodesList(args json.RawMessage) (toolResult, er
 }
 
 func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Subscription  string   `json:"subscription"`
+	var req struct {
 		Query         string   `json:"query"`
 		Patterns      []string `json:"patterns"`
 		CaseSensitive bool     `json:"case_sensitive"`
 		Limit         int      `json:"limit"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Subscription  string
+		Query         string
+		Patterns      []string
+		CaseSensitive bool
+		Limit         int
+	}{
+		Query:         req.Query,
+		Patterns:      req.Patterns,
+		CaseSensitive: req.CaseSensitive,
+		Limit:         req.Limit,
 	}
 	if s.state != nil && in.Subscription == "" {
 		in.Subscription = s.state.Paths.SubscriptionPath
 	}
+	setDefault(&in.Subscription, workspacePath(s.workspaceRoot(), "subscription.gob"))
 	result, err := rules.SearchSubscriptionNodes(rules.SubscriptionNodesSearchOptions{
 		Subscription:  in.Subscription,
 		Query:         in.Query,
@@ -2071,7 +2158,6 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 		URL string `json:"url"`
 	}
 	var in struct {
-		Config  string                             `json:"config"`
 		Sources []subscriptionConfigureSourceInput `json:"sources"`
 		Replace *bool                              `json:"replace"`
 	}
@@ -2080,9 +2166,11 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 	if err := decoder.Decode(&in); err != nil {
 		return toolResult{}, err
 	}
-	if s.state != nil && in.Config == "" {
-		in.Config = s.state.Paths.SubscriptionConfig
+	config := ""
+	if s.state != nil {
+		config = s.state.Paths.SubscriptionConfig
 	}
+	setDefault(&config, workspacePath(s.workspaceRoot(), "localclash-subscriptions.json"))
 	uris := make([]string, 0, len(in.Sources))
 	for _, source := range in.Sources {
 		if strings.TrimSpace(source.URI) != "" {
@@ -2092,7 +2180,7 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 		uris = append(uris, source.URL)
 	}
 	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
-		ConfigPath: in.Config,
+		ConfigPath: config,
 		URIs:       uris,
 		Replace:    in.Replace,
 	})
@@ -2103,21 +2191,32 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 }
 
 func (s *Server) callSubscriptionsRefresh(ctx context.Context, args json.RawMessage) (toolResult, error) {
-	var in struct {
-		Config               string   `json:"config"`
-		IDs                  []string `json:"ids"`
-		RuntimeDir           string   `json:"runtime_dir"`
-		Merged               string   `json:"merged"`
-		Force                bool     `json:"force"`
-		UserAgent            string   `json:"user_agent"`
-		LocalClashConfig     string   `json:"localclash_config"`
-		Selection            string   `json:"selection"`
-		RulesCache           string   `json:"rules_cache"`
-		RuntimeProfileConfig string   `json:"runtime_profile"`
-		Output               string   `json:"output"`
+	var req struct {
+		IDs        []string `json:"ids"`
+		Force      bool     `json:"force"`
+		UserAgent  string   `json:"user_agent"`
+		Background *bool    `json:"background"`
+		Wait       *bool    `json:"wait"`
 	}
-	if err := decodeToolInput(args, &in); err != nil {
+	if err := decodeStrictToolInput(args, &req); err != nil {
 		return toolResult{}, err
+	}
+	in := struct {
+		Config               string
+		IDs                  []string
+		RuntimeDir           string
+		Merged               string
+		Force                bool
+		UserAgent            string
+		LocalClashConfig     string
+		Selection            string
+		RulesCache           string
+		RuntimeProfileConfig string
+		Output               string
+	}{
+		IDs:       req.IDs,
+		Force:     req.Force,
+		UserAgent: req.UserAgent,
 	}
 	root := s.workspaceRoot()
 	if s.state != nil {
