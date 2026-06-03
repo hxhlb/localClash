@@ -180,8 +180,11 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if summary.ID != TemplateLocalClashDefault || config.Version != localconfig.ConfigSchemaVersion {
 		t.Fatalf("template = %+v config version = %d, want current localclash default", summary, config.Version)
 	}
-	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 27 || len(config.Packs) != 32 || len(config.TransportRules) != 1 || len(config.CustomRules) != 1 {
-		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d transport_rules=%d custom_rules=%d, want 9/27/32/1/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.TransportRules), len(config.CustomRules))
+	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 27 || len(config.Packs) != 33 || len(config.TransportRules) != 1 || len(config.CustomRules) != 1 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d transport_rules=%d custom_rules=%d, want 9/27/33/1/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.TransportRules), len(config.CustomRules))
+	}
+	if got := packTarget(config.Packs, "v2fly-dlc", "category-pt"); got != "DIRECT" {
+		t.Fatalf("default template missing v2fly-dlc/category-pt DIRECT pack: %+v", config.Packs)
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])

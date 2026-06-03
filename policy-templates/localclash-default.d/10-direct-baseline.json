@@ -27,6 +27,13 @@
       },
       {
         "source": "v2fly-dlc",
+        "pack": "category-pt",
+        "type": "geosite",
+        "target": "DIRECT",
+        "reason": "Keep private tracker and PT community domains direct for router-friendly download behavior."
+      },
+      {
+        "source": "v2fly-dlc",
         "pack": "category-game-platforms-download",
         "type": "geosite",
         "target": "DIRECT",
