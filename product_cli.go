@@ -332,16 +332,19 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 	if len(args) == 0 {
 		return fmt.Errorf("runtime subcommand is required: status, start, restart, or stop")
 	}
-	if err := parseJSONOnly("runtime "+args[0], args[1:]); err != nil {
-		return err
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	switch args[0] {
 	case "status":
+		if err := parseJSONOnly("runtime status", args[1:]); err != nil {
+			return err
+		}
 		result := corerun.Status(runtimeStatusOptions(state))
 		return printProductOK(productEnvelope{OK: true, Summary: "Runtime status read.", Status: result, Changes: []string{}, Warnings: []string{}})
 	case "start":
+		if err := parseJSONOnly("runtime start", args[1:]); err != nil {
+			return err
+		}
 		result, err := corerun.Start(ctx, runtimeStartOptions(state))
 		if err != nil {
 			return err
@@ -350,7 +353,15 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 		warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 		return printProductOK(productEnvelope{OK: true, Changed: result.Started, Summary: "Runtime start completed.", Status: result, Changes: changedIf(result.Started, "runtime_started"), Warnings: warnings, NextActions: result.NextActions})
 	case "restart":
-		result, err := corerun.Restart(ctx, runtimeRestartOptions(state))
+		input, err := parseRuntimeRestartInput(args[1:])
+		if err != nil {
+			return err
+		}
+		opts := runtimeRestartOptions(state)
+		opts.Strategy = input.Strategy
+		opts.ConfigSHA256 = input.ConfigSHA256
+		opts.AttestationPath = input.AttestationPath
+		result, err := corerun.Restart(ctx, opts)
 		if err != nil {
 			return err
 		}
@@ -358,6 +369,9 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 		warnings = append(warnings, refreshCoreVersionCacheWarnings(ctx, state, "")...)
 		return printProductOK(productEnvelope{OK: true, Changed: result.Restarted, Summary: "Runtime restart completed.", Status: result, Changes: changedIf(result.Restarted, "runtime_restarted"), Warnings: warnings, NextActions: result.NextActions})
 	case "stop":
+		if err := parseJSONOnly("runtime stop", args[1:]); err != nil {
+			return err
+		}
 		result, err := corerun.Stop(corerun.StopOptions{WorkDir: state.Paths.MihomoRuntimeDir, Timeout: 5 * time.Second})
 		if err != nil {
 			return err
@@ -366,6 +380,35 @@ func runProductRuntime(args []string, state appinit.RuntimeState) error {
 	default:
 		return fmt.Errorf("unknown runtime subcommand %q", args[0])
 	}
+}
+
+type runtimeRestartInput struct {
+	Strategy        string
+	ConfigSHA256    string
+	AttestationPath string
+}
+
+func parseRuntimeRestartInput(args []string) (runtimeRestartInput, error) {
+	fs := flag.NewFlagSet("runtime restart", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var input runtimeRestartInput
+	asJSON := fs.Bool("json", false, "print product JSON response")
+	fs.StringVar(&input.Strategy, "strategy", "", "restart strategy: process_restart or hot_reload")
+	fs.StringVar(&input.ConfigSHA256, "config-sha256", "", "expected config sha256 for hot_reload")
+	fs.StringVar(&input.AttestationPath, "attestation", "", "mihomo config test attestation for hot_reload")
+	if err := fs.Parse(args); err != nil {
+		return input, err
+	}
+	if !*asJSON || fs.NArg() != 0 {
+		return input, fmt.Errorf("usage: localclash runtime restart [--strategy process_restart|hot_reload] [--config-sha256 <sha256>] [--attestation <file>] --json")
+	}
+	switch strings.TrimSpace(input.Strategy) {
+	case "", corerun.RestartStrategyProcess, corerun.RestartStrategyHotReload:
+		input.Strategy = strings.TrimSpace(input.Strategy)
+	default:
+		return input, fmt.Errorf("runtime restart: invalid strategy %q", input.Strategy)
+	}
+	return input, nil
 }
 
 func runProductTakeover(args []string, state appinit.RuntimeState) error {

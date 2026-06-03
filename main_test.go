@@ -471,6 +471,43 @@ func TestRunProductRuntimeStartRefreshesCoreVersionCache(t *testing.T) {
 	}
 }
 
+func TestRunProductRuntimeRestartAcceptsStrategy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALCLASH_WORKDIR", dir)
+	t.Chdir(dir)
+	core := filepath.Join(dir, runtimeprofile.MetaCorePath)
+	writeMainExecutableCore(t, core, "Mihomo runtime restart")
+	config := filepath.Join(dir, ".runtime", "mihomo", "config.yaml")
+	writeMainTestFile(t, config, "mixed-port: 7890\n")
+
+	output := captureStdout(t, func() error {
+		return run([]string{"runtime", "restart", "--strategy", "process_restart", "--json"})
+	})
+	var result struct {
+		OK     bool `json:"ok"`
+		Status struct {
+			AppliedStrategy string `json:"applied_strategy"`
+			Start           struct {
+				PID int `json:"pid"`
+			} `json:"start"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		t.Fatalf("runtime restart JSON = %q, error = %v", output, err)
+	}
+	if result.Status.Start.PID > 0 {
+		t.Cleanup(func() {
+			if process, err := os.FindProcess(result.Status.Start.PID); err == nil {
+				_ = process.Kill()
+				_, _ = process.Wait()
+			}
+		})
+	}
+	if !result.OK || result.Status.AppliedStrategy != "process_restart" || result.Status.Start.PID == 0 {
+		t.Fatalf("runtime restart result = %+v, want process_restart runtime", result)
+	}
+}
+
 func TestRunProductTakeoverApplyFailureReturnsErrorEnvelope(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LOCALCLASH_WORKDIR", dir)
