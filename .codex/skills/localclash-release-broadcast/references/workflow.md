@@ -5,9 +5,12 @@
 - Changelog source: `docs/changelog.md`
 - Telegram fixed top Markdown: `telegram/top.md`
 - Telegram generator/poster: `scripts/telegram-channel-update.py`
+- X.com card generator: `scripts/x-release-card.py`
 - Generated Telegram update body: `telegram/changelog.md`
 - Default Telegram image:
   `telegram/localclash-telegram-update.png`
+- X.com changelog image style:
+  `docs/x-release-card-style.md`
 - Local token file: `telegram/.token`
 - Fallback Syncnext token file:
   `/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token`
@@ -20,6 +23,8 @@ Tracked source files:
 - `telegram/top.md`
 - `telegram/localclash-telegram-update.png`
 - `scripts/telegram-channel-update.py`
+- `scripts/x-release-card.py`
+- `docs/x-release-card-style.md`
 - `.codex/skills/localclash-release-broadcast/**`
 
 Local generated files that must stay ignored:
@@ -37,6 +42,34 @@ git check-ignore -v \
   telegram/.token \
   telegram/out/example.md \
   telegram/sent/example.json
+```
+
+## Telegram Commands
+
+## X.com Image Command
+
+Generate the X.com changelog image from the latest dated changelog section:
+
+```bash
+scripts/x-release-card.py
+```
+
+Generated files:
+
+```text
+telegram/out/localclash-x-release-card.html
+telegram/out/localclash-x-release-card.png
+```
+
+The script writes the ignored HTML working file and renders a `1600 x 2000` PNG
+through the existing Arc CDP endpoint at `http://localhost:9222`. If CDP or
+Playwright is unavailable, the script fails explicitly instead of silently
+reusing an old image.
+
+HTML-only generation for style/debug iteration:
+
+```bash
+scripts/x-release-card.py --html-only
 ```
 
 ## Telegram Commands
@@ -84,3 +117,12 @@ Token lookup order:
 - Avoid internal command transcripts in public-facing change bullets.
 - Include only current, verified facts for "latest" claims.
 - Put verification evidence in a short `Verification:` list when relevant.
+
+## X.com Update Image
+
+- Use `scripts/x-release-card.py` for every release broadcast before drafting an
+  X.com post.
+- Use the fixed dark technical card documented in `docs/x-release-card-style.md`.
+- The X.com image is a changelog summary only; do not include the Telegram fixed
+  top, product feature introduction, or right-bottom explanatory filler.
+- Generate local working files under `telegram/out/` and keep them ignored.
