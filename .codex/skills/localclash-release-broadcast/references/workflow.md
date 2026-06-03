@@ -3,6 +3,7 @@
 ## Files
 
 - Changelog source: `docs/changelog.md`
+- Telegram fixed top Markdown: `telegram/top.md`
 - Telegram generator/poster: `scripts/telegram-channel-update.py`
 - Generated Telegram Markdown: `telegram/changelog.md`
 - Default Telegram image:
@@ -16,6 +17,7 @@
 Tracked source files:
 
 - `docs/changelog.md`
+- `telegram/top.md`
 - `scripts/telegram-channel-update.py`
 - `.codex/skills/localclash-release-broadcast/**`
 

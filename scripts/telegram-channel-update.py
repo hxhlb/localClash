@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Generate and optionally post a localClash Telegram channel update.
 
-The script reads docs/changelog.md, extracts the latest dated release section,
-writes a Telegram Markdown announcement to telegram/changelog.md, and can post
-it to the same Telegram channel used by Syncnext.
+The script reads telegram/top.md and docs/changelog.md, extracts the latest
+dated release section, writes a Telegram Markdown announcement to
+telegram/changelog.md, and can post it to the same Telegram channel used by
+Syncnext.
 """
 
 from __future__ import annotations
@@ -86,9 +87,15 @@ def join_wrapped_line(current: str, continuation: str) -> str:
         return continuation
     if not continuation:
         return current
-    if current[-1].isascii() and continuation[0].isascii():
+    if should_join_with_space(current[-1], continuation[0]):
         return current + " " + continuation
     return current + continuation
+
+
+def should_join_with_space(left: str, right: str) -> bool:
+    if left in "([{`，。；：、" or right in ".,;:!?，。；：、）)]}":
+        return False
+    return left.isascii() or right.isascii()
 
 
 def extract_changes(block: str) -> list[str]:
@@ -128,13 +135,21 @@ def split_release_blocks(section: str) -> list[tuple[str, str]]:
     return blocks
 
 
-def build_telegram_message(changelog: str) -> tuple[str, str]:
+def merge_text(top: str, changelog: str, date: str) -> str:
+    top_clean = top.replace("{date}", date).rstrip("\n")
+    change_clean = changelog.lstrip("\n")
+    if top_clean and change_clean:
+        return f"{top_clean}\n\n{change_clean}"
+    return f"{top_clean}{change_clean}"
+
+
+def build_telegram_message(changelog: str, top: str) -> tuple[str, str]:
     date, section = latest_dated_section(changelog)
     blocks = split_release_blocks(section)
     if not blocks:
         raise ScriptError(f"No release blocks found under {date}.")
 
-    lines = ["*localClash 更新日誌*", date]
+    lines: list[str] = []
     extracted_blocks = 0
     for title, block in blocks:
         changes = extract_changes(block)
@@ -150,7 +165,7 @@ def build_telegram_message(changelog: str) -> tuple[str, str]:
         if release_url:
             lines.append(f"Release: {release_url}")
 
-    message = "\n".join(lines).strip() + "\n"
+    message = merge_text(top, "\n".join(lines).strip(), date) + "\n"
     if extracted_blocks == 0:
         raise ScriptError(f"No user-facing changes extracted under {date}.")
     return date, message
@@ -263,6 +278,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate or post a localClash Telegram channel update.")
     repo_root = Path(__file__).resolve().parents[1]
     parser.add_argument("--changelog", type=Path, default=repo_root / "docs/changelog.md")
+    parser.add_argument("--top", type=Path, default=repo_root / "telegram/top.md")
     parser.add_argument("--output", type=Path, default=repo_root / "telegram/changelog.md")
     parser.add_argument("--chat-id", default=DEFAULT_CHAT_ID)
     parser.add_argument("--token", default=None, help="Telegram bot token. Prefer env or token files.")
@@ -288,7 +304,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    date, message = build_telegram_message(read_text(args.changelog))
+    date, message = build_telegram_message(read_text(args.changelog), read_text(args.top))
 
     if not args.no_write:
         args.output.parent.mkdir(parents=True, exist_ok=True)
