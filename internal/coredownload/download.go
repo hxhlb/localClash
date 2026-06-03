@@ -53,6 +53,15 @@ type asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+type assetSelection struct {
+	Asset        asset
+	Target       string
+	CPULevel     string
+	Reason       string
+	DetectedOS   string
+	DetectedArch string
+}
+
 const (
 	FlavorAll    = "all"
 	FlavorMeta   = "meta"
@@ -99,15 +108,16 @@ func downloadFlavor(ctx context.Context, opts Options, flavor string) (Result, e
 		return Result{}, err
 	}
 
-	selected, err := selectAsset(rel.Assets, opts.TargetOS, opts.TargetArch)
+	selected, err := selectAssetForTarget(rel.Assets, opts.TargetOS, opts.TargetArch)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w for %s/%s in %s", err, opts.TargetOS, opts.TargetArch, rel.TagName)
 	}
+	logSelection(selected)
 
 	result := Result{
 		Version:     rel.TagName,
-		AssetName:   selected.Name,
-		DownloadURL: selected.BrowserDownloadURL,
+		AssetName:   selected.Asset.Name,
+		DownloadURL: selected.Asset.BrowserDownloadURL,
 		OutputPath:  outputPath(opts, flavor),
 		Flavor:      flavor,
 		Target:      opts.Target,
@@ -126,7 +136,7 @@ func downloadFlavor(ctx context.Context, opts Options, flavor string) (Result, e
 	tmpPath := result.OutputPath + ".download"
 	defer os.Remove(tmpPath)
 
-	if err := downloadAsset(ctx, selected.BrowserDownloadURL, selected.Name, tmpPath); err != nil {
+	if err := downloadAsset(ctx, selected.Asset.BrowserDownloadURL, selected.Asset.Name, tmpPath); err != nil {
 		return Result{}, err
 	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
@@ -142,6 +152,7 @@ func downloadFlavor(ctx context.Context, opts Options, flavor string) (Result, e
 func shouldUseOpenClashMeta(opts Options) bool {
 	return opts.Target == TargetRouter &&
 		opts.TargetOS == "linux" &&
+		normalizeArch(opts.TargetArch) != "amd64" &&
 		opts.Version == "latest" &&
 		opts.Repo == "MetaCubeX/mihomo"
 }
@@ -156,6 +167,7 @@ func downloadOpenClashCore(ctx context.Context, opts Options, flavor string) (Re
 		return Result{}, err
 	}
 	url := fmt.Sprintf("https://raw.githubusercontent.com/vernesong/OpenClash/core/%s/%s/%s", opts.SmartBranch, flavor, name)
+	logSelection(openClashSelection(opts.TargetOS, opts.TargetArch, name))
 	result := Result{
 		Version:     version,
 		AssetName:   name,
@@ -392,27 +404,35 @@ func openClashCoreAssetName(targetOS, targetArch string) (string, error) {
 }
 
 func selectAsset(assets []asset, targetOS, targetArch string) (asset, error) {
-	targetArch = normalizeArch(targetArch)
-	exact := fmt.Sprintf("mihomo-%s-%s-", targetOS, targetArch)
-	if targetOS == "linux" && targetArch == "amd64" {
-		compatible := exact + "compatible-"
-		for _, candidate := range assets {
-			name := candidate.Name
-			if strings.HasPrefix(name, compatible) && (strings.HasSuffix(name, ".gz") || strings.HasSuffix(name, ".zip")) {
-				return candidate, nil
-			}
-		}
+	selected, err := selectAssetForTarget(assets, targetOS, targetArch)
+	if err != nil {
+		return asset{}, err
 	}
+	return selected.Asset, nil
+}
+
+func selectAssetForTarget(assets []asset, targetOS, targetArch string) (assetSelection, error) {
+	targetOS = strings.ToLower(strings.TrimSpace(targetOS))
+	targetArch = normalizeArch(targetArch)
+	mihomoTarget, cpuLevel, reason := mihomoReleaseTarget(targetOS, targetArch)
+	exact := fmt.Sprintf("mihomo-%s-%s-", targetOS, mihomoTarget)
 	for _, candidate := range assets {
 		name := candidate.Name
 		if strings.HasPrefix(name, exact) && (strings.HasSuffix(name, ".gz") || strings.HasSuffix(name, ".zip")) {
-			if isSpecialVariant(name, targetOS, targetArch) {
+			if isSpecialVariant(name, targetOS, mihomoTarget) {
 				continue
 			}
-			return candidate, nil
+			return assetSelection{
+				Asset:        candidate,
+				Target:       mihomoTarget,
+				CPULevel:     cpuLevel,
+				Reason:       reason,
+				DetectedOS:   targetOS,
+				DetectedArch: detectedArchForLog(targetOS, targetArch),
+			}, nil
 		}
 	}
-	return asset{}, errors.New("no matching mihomo release asset")
+	return assetSelection{}, fmt.Errorf("no matching mihomo release asset for exact target %q", mihomoTarget)
 }
 
 func normalizeArch(arch string) string {
@@ -424,6 +444,42 @@ func normalizeArch(arch string) string {
 	default:
 		return strings.ToLower(arch)
 	}
+}
+
+func mihomoReleaseTarget(targetOS, targetArch string) (target, cpuLevel, reason string) {
+	if targetOS == "linux" && targetArch == "amd64" {
+		return "amd64-v1", "unknown", "x86_64 OpenWrt/iStoreOS environment uses conservative amd64-v1 target unless higher CPU level is explicitly verified"
+	}
+	return targetArch, "unknown", fmt.Sprintf("%s/%s maps directly to Mihomo release target %s", targetOS, targetArch, targetArch)
+}
+
+func detectedArchForLog(targetOS, targetArch string) string {
+	if targetOS == "linux" && targetArch == "amd64" {
+		return "x86_64"
+	}
+	return targetArch
+}
+
+func openClashSelection(targetOS, targetArch, name string) assetSelection {
+	targetOS = strings.ToLower(strings.TrimSpace(targetOS))
+	targetArch = normalizeArch(targetArch)
+	return assetSelection{
+		Asset:        asset{Name: name},
+		Target:       targetArch,
+		CPULevel:     "unknown",
+		Reason:       fmt.Sprintf("OpenClash %s/%s core asset naming maps directly to %s", targetOS, targetArch, name),
+		DetectedOS:   targetOS,
+		DetectedArch: detectedArchForLog(targetOS, targetArch),
+	}
+}
+
+func logSelection(selection assetSelection) {
+	fmt.Fprintf(os.Stderr, "Detected OS: %s\n", selection.DetectedOS)
+	fmt.Fprintf(os.Stderr, "Detected arch: %s\n", selection.DetectedArch)
+	fmt.Fprintf(os.Stderr, "Detected CPU level: %s\n", selection.CPULevel)
+	fmt.Fprintf(os.Stderr, "Selected mihomo target: %s\n", selection.Target)
+	fmt.Fprintf(os.Stderr, "Selected mihomo asset: %s\n", selection.Asset.Name)
+	fmt.Fprintf(os.Stderr, "Selection reason: %s\n", selection.Reason)
 }
 
 func isSpecialVariant(name, targetOS, targetArch string) bool {

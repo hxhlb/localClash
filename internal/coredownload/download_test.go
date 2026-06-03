@@ -23,19 +23,73 @@ func TestSelectAssetPrefersDefaultVariant(t *testing.T) {
 	}
 }
 
-func TestSelectAssetPrefersCompatibleLinuxAMD64(t *testing.T) {
+func TestSelectAssetUsesConservativeLinuxAMD64V1(t *testing.T) {
 	assets := []asset{
 		{Name: "mihomo-linux-amd64-v3-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v3"},
 		{Name: "mihomo-linux-amd64-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64"},
 		{Name: "mihomo-linux-amd64-compatible-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-compatible"},
+		{Name: "mihomo-linux-amd64-v1-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v1"},
 	}
 
 	got, err := selectAsset(assets, "linux", "amd64")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.BrowserDownloadURL != "https://example.test/linux-amd64-compatible" {
-		t.Fatalf("selected %q, want compatible linux amd64 asset", got.Name)
+	if got.BrowserDownloadURL != "https://example.test/linux-amd64-v1" {
+		t.Fatalf("selected %q, want conservative linux amd64-v1 asset", got.Name)
+	}
+}
+
+func TestSelectAssetNormalizesX8664ToLinuxAMD64V1(t *testing.T) {
+	assets := []asset{
+		{Name: "mihomo-linux-amd64-v3-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v3"},
+		{Name: "mihomo-linux-amd64-v1-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v1"},
+	}
+
+	got, err := selectAssetForTarget(assets, "linux", "x86_64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Target != "amd64-v1" {
+		t.Fatalf("target = %q, want amd64-v1", got.Target)
+	}
+	if got.DetectedArch != "x86_64" {
+		t.Fatalf("detected arch = %q, want x86_64", got.DetectedArch)
+	}
+	if got.Asset.BrowserDownloadURL != "https://example.test/linux-amd64-v1" {
+		t.Fatalf("selected %q, want linux amd64-v1 asset", got.Asset.Name)
+	}
+}
+
+func TestSelectAssetRequiresExactLinuxAMD64V1Token(t *testing.T) {
+	assets := []asset{
+		{Name: "mihomo-linux-amd64-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64"},
+		{Name: "mihomo-linux-amd64-compatible-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-compatible"},
+		{Name: "mihomo-linux-amd64-v2-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v2"},
+		{Name: "mihomo-linux-amd64-v3-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v3"},
+	}
+
+	_, err := selectAsset(assets, "linux", "amd64")
+	if err == nil {
+		t.Fatal("expected missing amd64-v1 asset to fail")
+	}
+	if !strings.Contains(err.Error(), `exact target "amd64-v1"`) {
+		t.Fatalf("error = %q, want exact target amd64-v1", err)
+	}
+}
+
+func TestSelectAssetChoosesLinuxAMD64V1WhenV3AppearsFirst(t *testing.T) {
+	assets := []asset{
+		{Name: "mihomo-linux-amd64-v3-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v3"},
+		{Name: "mihomo-linux-amd64-v1-v1.19.25.gz", BrowserDownloadURL: "https://example.test/linux-amd64-v1"},
+	}
+
+	got, err := selectAsset(assets, "linux", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BrowserDownloadURL != "https://example.test/linux-amd64-v1" {
+		t.Fatalf("selected %q, want linux amd64-v1 asset", got.Name)
 	}
 }
 
@@ -50,6 +104,33 @@ func TestSelectAssetNormalizesAarch64(t *testing.T) {
 	}
 	if got.BrowserDownloadURL != "https://example.test/linux-arm64" {
 		t.Fatalf("selected %q, want linux arm64 asset", got.Name)
+	}
+}
+
+func TestSelectAssetKeepsNonX86LinuxTargets(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetArch string
+		assetName  string
+	}{
+		{name: "arm64", targetArch: "arm64", assetName: "mihomo-linux-arm64-v1.19.25.gz"},
+		{name: "mips64", targetArch: "mips64", assetName: "mihomo-linux-mips64-v1.19.25.gz"},
+		{name: "riscv64", targetArch: "riscv64", assetName: "mihomo-linux-riscv64-v1.19.25.gz"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectAssetForTarget([]asset{{Name: tt.assetName, BrowserDownloadURL: "https://example.test/" + tt.targetArch}}, "linux", tt.targetArch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Target != tt.targetArch {
+				t.Fatalf("target = %q, want %q", got.Target, tt.targetArch)
+			}
+			if got.Asset.Name != tt.assetName {
+				t.Fatalf("selected %q, want %q", got.Asset.Name, tt.assetName)
+			}
+		})
 	}
 }
 
@@ -122,6 +203,20 @@ func TestOpenClashCoreAssetNameUsesLinuxArm64(t *testing.T) {
 	}
 	if got != "clash-linux-arm64.tar.gz" {
 		t.Fatalf("asset = %q, want clash-linux-arm64.tar.gz", got)
+	}
+}
+
+func TestRouterMetaLinuxAMD64UsesGitHubReleaseSelection(t *testing.T) {
+	opts := normalizeOptions(Options{Target: TargetRouter, TargetArch: "x86_64", Flavor: FlavorMeta, Version: "latest", Repo: "MetaCubeX/mihomo"})
+	if shouldUseOpenClashMeta(opts) {
+		t.Fatal("router meta linux amd64 should use exact GitHub amd64-v1 release selection, not OpenClash amd64 asset")
+	}
+}
+
+func TestRouterMetaNonX86KeepsOpenClashSelection(t *testing.T) {
+	opts := normalizeOptions(Options{Target: TargetRouter, TargetArch: "arm64", Flavor: FlavorMeta, Version: "latest", Repo: "MetaCubeX/mihomo"})
+	if !shouldUseOpenClashMeta(opts) {
+		t.Fatal("router meta non-x86 target should keep existing OpenClash selection")
 	}
 }
 
