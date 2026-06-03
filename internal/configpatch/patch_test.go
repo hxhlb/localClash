@@ -56,6 +56,122 @@ func TestImportPolicyTemplateWritesCanonicalPatchesAndCompiledIntent(t *testing.
 	}
 }
 
+func TestImportPolicyTemplateRefreshesOnlyPolicyTemplatePatches(t *testing.T) {
+	dir := t.TempDir()
+	templatesDir := filepath.Join(dir, "policy-templates")
+	writeTestFile(t, filepath.Join(templatesDir, "localclash-default.json"), `{
+  "id": "localclash-default",
+  "name": "Default",
+  "description": "Default template.",
+  "config": {
+    "version": 4,
+    "policy_template": "localclash-default",
+    "proxy_groups": {
+      "NewDirect": {"mode": "direct"}
+    }
+  }
+}`)
+	registryDir := filepath.Join(dir, "patches")
+	writePatchJSON(t, filepath.Join(registryDir, "default.old_old-default.json"), Patch{
+		Version: PatchVersion,
+		PatchID: "default.old",
+		Title:   "Old Default",
+		Source:  SourcePolicyTemplate,
+		Status:  StatusEnabled,
+		OrderID: "0200.000000",
+		Overlay: configplan.OverlayIntent{
+			ProxyGroups: []configplan.OverlayProxyGroupIntent{{ID: "OldDirect", Mode: "direct"}},
+		},
+	})
+	writePatchJSON(t, filepath.Join(registryDir, "user.keep_keep.json"), Patch{
+		Version: PatchVersion,
+		PatchID: "user.keep",
+		Title:   "Keep",
+		Source:  SourceUser,
+		Status:  StatusEnabled,
+		OrderID: "1000.000000",
+		Overlay: configplan.OverlayIntent{
+			PolicyGroups: []configplan.OverlayPolicyGroupIntent{{ID: "UserPolicy", Mode: "manual", Exits: []string{"NewDirect"}}},
+		},
+	})
+
+	result, err := ImportPolicyTemplate(context.Background(), ImportTemplateOptions{
+		RegistryDir:         registryDir,
+		PolicyTemplatesDir:  templatesDir,
+		PolicyTemplate:      "localclash-default",
+		RefreshTemplateOnly: true,
+		ConfigPath:          filepath.Join(dir, "localclash-intent.json"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RefreshTemplateOnly || result.ResetPatches {
+		t.Fatalf("result refresh=%v reset=%v, want template-only refresh", result.RefreshTemplateOnly, result.ResetPatches)
+	}
+	if _, err := os.Stat(filepath.Join(registryDir, "default.old_old-default.json")); !os.IsNotExist(err) {
+		t.Fatalf("old policy template patch should be removed, err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(registryDir, "user.keep_keep.json")); err != nil {
+		t.Fatalf("user patch should be preserved: %v", err)
+	}
+	registry, err := Load(registryDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record, ok := registry.ByID["default.localclash-default.v1"]; !ok || record.Patch.Source != SourcePolicyTemplate {
+		t.Fatalf("new policy template patch = %+v, want source policy_template", record)
+	}
+	config, err := localconfig.Load(filepath.Join(dir, "localclash-intent.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := config.ProxyGroups["OldDirect"]; ok {
+		t.Fatalf("compiled config retained old policy template group: %+v", config.ProxyGroups)
+	}
+	if _, ok := config.ProxyGroups["NewDirect"]; !ok {
+		t.Fatalf("compiled config missing new policy template group: %+v", config.ProxyGroups)
+	}
+	if _, ok := config.PolicyGroups["UserPolicy"]; !ok {
+		t.Fatalf("compiled config missing preserved user policy group: %+v", config.PolicyGroups)
+	}
+}
+
+func TestImportPolicyTemplateRefreshRejectsPatchWithoutSource(t *testing.T) {
+	dir := t.TempDir()
+	templatesDir := filepath.Join(dir, "policy-templates")
+	writeTestFile(t, filepath.Join(templatesDir, "minimal.json"), `{
+  "id": "minimal",
+  "name": "Minimal",
+  "description": "Minimal template.",
+  "config": {
+    "version": 4,
+    "policy_template": "minimal",
+    "proxy_groups": {
+      "DIRECT-ONLY": {"mode": "direct"}
+    }
+  }
+}`)
+	writeTestFile(t, filepath.Join(dir, "patches", "user.unknown_unknown.json"), `{
+  "version": 1,
+  "patch_id": "user.unknown",
+  "title": "Unknown",
+  "status": "enabled",
+  "order_id": "1000.000000",
+  "overlay": {}
+}`)
+
+	_, err := ImportPolicyTemplate(context.Background(), ImportTemplateOptions{
+		RegistryDir:         filepath.Join(dir, "patches"),
+		PolicyTemplatesDir:  templatesDir,
+		PolicyTemplate:      "minimal",
+		RefreshTemplateOnly: true,
+		ConfigPath:          filepath.Join(dir, "localclash-intent.json"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "patch source is required") {
+		t.Fatalf("error = %v, want missing source failure", err)
+	}
+}
+
 func TestLoadRejectsDuplicatePatchIDAndOrderID(t *testing.T) {
 	dir := t.TempDir()
 	patch := Patch{

@@ -245,6 +245,7 @@ type ImportTemplateOptions struct {
 	PolicyTemplatesDir  string
 	PolicyTemplate      string
 	ResetPatches        bool
+	RefreshTemplateOnly bool
 	ConfigPath          string
 	SelectionPath       string
 	OutputPath          string
@@ -260,17 +261,18 @@ type ImportTemplateOptions struct {
 }
 
 type ImportTemplateResult struct {
-	Imported      bool                   `json:"imported"`
-	ResetPatches  bool                   `json:"reset_patches"`
-	Template      policytemplate.Summary `json:"template"`
-	Patches       []PatchSummary         `json:"patches"`
-	RegistryHash  string                 `json:"registry_hash"`
-	ConfigPath    string                 `json:"config_path"`
-	SelectionPath string                 `json:"selection_path,omitempty"`
-	OutputPath    string                 `json:"output_path,omitempty"`
-	Build         BuildResult            `json:"build,omitempty"`
-	Warnings      []string               `json:"warnings,omitempty"`
-	NextActions   []string               `json:"next_actions,omitempty"`
+	Imported            bool                   `json:"imported"`
+	ResetPatches        bool                   `json:"reset_patches"`
+	RefreshTemplateOnly bool                   `json:"refresh_policy_template_patches"`
+	Template            policytemplate.Summary `json:"template"`
+	Patches             []PatchSummary         `json:"patches"`
+	RegistryHash        string                 `json:"registry_hash"`
+	ConfigPath          string                 `json:"config_path"`
+	SelectionPath       string                 `json:"selection_path,omitempty"`
+	OutputPath          string                 `json:"output_path,omitempty"`
+	Build               BuildResult            `json:"build,omitempty"`
+	Warnings            []string               `json:"warnings,omitempty"`
+	NextActions         []string               `json:"next_actions,omitempty"`
 }
 
 type compiledRegistry struct {
@@ -529,12 +531,19 @@ func Apply(ctx context.Context, opts ApplyOptions) (ApplyResult, error) {
 
 func ImportPolicyTemplate(ctx context.Context, opts ImportTemplateOptions) (ImportTemplateResult, error) {
 	opts = normalizeImportOptions(opts)
+	if opts.ResetPatches && opts.RefreshTemplateOnly {
+		return ImportTemplateResult{}, errors.New("reset_patches and refresh_policy_template_patches are mutually exclusive")
+	}
 	sources, summary, err := policytemplate.PatchSources(opts.PolicyTemplatesDir, opts.PolicyTemplate)
 	if err != nil {
 		return ImportTemplateResult{}, err
 	}
 	if opts.ResetPatches {
 		if err := removeRegistryFiles(opts.RegistryDir); err != nil {
+			return ImportTemplateResult{}, err
+		}
+	} else if opts.RefreshTemplateOnly {
+		if err := removePolicyTemplateRegistryFiles(opts.RegistryDir); err != nil {
 			return ImportTemplateResult{}, err
 		}
 	}
@@ -559,13 +568,14 @@ func ImportPolicyTemplate(ctx context.Context, opts ImportTemplateOptions) (Impo
 		return ImportTemplateResult{}, err
 	}
 	result := ImportTemplateResult{
-		Imported:      true,
-		ResetPatches:  opts.ResetPatches,
-		Template:      summary,
-		RegistryHash:  compiled.RegistryHash,
-		ConfigPath:    opts.ConfigPath,
-		SelectionPath: opts.SelectionPath,
-		OutputPath:    opts.OutputPath,
+		Imported:            true,
+		ResetPatches:        opts.ResetPatches,
+		RefreshTemplateOnly: opts.RefreshTemplateOnly,
+		Template:            summary,
+		RegistryHash:        compiled.RegistryHash,
+		ConfigPath:          opts.ConfigPath,
+		SelectionPath:       opts.SelectionPath,
+		OutputPath:          opts.OutputPath,
 	}
 	for _, record := range registry.Records {
 		result.Patches = append(result.Patches, summaryForRecord(record))
@@ -1459,6 +1469,48 @@ func removeRegistryFiles(dir string) error {
 		}
 		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil && !os.IsNotExist(err) {
 			return err
+		}
+	}
+	return nil
+}
+
+func removePolicyTemplateRegistryFiles(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var raw struct {
+			PatchID string  `json:"patch_id"`
+			Source  *string `json:"source"`
+		}
+		if err := json.Unmarshal(data, &raw); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if raw.Source == nil {
+			return fmt.Errorf("%s: patch source is required to refresh policy template patches without removing user patches", path)
+		}
+		source := strings.TrimSpace(*raw.Source)
+		switch source {
+		case SourcePolicyTemplate:
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		case SourceUser:
+			continue
+		default:
+			return fmt.Errorf("%s: patch %q has unsupported source %q", path, strings.TrimSpace(raw.PatchID), source)
 		}
 	}
 	return nil

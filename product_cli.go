@@ -824,12 +824,13 @@ type subscriptionInput struct {
 }
 
 type configInput struct {
-	Version                int    `json:"version"`
-	Template               string `json:"template"`
-	RuntimeProfile         string `json:"runtime_profile"`
-	Core                   string `json:"core"`
-	AllowOverwriteModified bool   `json:"allow_overwrite_modified"`
-	ResetPatches           bool   `json:"reset_patches"`
+	Version                      int    `json:"version"`
+	Template                     string `json:"template"`
+	RuntimeProfile               string `json:"runtime_profile"`
+	Core                         string `json:"core"`
+	AllowOverwriteModified       bool   `json:"allow_overwrite_modified"`
+	ResetPatches                 bool   `json:"reset_patches"`
+	RefreshPolicyTemplatePatches bool   `json:"refresh_policy_template_patches"`
 }
 
 func parseSubscriptionInput(args []string) (subscriptionInput, error) {
@@ -862,6 +863,9 @@ func parseConfigInput(args []string) (configInput, error) {
 	}
 	if input.Core != runtimeprofile.CoreMeta && input.Core != runtimeprofile.CoreSmart {
 		return input, fmt.Errorf("core must be meta or smart")
+	}
+	if input.ResetPatches && input.RefreshPolicyTemplatePatches {
+		return input, fmt.Errorf("reset_patches and refresh_policy_template_patches are mutually exclusive")
 	}
 	return input, nil
 }
@@ -1093,6 +1097,7 @@ func applyTemplateInput(ctx context.Context, input configInput, state appinit.Ru
 		RuntimeProfilePath:  state.Paths.RuntimeProfilePath,
 		CorePath:            normalizeCorePathForState(state, profile.CorePath),
 		WorkDir:             state.Paths.MihomoRuntimeDir,
+		RefreshTemplateOnly: input.RefreshPolicyTemplatePatches,
 	})
 	if err != nil {
 		return nil, nil, err
