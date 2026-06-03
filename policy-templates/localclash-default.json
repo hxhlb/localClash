@@ -12,7 +12,7 @@
     {
       "id": "default.direct-baseline.v1",
       "path": "localclash-default.d/10-direct-baseline.json",
-      "description": "Add reject, private, tracker, download, and China direct baseline packs."
+      "description": "Add reject, private, tracker, PT, download, and China direct baseline packs."
     },
     {
       "id": "default.quic-main.v1",

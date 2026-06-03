@@ -180,11 +180,11 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 	if summary.ID != TemplateLocalClashDefault || config.Version != localconfig.ConfigSchemaVersion {
 		t.Fatalf("template = %+v config version = %d, want current localclash default", summary, config.Version)
 	}
-	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 27 || len(config.Packs) != 33 || len(config.TransportRules) != 1 || len(config.CustomRules) != 1 {
-		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d transport_rules=%d custom_rules=%d, want 9/27/33/1/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.TransportRules), len(config.CustomRules))
+	if len(config.ProxyGroups) != 9 || len(config.PolicyGroups) != 28 || len(config.Packs) != 33 || len(config.TransportRules) != 1 || len(config.CustomRules) != 1 {
+		t.Fatalf("default template counts: proxy_groups=%d policy_groups=%d packs=%d transport_rules=%d custom_rules=%d, want 9/28/33/1/1", len(config.ProxyGroups), len(config.PolicyGroups), len(config.Packs), len(config.TransportRules), len(config.CustomRules))
 	}
-	if got := packTarget(config.Packs, "v2fly-dlc", "category-pt"); got != "DIRECT" {
-		t.Fatalf("default template missing v2fly-dlc/category-pt DIRECT pack: %+v", config.Packs)
+	if got := packTarget(config.Packs, "v2fly-dlc", "category-pt"); got != "🧲 BT/PT 下载" {
+		t.Fatalf("default template category-pt target = %q, want 🧲 BT/PT 下载", got)
 	}
 	if _, exists := config.ProxyGroups["STEAM"]; exists {
 		t.Fatalf("default template still has flat STEAM proxy group: %+v", config.ProxyGroups["STEAM"])
@@ -214,11 +214,12 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 		t.Fatalf("transport rule = %+v, want QUIC UDP/443 target", got)
 	}
 	wantExitsByGroup := map[string][]string{
-		"🎮 Steam":   {"⚡ 自动选择", "🎯 手动选择", "🌐 全球直连", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
-		"🎮 游戏平台":    {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
-		"🕹 Bahamut": {"🇹🇼 台湾节点", "🎯 手动选择", "🌐 全球直连"},
-		"🤖 ChatGPT": {"🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🎯 手动选择", "⚡ 自动选择", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
-		"🍎 Apple":   {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🎮 Steam":    {"⚡ 自动选择", "🎯 手动选择", "🌐 全球直连", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🎮 游戏平台":     {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🕹 Bahamut":  {"🇹🇼 台湾节点", "🎯 手动选择", "🌐 全球直连"},
+		"🤖 ChatGPT":  {"🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🎯 手动选择", "⚡ 自动选择", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🍎 Apple":    {"🌐 全球直连", "🎯 手动选择", "⚡ 自动选择", "🇭🇰 香港节点", "🇺🇸 美国节点", "🇯🇵 日本节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
+		"🧲 BT/PT 下载": {"🌐 全球直连", "⚡ 自动选择", "🎯 手动选择", "🇭🇰 香港节点", "🇯🇵 日本节点", "🇺🇸 美国节点", "🇸🇬 新加坡节点", "🇹🇼 台湾节点", "🇰🇷 韩国节点"},
 	}
 	for id, wantExits := range wantExitsByGroup {
 		group, exists := config.PolicyGroups[id]
@@ -252,6 +253,8 @@ func TestRealLocalClashDefaultTemplateIsLayered(t *testing.T) {
 		t.Fatalf("telegram target = %q, want 💬 通信服务", got)
 	}
 	wantExactPacks := map[string]string{
+		"category-public-tracker":   "🧲 BT/PT 下载",
+		"category-pt":               "🧲 BT/PT 下载",
 		"category-social-media-!cn": "👥 社交媒体",
 		"category-ai-!cn":           "🧠 AI",
 		"geolocation-!cn":           "🧭 漏网之鱼",

@@ -48,8 +48,10 @@ Ordinary proxy-oriented business groups default to `⚡ 自动选择` and keep
 semantics can still choose a different first exit, such as `🤖 ChatGPT` defaulting
 to United States, then Japan, then Singapore while excluding the Hong Kong region
 exit; `🚦 QUIC` defaulting to `REJECT`; game platform/Apple/Microsoft/speed-test
-defaulting to direct; or Bahamut defaulting to Taiwan. Region exits are optional
-so subscriptions without a given region can still initialize. Patch files
+defaulting to direct; `🧲 BT/PT 下载` defaulting to direct while exposing automatic,
+manual, and regional proxy exits for Dashboard overrides; or Bahamut defaulting
+to Taiwan. Region exits are optional so subscriptions without a given region can
+still initialize. Patch files
 intentionally keep emoji identifiers as YAML `\U...` escapes so OpenWrt/BusyBox
 display locale quirks do not change on-disk template bytes.
 

@@ -1,8 +1,26 @@
 {
   "id": "default.direct-baseline.v1",
-  "description": "Add reject, private, tracker, download, and China direct baseline packs.",
+  "description": "Add reject, private, tracker, PT, download, and China direct baseline packs.",
   "config": {
     "version": 3,
+    "policy_groups": {
+      "🧲 BT/PT 下载": {
+        "mode": "manual",
+        "exits": [
+          "🌐 全球直连",
+          "⚡ 自动选择",
+          "🎯 手动选择",
+          "🇭🇰 香港节点",
+          "🇯🇵 日本节点",
+          "🇺🇸 美国节点",
+          "🇸🇬 新加坡节点",
+          "🇹🇼 台湾节点",
+          "🇰🇷 韩国节点"
+        ],
+        "reason": "BT tracker 和 PT 相关流量默认直连，并允许 Dashboard 手动切换代理出口。",
+        "boundary": "business_to_exit_layer"
+      }
+    },
     "packs": [
       {
         "source": "v2fly-dlc",
@@ -22,15 +40,15 @@
         "source": "v2fly-dlc",
         "pack": "category-public-tracker",
         "type": "geosite",
-        "target": "DIRECT",
-        "reason": "Keep public tracker domains direct for router-friendly download behavior."
+        "target": "🧲 BT/PT 下载",
+        "reason": "Route public tracker domains through the BT/PT download selector."
       },
       {
         "source": "v2fly-dlc",
         "pack": "category-pt",
         "type": "geosite",
-        "target": "DIRECT",
-        "reason": "Keep private tracker and PT community domains direct for router-friendly download behavior."
+        "target": "🧲 BT/PT 下载",
+        "reason": "Route private tracker and PT community domains through the BT/PT download selector."
       },
       {
         "source": "v2fly-dlc",
