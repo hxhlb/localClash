@@ -26,6 +26,7 @@ import (
 const DefaultUserAgent = "clash-verge/v1.5.1"
 const sourceIDPrefix = "S-"
 const sourceIDHashLength = 8
+const maxSourceDisplayIndex = 99
 const refreshFetchConcurrency = 4
 const (
 	sourceTypeRemoteSubscription = "remote_subscription"
@@ -36,11 +37,12 @@ const (
 )
 
 type Source struct {
-	ID   string   `json:"id" yaml:"id"`
-	Type string   `json:"type,omitempty" yaml:"type,omitempty"`
-	URI  string   `json:"uri,omitempty" yaml:"uri,omitempty"`
-	URIs []string `json:"uris,omitempty" yaml:"uris,omitempty"`
-	URL  string   `json:"url,omitempty" yaml:"url,omitempty"` // legacy config key
+	ID          string   `json:"id" yaml:"id"`
+	DisplayName string   `json:"display_name" yaml:"display_name"`
+	Type        string   `json:"type,omitempty" yaml:"type,omitempty"`
+	URI         string   `json:"uri,omitempty" yaml:"uri,omitempty"`
+	URIs        []string `json:"uris,omitempty" yaml:"uris,omitempty"`
+	URL         string   `json:"url,omitempty" yaml:"url,omitempty"` // legacy config key
 }
 
 type Config struct {
@@ -56,6 +58,7 @@ type StatusOptions struct {
 
 type ConfigureOptions struct {
 	ConfigPath string
+	Sources    []Source
 	URIs       []string
 	URLs       []string
 	Replace    *bool
@@ -89,6 +92,7 @@ type StatusResult struct {
 
 type SourceStatus struct {
 	ID               string `json:"id"`
+	DisplayName      string `json:"display_name"`
 	Type             string `json:"type"`
 	URI              string `json:"uri,omitempty"`
 	URL              string `json:"url,omitempty"`
@@ -119,11 +123,12 @@ type ConfigureResult struct {
 }
 
 type ConfiguredSource struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	URI     string `json:"uri,omitempty"`
-	URL     string `json:"url,omitempty"`
-	URIHash string `json:"uri_hash,omitempty"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Type        string `json:"type"`
+	URI         string `json:"uri,omitempty"`
+	URL         string `json:"url,omitempty"`
+	URIHash     string `json:"uri_hash,omitempty"`
 }
 
 type GetResult struct {
@@ -147,6 +152,7 @@ type RefreshResult struct {
 
 type RefreshSourceSummary struct {
 	ID               string `json:"id"`
+	DisplayName      string `json:"display_name"`
 	Artifact         string `json:"artifact"`
 	ProxiesCount     int    `json:"proxies_count,omitempty"`
 	ProxyGroupsCount int    `json:"proxy_groups_count,omitempty"`
@@ -175,6 +181,7 @@ type subscriptionArtifact struct {
 }
 
 var sourceIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+var sourceDisplayNamePattern = regexp.MustCompile(`^[0-9]{2}$`)
 
 func init() {
 	gob.Register(map[string]any{})
@@ -205,6 +212,7 @@ func Status(opts StatusOptions) (StatusResult, error) {
 		summary := summarizeArtifact(artifact)
 		result.Sources = append(result.Sources, SourceStatus{
 			ID:               source.ID,
+			DisplayName:      sourceDisplayName(source),
 			Type:             sourceType(source),
 			URI:              MaskURI(sourcePrimaryURI(source)),
 			URL:              legacyURLForResult(source),
@@ -238,11 +246,12 @@ func Get(opts StatusOptions) (GetResult, error) {
 	for _, source := range config.Sources {
 		uri := sourcePrimaryURI(source)
 		result.Sources = append(result.Sources, ConfiguredSource{
-			ID:      source.ID,
-			Type:    sourceType(source),
-			URI:     uri,
-			URL:     legacyURLForGet(source),
-			URIHash: sourceURIHash(source),
+			ID:          source.ID,
+			DisplayName: sourceDisplayName(source),
+			Type:        sourceType(source),
+			URI:         uri,
+			URL:         legacyURLForGet(source),
+			URIHash:     sourceURIHash(source),
 		})
 		if uri != "" {
 			result.URIs = append(result.URIs, uri)
@@ -260,14 +269,7 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 	if opts.Replace != nil && !*opts.Replace {
 		return ConfigureResult{}, fmt.Errorf("replace=false is not supported in this version")
 	}
-	rawURIs := opts.URIs
-	if len(rawURIs) == 0 {
-		rawURIs = opts.URLs
-	}
-	if len(rawURIs) == 0 {
-		return ConfigureResult{}, fmt.Errorf("uris is required")
-	}
-	sources, err := SourcesFromURIs(rawURIs)
+	sources, err := configureSources(opts)
 	if err != nil {
 		return ConfigureResult{}, err
 	}
@@ -282,11 +284,12 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 	}
 	for _, source := range sources {
 		result.Sources = append(result.Sources, ConfiguredSource{
-			ID:      source.ID,
-			Type:    sourceType(source),
-			URI:     MaskURI(sourcePrimaryURI(source)),
-			URL:     legacyMaskedURL(source),
-			URIHash: sourceURIHash(source),
+			ID:          source.ID,
+			DisplayName: source.DisplayName,
+			Type:        sourceType(source),
+			URI:         MaskURI(sourcePrimaryURI(source)),
+			URL:         legacyMaskedURL(source),
+			URIHash:     sourceURIHash(source),
 		})
 	}
 	return result, nil
@@ -294,6 +297,20 @@ func Configure(opts ConfigureOptions) (ConfigureResult, error) {
 
 func SourcesFromURLs(rawURLs []string) ([]Source, error) {
 	return SourcesFromURIs(rawURLs)
+}
+
+func configureSources(opts ConfigureOptions) ([]Source, error) {
+	if len(opts.Sources) > 0 {
+		return normalizeSources(opts.Sources)
+	}
+	rawURIs := opts.URIs
+	if len(rawURIs) == 0 {
+		rawURIs = opts.URLs
+	}
+	if len(rawURIs) == 0 {
+		return nil, fmt.Errorf("uris is required")
+	}
+	return SourcesFromURIs(rawURIs)
 }
 
 func SourcesFromURIs(rawURIs []string) ([]Source, error) {
@@ -329,11 +346,9 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 	finish(nil, map[string]any{"source_count": len(config.Sources)})
 
 	finish = stage("validate_sources", nil)
-	for _, source := range config.Sources {
-		if err := validateSource(source); err != nil {
-			finish(err, map[string]any{"source_id": source.ID})
-			return RefreshResult{}, err
-		}
+	if err := validateSources(config.Sources); err != nil {
+		finish(err, nil)
+		return RefreshResult{}, err
 	}
 	finish(nil, nil)
 
@@ -398,6 +413,7 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 		})
 		result.Sources = append(result.Sources, RefreshSourceSummary{
 			ID:               source.ID,
+			DisplayName:      sourceDisplayName(source),
 			Artifact:         path,
 			ProxiesCount:     summary.ProxiesCount,
 			ProxyGroupsCount: summary.ProxyGroupsCount,
@@ -634,9 +650,13 @@ func writeConfig(path string, config Config) error {
 }
 
 func normalizeSources(sources []Source) ([]Source, error) {
+	if len(sources) > maxSourceDisplayIndex {
+		return nil, fmt.Errorf("subscription sources support at most %d entries for two-digit display_name values", maxSourceDisplayIndex)
+	}
 	normalized := make([]Source, 0, len(sources))
 	seenCanonicalURI := map[string]bool{}
 	usedIDs := map[string]bool{}
+	usedDisplayNames := map[string]bool{}
 	canonicalURIs := make([]string, 0, len(sources))
 	for i, source := range sources {
 		canonicalURI, err := canonicalSourceURI(source)
@@ -651,10 +671,32 @@ func normalizeSources(sources []Source) ([]Source, error) {
 	}
 	for i, source := range sources {
 		id := sourceIDFromCanonicalURI(canonicalURIs[i], usedIDs)
+		displayName, err := normalizeSourceDisplayName(source.DisplayName, i)
+		if err != nil {
+			return nil, fmt.Errorf("sources[%d] %w", i, err)
+		}
+		if usedDisplayNames[displayName] {
+			return nil, fmt.Errorf("duplicate subscription source display_name %q at sources[%d]", displayName, i)
+		}
 		usedIDs[id] = true
-		normalized = append(normalized, normalizeSourceForConfig(source, id))
+		usedDisplayNames[displayName] = true
+		normalized = append(normalized, normalizeSourceForConfig(source, id, displayName))
 	}
 	return normalized, nil
+}
+
+func normalizeSourceDisplayName(raw string, index int) (string, error) {
+	displayName := strings.TrimSpace(raw)
+	if displayName == "" {
+		if index >= maxSourceDisplayIndex {
+			return "", fmt.Errorf("source display_name is required after %d sources", maxSourceDisplayIndex)
+		}
+		displayName = fmt.Sprintf("%02d", index+1)
+	}
+	if !sourceDisplayNamePattern.MatchString(displayName) || displayName == "00" {
+		return "", fmt.Errorf("source display_name %q is invalid; use two digits from 01 to 99", displayName)
+	}
+	return displayName, nil
 }
 
 func normalizeSourcesFromURIs(rawURIs []string) ([]Source, error) {
@@ -780,6 +822,24 @@ func sourceIDFromCanonicalURI(canonicalURI string, used map[string]bool) string 
 	return sourceIDPrefix + encoded
 }
 
+func validateSources(sources []Source) error {
+	usedDisplayNames := map[string]bool{}
+	for i, source := range sources {
+		if err := validateSource(source); err != nil {
+			return fmt.Errorf("sources[%d] %w", i, err)
+		}
+		displayName := strings.TrimSpace(source.DisplayName)
+		if displayName == "" {
+			continue
+		}
+		if usedDisplayNames[displayName] {
+			return fmt.Errorf("duplicate subscription source display_name %q at sources[%d]", displayName, i)
+		}
+		usedDisplayNames[displayName] = true
+	}
+	return nil
+}
+
 func validateSource(source Source) error {
 	if source.ID == "" {
 		return fmt.Errorf("source id is required")
@@ -787,8 +847,32 @@ func validateSource(source Source) error {
 	if !sourceIDPattern.MatchString(source.ID) {
 		return fmt.Errorf("source id %q is invalid; use only letters, digits, underscore, and hyphen", source.ID)
 	}
+	displayName := strings.TrimSpace(source.DisplayName)
+	if displayName != "" && (!sourceDisplayNamePattern.MatchString(displayName) || displayName == "00") {
+		return fmt.Errorf("source %q display_name %q is invalid; use two digits from 01 to 99", source.ID, source.DisplayName)
+	}
 	_, err := canonicalSourceURI(source)
 	return err
+}
+
+func sourceDisplayName(source Source) string {
+	displayName := strings.TrimSpace(source.DisplayName)
+	if displayName != "" {
+		return displayName
+	}
+	id := strings.TrimSpace(source.ID)
+	trimmed := strings.TrimPrefix(id, sourceIDPrefix)
+	if trimmed == "" {
+		trimmed = id
+	}
+	return firstSourceIDChars(trimmed, 2)
+}
+
+func firstSourceIDChars(value string, count int) string {
+	if len(value) <= count {
+		return value
+	}
+	return value[:count]
 }
 
 func selectedSourceIDs(sources []Source, ids []string) (map[string]bool, error) {
@@ -948,7 +1032,7 @@ func mergeSubscriptions(sources []Source, docs map[string]subscriptionDoc) (map[
 			originalName := stringValue(proxy["name"])
 			name := originalName
 			if prefixSource {
-				name = "[" + source.ID + "] " + name
+				name = "[" + sourceDisplayName(source) + "] " + name
 			}
 			// Mihomo requires unique proxy names, but unsafe subscription
 			// payloads can contain duplicates. Normalize duplicates during
@@ -1063,10 +1147,10 @@ func sourcePrimaryURI(source Source) string {
 	return ""
 }
 
-func normalizeSourceForConfig(source Source, id string) Source {
+func normalizeSourceForConfig(source Source, id, displayName string) Source {
 	switch sourceType(source) {
 	case sourceTypeRemoteSubscription:
-		return Source{ID: id, Type: sourceTypeRemoteSubscription, URI: sourcePrimaryURI(source)}
+		return Source{ID: id, DisplayName: displayName, Type: sourceTypeRemoteSubscription, URI: sourcePrimaryURI(source)}
 	case sourceTypeInlineProxyURIs:
 		uris := make([]string, 0, len(source.URIs))
 		seen := map[string]bool{}
@@ -1078,9 +1162,9 @@ func normalizeSourceForConfig(source Source, id string) Source {
 			seen[uri] = true
 			uris = append(uris, uri)
 		}
-		return Source{ID: id, Type: sourceTypeInlineProxyURIs, URIs: uris}
+		return Source{ID: id, DisplayName: displayName, Type: sourceTypeInlineProxyURIs, URIs: uris}
 	default:
-		return Source{ID: id}
+		return Source{ID: id, DisplayName: displayName}
 	}
 }
 

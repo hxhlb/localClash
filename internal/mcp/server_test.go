@@ -1085,6 +1085,7 @@ func TestToolsCallSubscriptionsRefreshAutoAppliesValidLocalClashSelector(t *test
 	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
 sources:
   - id: primary
+    display_name: "01"
     url: %s/sub?token=secret-token
 `, server.URL))
 	writeMCPFile(t, localClashConfig, `version: 1
@@ -1307,6 +1308,7 @@ func TestToolsCallSubscriptionsRefreshReportsStaleExactNodes(t *testing.T) {
 	writeMCPFile(t, subConfig, fmt.Sprintf(`version: 1
 sources:
   - id: primary
+    display_name: "01"
     url: %s/sub?token=secret-token
 `, server.URL))
 	writeMCPFile(t, localClashConfig, `version: 1
@@ -3818,6 +3820,7 @@ func setupMCPSubscriptionsFixture(t *testing.T) mcpSubscriptionsFixture {
 	writeMCPFile(t, paths.config, fmt.Sprintf(`version: 1
 sources:
   - id: primary
+    display_name: "01"
     url: %s/sub?token=secret-token
 `, server.URL))
 	return paths

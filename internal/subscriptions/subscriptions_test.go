@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -91,9 +92,15 @@ func TestConfigureWritesValidMultiSourcesAndMasksURLs(t *testing.T) {
 	if result.Sources[0].ID != mustSourceID(t, url1) || result.Sources[1].ID != mustSourceID(t, url2) {
 		t.Fatalf("source ids = %+v, want generated short hash ids", result.Sources)
 	}
+	if result.Sources[0].DisplayName != "01" || result.Sources[1].DisplayName != "02" {
+		t.Fatalf("source display names = %+v, want 01/02", result.Sources)
+	}
 	data := readTestFile(t, filepath.Join(dir, "localclash-subscriptions.json"))
 	if !strings.Contains(data, "secret-token") {
 		t.Fatal("config should contain the real URL token on disk")
+	}
+	if !strings.Contains(data, `"display_name": "01"`) || !strings.Contains(data, `"display_name": "02"`) {
+		t.Fatalf("config missing display names:\n%s", data)
 	}
 	assertNoTokenLeak(t, result)
 
@@ -124,6 +131,51 @@ func TestConfigureRejectsInvalidInputs(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected configure error")
 			}
+		})
+	}
+}
+
+func TestConfigureAcceptsExplicitSourceDisplayNames(t *testing.T) {
+	dir := t.TempDir()
+	result, err := Configure(ConfigureOptions{
+		ConfigPath: filepath.Join(dir, "localclash-subscriptions.json"),
+		Sources: []Source{
+			{DisplayName: "09", URI: "https://example.com/primary?token=secret-token"},
+			{DisplayName: "10", URI: "https://example.net/backup?token=backup-secret"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Sources[0].DisplayName != "09" || result.Sources[1].DisplayName != "10" {
+		t.Fatalf("source display names = %+v, want explicit values", result.Sources)
+	}
+	assertNoTokenLeak(t, result)
+}
+
+func TestConfigureRejectsInvalidSourceDisplayNames(t *testing.T) {
+	dir := t.TempDir()
+	tests := []struct {
+		name        string
+		displayName string
+		want        string
+	}{
+		{name: "zero", displayName: "00", want: "two digits from 01 to 99"},
+		{name: "too long", displayName: "100", want: "two digits from 01 to 99"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Configure(ConfigureOptions{
+				ConfigPath: filepath.Join(dir, tt.name+".json"),
+				Sources: []Source{{
+					DisplayName: tt.displayName,
+					URI:         "https://example.com/sub?token=secret-token",
+				}},
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+			assertNoTokenLeak(t, err.Error())
 		})
 	}
 }
@@ -224,10 +276,13 @@ rules:
 		t.Fatalf("merged = %+v, want 3 proxies and 3 renamed", result.Merged)
 	}
 	merged := readTestFile(t, paths.merged)
-	for _, want := range []string{"[" + primaryID + "] Same", "[" + backupID + "] Same", "[" + backupID + "] Unique"} {
+	for _, want := range []string{"[01] Same", "[02] Same", "[02] Unique"} {
 		if !strings.Contains(merged, want) {
 			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
 		}
+	}
+	if strings.Contains(merged, primaryID) || strings.Contains(merged, backupID) {
+		t.Fatalf("merged subscription should not expose source ids:\n%s", merged)
 	}
 	assertNoTokenLeak(t, result)
 }
@@ -421,6 +476,80 @@ func TestRefreshSingleSourcePreservesNodeNames(t *testing.T) {
 	}
 	if strings.Contains(merged, "[primary]") {
 		t.Fatalf("single-source merged subscription should not add source prefix:\n%s", merged)
+	}
+	assertNoTokenLeak(t, result)
+}
+
+func TestRefreshUsesSourceIDDisplayNameFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/primary":
+			_, _ = w.Write([]byte(`proxies:
+  - name: Same
+    type: ss
+    server: primary.example
+    password: secret
+`))
+		case "/backup":
+			_, _ = w.Write([]byte(`proxies:
+  - name: Same
+    type: ss
+    server: backup.example
+    password: secret
+`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	config := filepath.Join(dir, "localclash-subscriptions.json")
+	writeTestFile(t, config, fmt.Sprintf(`{
+  "version": 1,
+  "sources": [
+    {
+      "id": "S-12345678",
+      "type": "remote_subscription",
+      "uri": "%s/primary?token=secret-token"
+    },
+    {
+      "id": "S-abcd1234",
+      "type": "remote_subscription",
+      "uri": "%s/backup?token=backup-secret"
+    }
+  ]
+}`, server.URL, server.URL))
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: config,
+		RuntimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
+		MergedPath: filepath.Join(dir, "subscription.gob"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Sources[0].DisplayName != "12" || result.Sources[1].DisplayName != "ab" {
+		t.Fatalf("source display fallback = %+v, want 12/ab", result.Sources)
+	}
+	merged := readTestFile(t, filepath.Join(dir, "subscription.gob"))
+	for _, want := range []string{"[12] Same", "[ab] Same"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
+		}
+	}
+	if strings.Contains(merged, "[S-") {
+		t.Fatalf("merged subscription should not expose source id prefix:\n%s", merged)
+	}
+	status, err := Status(StatusOptions{
+		ConfigPath: config,
+		RuntimeDir: filepath.Join(dir, ".runtime", "subscriptions"),
+		MergedPath: filepath.Join(dir, "subscription.gob"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Sources[0].DisplayName != "12" || status.Sources[1].DisplayName != "ab" {
+		t.Fatalf("status display fallback = %+v, want 12/ab", status.Sources)
 	}
 	assertNoTokenLeak(t, result)
 }

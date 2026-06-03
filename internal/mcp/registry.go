@@ -461,8 +461,9 @@ func inputSchemaForTool(name string) map[string]any {
 			"type":                 "object",
 			"additionalProperties": false,
 			"properties": map[string]any{
-				"uri": map[string]any{"type": "string", "description": "HTTP/HTTPS subscription URI or MVP proxy URI. The source id is generated automatically."},
-				"url": map[string]any{"type": "string", "description": "Legacy alias for uri when the source is an HTTP or HTTPS subscription URL."},
+				"uri":          map[string]any{"type": "string", "description": "HTTP/HTTPS subscription URI or MVP proxy URI. The source id is generated automatically."},
+				"url":          map[string]any{"type": "string", "description": "Legacy alias for uri when the source is an HTTP or HTTPS subscription URL."},
+				"display_name": map[string]any{"type": "string", "description": "Optional two-digit visual source label from 01 to 99. Defaults to source order when configuring."},
 			},
 		}
 		return map[string]any{

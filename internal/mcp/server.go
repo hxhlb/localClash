@@ -2159,8 +2159,9 @@ func (s *Server) callSubscriptionNodesSearch(args json.RawMessage) (toolResult, 
 
 func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, error) {
 	type subscriptionConfigureSourceInput struct {
-		URI string `json:"uri"`
-		URL string `json:"url"`
+		URI         string `json:"uri"`
+		URL         string `json:"url"`
+		DisplayName string `json:"display_name"`
 	}
 	var in struct {
 		Sources []subscriptionConfigureSourceInput `json:"sources"`
@@ -2176,17 +2177,23 @@ func (s *Server) callSubscriptionsConfigure(args json.RawMessage) (toolResult, e
 		config = s.state.Paths.SubscriptionConfig
 	}
 	setDefault(&config, workspacePath(s.workspaceRoot(), "localclash-subscriptions.json"))
-	uris := make([]string, 0, len(in.Sources))
+	sources := make([]subscriptions.Source, 0, len(in.Sources))
 	for _, source := range in.Sources {
 		if strings.TrimSpace(source.URI) != "" {
-			uris = append(uris, source.URI)
+			sources = append(sources, subscriptions.Source{
+				URI:         source.URI,
+				DisplayName: source.DisplayName,
+			})
 			continue
 		}
-		uris = append(uris, source.URL)
+		sources = append(sources, subscriptions.Source{
+			URL:         source.URL,
+			DisplayName: source.DisplayName,
+		})
 	}
 	result, err := subscriptions.Configure(subscriptions.ConfigureOptions{
 		ConfigPath: config,
-		URIs:       uris,
+		Sources:    sources,
 		Replace:    in.Replace,
 	})
 	if err != nil {
