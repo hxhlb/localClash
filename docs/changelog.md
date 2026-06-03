@@ -98,6 +98,18 @@ scripts/telegram-channel-update.py --dry-run
 scripts/telegram-channel-update.py
 ```
 
+正式發送預設會附加本機手繪 16:9 更新圖：
+
+```text
+telegram/out/localclash-telegram-update-handdrawn-16x9.png
+```
+
+如需只發文字，可以使用：
+
+```bash
+scripts/telegram-channel-update.py --no-image
+```
+
 Bot token 讀取順序：
 
 1. `TELEGRAM_BOT_TOKEN`
@@ -105,4 +117,5 @@ Bot token 讀取順序：
 3. `/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token`
 
 腳本會把生成的 Telegram Markdown 寫入 `telegram/changelog.md`。該文件、
-本地 token 和發送記錄目錄都在 `.gitignore` 中，不能進入 Git 追蹤。
+預設附圖、本地 token 和發送記錄目錄都在 `.gitignore` 中，不能進入 Git
+追蹤。

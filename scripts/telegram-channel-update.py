@@ -24,6 +24,7 @@ CAPTION_LIMIT = 1024
 MESSAGE_LIMIT = 4096
 DEFAULT_CHAT_ID = "@RonnieAppsChannel"
 DEFAULT_SYNCNEXT_TOKEN_FILE = Path("/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token")
+DEFAULT_IMAGE_NAME = "localclash-telegram-update-handdrawn-16x9.png"
 
 
 class ScriptError(RuntimeError):
@@ -272,7 +273,13 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_SYNCNEXT_TOKEN_FILE,
         help="Fallback token file used by the existing Syncnext Telegram workflow.",
     )
-    parser.add_argument("--image", type=Path, default=None, help="Optional image to send before/as the update.")
+    parser.add_argument(
+        "--image",
+        type=Path,
+        default=repo_root / "telegram/out" / DEFAULT_IMAGE_NAME,
+        help="Image to send before/as the update.",
+    )
+    parser.add_argument("--no-image", action="store_true", help="Send text only, without the default image.")
     parser.add_argument("--parse-mode", default="Markdown", help="Telegram parse mode. Use empty string for plain text.")
     parser.add_argument("--dry-run", action="store_true", help="Generate and print the message without posting.")
     parser.add_argument("--no-write", action="store_true", help="Print/generate without writing --output.")
@@ -303,7 +310,7 @@ def main() -> int:
     if not token:
         raise ScriptError("Missing Telegram bot token. Set TELEGRAM_BOT_TOKEN or create telegram/.token.")
 
-    image = args.image
+    image = None if args.no_image else args.image
     if image and not image.exists():
         raise ScriptError(f"Image file not found: {image}")
     parse_mode = args.parse_mode or None
