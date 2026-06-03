@@ -186,8 +186,9 @@ type StageEvent struct {
 }
 
 type SubscriptionSourceArtifact struct {
-	SourceID string
-	Proxies  []map[string]any
+	SourceID    string
+	DisplayName string
+	Proxies     []map[string]any
 }
 
 type SubscriptionNodeBuildStats struct {
@@ -305,7 +306,8 @@ func (err *MissingNodesError) Error() string {
 
 type subscriptionSources struct {
 	Sources []struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
 	} `json:"sources"`
 }
 
@@ -748,7 +750,7 @@ func BuildSubscriptionNodesFromArtifactsMeasured(artifacts []SubscriptionSourceA
 				continue
 			}
 			if prefixSource {
-				name = "[" + artifact.SourceID + "] " + name
+				name = "[" + displayNameForSubscriptionSource(artifact.SourceID, artifact.DisplayName) + "] " + name
 			}
 			var checks int
 			// Mihomo requires unique proxy names, but unsafe subscription artifacts
@@ -762,6 +764,22 @@ func BuildSubscriptionNodesFromArtifactsMeasured(artifacts []SubscriptionSourceA
 		}
 	}
 	return nodes, stats
+}
+
+func displayNameForSubscriptionSource(sourceID, displayName string) string {
+	displayName = strings.TrimSpace(displayName)
+	if displayName != "" {
+		return displayName
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	trimmed := strings.TrimPrefix(sourceID, "S-")
+	if trimmed == "" {
+		trimmed = sourceID
+	}
+	if len(trimmed) <= 2 {
+		return trimmed
+	}
+	return trimmed[:2]
 }
 
 func loadMergedSubscriptionNodes(path string, stage localConfigStageFunc) ([]SubscriptionNode, error) {
@@ -820,7 +838,7 @@ func loadSourceSubscriptionNodes(opts SubscriptionNodeOptions) ([]SubscriptionNo
 	artifacts := make([]SubscriptionSourceArtifact, 0, len(sources.Sources))
 	for _, source := range sources.Sources {
 		if proxies, ok := sourceDocs[source.ID]; ok {
-			artifacts = append(artifacts, SubscriptionSourceArtifact{SourceID: source.ID, Proxies: proxies})
+			artifacts = append(artifacts, SubscriptionSourceArtifact{SourceID: source.ID, DisplayName: source.DisplayName, Proxies: proxies})
 		}
 	}
 	nodes, buildStats := BuildSubscriptionNodesFromArtifactsMeasured(artifacts)

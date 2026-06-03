@@ -2309,8 +2309,9 @@ func subscriptionArtifactsForLocalConfig(artifacts []subscriptions.RefreshArtifa
 	out := make([]localconfig.SubscriptionSourceArtifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
 		out = append(out, localconfig.SubscriptionSourceArtifact{
-			SourceID: artifact.SourceID,
-			Proxies:  artifact.Proxies,
+			SourceID:    artifact.SourceID,
+			DisplayName: artifact.DisplayName,
+			Proxies:     artifact.Proxies,
 		})
 	}
 	return out

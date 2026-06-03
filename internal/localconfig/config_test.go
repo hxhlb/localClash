@@ -19,10 +19,7 @@ func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "localclash-subscriptions.json")
 	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
-	writeTestFile(t, configPath, `sources:
-  - id: main
-  - id: backup
-`)
+	writeTestFile(t, configPath, `{"sources":[{"id":"main","display_name":"01"},{"id":"backup","display_name":"02"}]}`)
 	writeTestFile(t, filepath.Join(runtimeDir, "main.gob"), `proxies:
   - name: HK 01
     type: ss
@@ -59,12 +56,52 @@ func TestResolveNameRegexUsesSourceArtifactsAndMergeNames(t *testing.T) {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
 	got := resolved.Config.ProxyGroups["SteamHK"].SelectedNodes
-	want := []string{"[main] HK 01"}
+	want := []string{"[01] HK 01"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected nodes = %#v, want %#v", got, want)
 	}
 	got = resolved.Config.ProxyGroups["MainSG"].SelectedNodes
-	want = []string{"[main] SG 01"}
+	want = []string{"[01] SG 01"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected nodes = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveNameRegexUsesSourceIDDisplayNameFallback(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "localclash-subscriptions.json")
+	runtimeDir := filepath.Join(dir, ".runtime", "subscriptions")
+	writeTestFile(t, configPath, `sources:
+  - id: S-84e82d9f
+  - id: S-fb8964b3
+`)
+	writeTestFile(t, filepath.Join(runtimeDir, "S-84e82d9f.gob"), `proxies:
+  - name: JP 01
+    type: ss
+`)
+	writeTestFile(t, filepath.Join(runtimeDir, "S-fb8964b3.gob"), `proxies:
+  - name: JP 01
+    type: ss
+`)
+
+	resolved, err := Resolve(ResolveOptions{
+		Config: Config{
+			ProxyGroups: map[string]ProxyGroup{
+				"JP": {
+					Mode:  "auto",
+					Match: &Match{Type: "name_regex", Pattern: "JP", SourceIDs: []string{"S-84e82d9f"}, Min: 1},
+				},
+			},
+		},
+		SubscriptionPath:    filepath.Join(dir, "subscription.gob"),
+		SubscriptionConfig:  configPath,
+		SubscriptionRuntime: runtimeDir,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	got := resolved.Config.ProxyGroups["JP"].SelectedNodes
+	want := []string{"[84] JP 01"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("selected nodes = %#v, want %#v", got, want)
 	}

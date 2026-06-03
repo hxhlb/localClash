@@ -428,7 +428,7 @@ proxies:
 	if !strings.Contains(artifact, "# raw marker should be preserved") {
 		t.Fatalf("artifact did not preserve raw subscription body:\n%s", artifact)
 	}
-	if len(result.Artifacts) != 1 || result.Artifacts[0].SourceID != id || len(result.Artifacts[0].Proxies) != 1 {
+	if len(result.Artifacts) != 1 || result.Artifacts[0].SourceID != id || result.Artifacts[0].DisplayName != "01" || len(result.Artifacts[0].Proxies) != 1 {
 		t.Fatalf("artifacts = %+v, want one in-memory artifact", result.Artifacts)
 	}
 	event := findStageEvent(t, events, "read_artifacts", "done")

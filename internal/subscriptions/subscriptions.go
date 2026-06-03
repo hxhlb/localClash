@@ -163,8 +163,9 @@ type RefreshSourceSummary struct {
 }
 
 type RefreshArtifact struct {
-	SourceID string
-	Proxies  []map[string]any
+	SourceID    string
+	DisplayName string
+	Proxies     []map[string]any
 }
 
 type subscriptionDoc struct {
@@ -408,8 +409,9 @@ func Refresh(ctx context.Context, opts RefreshOptions) (RefreshResult, error) {
 			status = "ok"
 		}
 		result.Artifacts = append(result.Artifacts, RefreshArtifact{
-			SourceID: source.ID,
-			Proxies:  proxyMaps(doc.Data),
+			SourceID:    source.ID,
+			DisplayName: sourceDisplayName(source),
+			Proxies:     proxyMaps(doc.Data),
 		})
 		result.Sources = append(result.Sources, RefreshSourceSummary{
 			ID:               source.ID,
