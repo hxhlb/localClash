@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Generate and optionally post a localClash Telegram channel update.
 
-The script reads telegram/top.md and docs/changelog.md, extracts the latest
-dated release section, writes a Telegram Markdown announcement to
-telegram/changelog.md, and can post it to the same Telegram channel used by
-Syncnext.
+The script reads docs/changelog.md, extracts the latest dated release section,
+writes the generated update body to telegram/changelog.md, then combines
+telegram/top.md + telegram/changelog.md for previewing or posting to Telegram.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ CAPTION_LIMIT = 1024
 MESSAGE_LIMIT = 4096
 DEFAULT_CHAT_ID = "@RonnieAppsChannel"
 DEFAULT_SYNCNEXT_TOKEN_FILE = Path("/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token")
-DEFAULT_IMAGE_NAME = "localclash-telegram-update-handdrawn-16x9.png"
+DEFAULT_IMAGE_NAME = "localclash-telegram-update.png"
 
 
 class ScriptError(RuntimeError):
@@ -143,7 +142,7 @@ def merge_text(top: str, changelog: str, date: str) -> str:
     return f"{top_clean}{change_clean}"
 
 
-def build_telegram_message(changelog: str, top: str) -> tuple[str, str]:
+def build_telegram_changelog(changelog: str) -> tuple[str, str]:
     date, section = latest_dated_section(changelog)
     blocks = split_release_blocks(section)
     if not blocks:
@@ -165,7 +164,7 @@ def build_telegram_message(changelog: str, top: str) -> tuple[str, str]:
         if release_url:
             lines.append(f"Release: {release_url}")
 
-    message = merge_text(top, "\n".join(lines).strip(), date) + "\n"
+    message = "\n".join(lines).strip() + "\n"
     if extracted_blocks == 0:
         raise ScriptError(f"No user-facing changes extracted under {date}.")
     return date, message
@@ -292,7 +291,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--image",
         type=Path,
-        default=repo_root / "telegram/out" / DEFAULT_IMAGE_NAME,
+        default=repo_root / "telegram" / DEFAULT_IMAGE_NAME,
         help="Image to send before/as the update.",
     )
     parser.add_argument("--no-image", action="store_true", help="Send text only, without the default image.")
@@ -304,11 +303,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    date, message = build_telegram_message(read_text(args.changelog), read_text(args.top))
+    date, changelog_body = build_telegram_changelog(read_text(args.changelog))
 
     if not args.no_write:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(message, encoding="utf-8")
+        args.output.write_text(changelog_body, encoding="utf-8")
+
+    message = merge_text(read_text(args.top), changelog_body, date) + "\n"
 
     if args.dry_run:
         print(message, end="")

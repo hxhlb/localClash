@@ -5,9 +5,9 @@
 - Changelog source: `docs/changelog.md`
 - Telegram fixed top Markdown: `telegram/top.md`
 - Telegram generator/poster: `scripts/telegram-channel-update.py`
-- Generated Telegram Markdown: `telegram/changelog.md`
+- Generated Telegram update body: `telegram/changelog.md`
 - Default Telegram image:
-  `telegram/out/localclash-telegram-update-handdrawn-16x9.png`
+  `telegram/localclash-telegram-update.png`
 - Local token file: `telegram/.token`
 - Fallback Syncnext token file:
   `/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token`
@@ -18,6 +18,7 @@ Tracked source files:
 
 - `docs/changelog.md`
 - `telegram/top.md`
+- `telegram/localclash-telegram-update.png`
 - `scripts/telegram-channel-update.py`
 - `.codex/skills/localclash-release-broadcast/**`
 
