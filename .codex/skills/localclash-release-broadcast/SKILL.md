@@ -42,8 +42,8 @@ notes and Telegram channel announcements.
      `scripts/telegram-channel-update.py`.
    - Otherwise stop after dry-run and ask for approval before posting.
    - The default channel is `@RonnieAppsChannel`.
-   - The default image is
-     `telegram/out/localclash-telegram-update-handdrawn-16x9.png`.
+   - The default image is the generated X.com changelog card:
+     `telegram/out/localclash-x-release-card.png`.
 8. Verify local generated release-broadcast files are ignored:
    ```bash
    git check-ignore -v telegram/changelog.md telegram/.token telegram/out/example.md telegram/sent/example.json telegram/out/localclash-x-release-card.html telegram/out/localclash-x-release-card.png

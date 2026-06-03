@@ -8,7 +8,7 @@
 - X.com card generator: `scripts/x-release-card.py`
 - Generated Telegram update body: `telegram/changelog.md`
 - Default Telegram image:
-  `telegram/localclash-telegram-update.png`
+  `telegram/out/localclash-x-release-card.png`
 - X.com changelog image style:
   `docs/x-release-card-style.md`
 - Local token file: `telegram/.token`
@@ -21,7 +21,6 @@ Tracked source files:
 
 - `docs/changelog.md`
 - `telegram/top.md`
-- `telegram/localclash-telegram-update.png`
 - `scripts/telegram-channel-update.py`
 - `scripts/x-release-card.py`
 - `docs/x-release-card-style.md`

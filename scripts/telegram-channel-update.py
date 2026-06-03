@@ -24,7 +24,7 @@ CAPTION_LIMIT = 1024
 MESSAGE_LIMIT = 4096
 DEFAULT_CHAT_ID = "@RonnieAppsChannel"
 DEFAULT_SYNCNEXT_TOKEN_FILE = Path("/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token")
-DEFAULT_IMAGE_NAME = "localclash-telegram-update.png"
+DEFAULT_IMAGE_RELATIVE_PATH = Path("telegram/out/localclash-x-release-card.png")
 
 
 class ScriptError(RuntimeError):
@@ -291,8 +291,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--image",
         type=Path,
-        default=repo_root / "telegram" / DEFAULT_IMAGE_NAME,
-        help="Image to send before/as the update.",
+        default=repo_root / DEFAULT_IMAGE_RELATIVE_PATH,
+        help="Image to send before/as the update. Defaults to the generated X changelog card.",
     )
     parser.add_argument("--no-image", action="store_true", help="Send text only, without the default image.")
     parser.add_argument("--parse-mode", default="Markdown", help="Telegram parse mode. Use empty string for plain text.")
