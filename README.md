@@ -50,6 +50,8 @@ not require a LuCI package release unless the LuCI frontend, rpcd helper, ACL,
 menu metadata, or package files changed. Users with a current LuCI package can
 pull a newer localClash core through the LuCI "install/update core" flow.
 
+See [更新日誌](docs/changelog.md) for user-facing Core and LuCI release notes.
+
 ## Main Bootstrap
 
 Every localClash process builds a shared runtime bootstrap state before serving

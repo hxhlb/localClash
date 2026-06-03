@@ -34,3 +34,12 @@ dist/
 build/
 *.log
 cherry-latest.jsonl
+__pycache__/
+*.pyc
+
+# Telegram channel update working files. Keep generated announcements,
+# local tokens, and send receipts out of Git history.
+/telegram/changelog.md
+/telegram/.token
+/telegram/out/
+/telegram/sent/
