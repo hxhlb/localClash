@@ -37,7 +37,7 @@ func parseProxyURIList(sourceID string, data []byte) (subscriptionDoc, error) {
 		}
 		scheme, rest, ok := strings.Cut(line, "://")
 		if !ok || !proxyURISchemes[strings.ToLower(scheme)] || strings.TrimSpace(rest) == "" {
-			return subscriptionDoc{}, fmt.Errorf("source %q proxy URI line %d is not an MVP proxy URI", sourceID, idx+1)
+			continue
 		}
 		if seen[line] {
 			continue

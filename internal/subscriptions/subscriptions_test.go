@@ -320,6 +320,41 @@ vmess://eyJ2IjoiMiIsInBzIjoiVk1lc3MiLCJhZGQiOiJ2bWVzcy5leGFtcGxlIiwicG9ydCI6IjQ0
 	assertNoTokenLeak(t, result)
 }
 
+func TestRefreshRemoteProxyURILinesIgnoresNonURILines(t *testing.T) {
+	const body = `REMARKS=oixCloud
+STATUS=traffic: 2.85 TiB/3.01 TiB
+anytls://pass@example.com:443?sni=edge.example.com&insecure=1#AnyTLS
+not a proxy line
+`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	paths := writeRefreshConfig(t, []Source{{URI: server.URL + "/sub?token=secret-token"}})
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Merged.ProxiesCount != 1 {
+		t.Fatalf("merged = %+v, want one proxy from URI lines", result.Merged)
+	}
+	if result.Sources[0].Format != subscriptionFormatProxyURILines {
+		t.Fatalf("source format = %q, want proxy URI lines", result.Sources[0].Format)
+	}
+	merged := readTestFile(t, paths.merged)
+	for _, want := range []string{"name: AnyTLS", "type: anytls"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
+		}
+	}
+	assertNoTokenLeak(t, result)
+}
+
 func TestRefreshInlineProxyURILinesDeduplicatesByURIString(t *testing.T) {
 	vless := "vless://uuid@example.com:443?security=tls&type=tcp#VLESS"
 	hy2 := "hysteria2://pass@example.com:8443?insecure=1#HY2"
@@ -599,9 +634,9 @@ func TestRefreshRejectsInvalidResponses(t *testing.T) {
 	}
 }
 
-func TestRefreshRejectsRemoteTextThatIsNeitherYAMLNorProxyURILines(t *testing.T) {
+func TestRefreshRejectsRemoteTextWithoutProxyURILines(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("hello world\nvless://uuid@example.com:443#VLESS\n"))
+		_, _ = w.Write([]byte("hello world\nREMARKS=oixCloud\n"))
 	}))
 	defer server.Close()
 	paths := writeRefreshConfig(t, []Source{{URI: server.URL + "/sub?token=secret-token"}})
@@ -611,7 +646,7 @@ func TestRefreshRejectsRemoteTextThatIsNeitherYAMLNorProxyURILines(t *testing.T)
 		RuntimeDir: paths.runtimeDir,
 		MergedPath: paths.merged,
 	})
-	if err == nil || !strings.Contains(err.Error(), "neither Mihomo YAML nor MVP proxy URI lines") {
+	if err == nil || !strings.Contains(err.Error(), "has no MVP proxy URI lines") {
 		t.Fatalf("error = %v, want explicit input format rejection", err)
 	}
 	assertNoTokenLeak(t, err.Error())
