@@ -4,6 +4,62 @@ This document records router-facing usability and performance incidents that
 must be investigated with evidence. Do not treat post-removal or wrong-window
 samples as proof for an incident.
 
+## 2026-06-04 Router Reset Left Incomplete localClash Home
+
+Observed symptom:
+
+- After reinstalling localClash on a router that had been reset, startup failed
+  during router takeover with `router_takeover_apply_failed`.
+- The returned details included `profile_mode: "normal"`,
+  `runtime_running: false`, and the next action
+  `call config_configure with runtime_profile=router before
+  router_takeover_apply`.
+- This was confusing because the LuCI initialization path is expected to apply a
+  router runtime profile before starting runtime takeover.
+
+Current explanation:
+
+- The router reset did not leave a clean first-run state. It left an incomplete
+  user home/work directory under the Linux-style localClash state layout.
+- localClash core path resolution is intentionally filesystem-based: the LuCI
+  helper passes `LOCALCLASH_WORKDIR` to the core, and the core reads runtime
+  profile, generated config, subscription state, and managed core paths from
+  that work directory.
+- When `localclash-runtime.json` is absent or the work directory is incomplete,
+  `runtimeprofile.Load` creates the default runtime profile. The default mode is
+  `normal`, so `router_takeover_apply` correctly refuses to apply router
+  takeover.
+- Therefore `profile_mode: "normal"` did not mean LuCI generated a normal
+  router configuration. It meant the core observed an incomplete or mismatched
+  working state at takeover time.
+
+User recovery path:
+
+- Guide the user through the LuCI `Advanced` -> full reset flow, then repeat the
+  normal initialization flow from the overview page.
+- Do not try to repair this class of state by manually calling
+  `router_takeover_apply`; takeover depends on a coherent router runtime profile,
+  rendered config, runtime process, and state directory.
+
+Required evidence for the next similar report:
+
+- `ubus call localclash status`
+- `/root/localclash/localclash-runtime.json` presence and contents summary
+- `LOCALCLASH_WORKDIR=/root/localclash /usr/local/bin/localclash config status
+  --json`
+- `LOCALCLASH_WORKDIR=/root/localclash /usr/local/bin/localclash doctor --json`
+- recent `/tmp/localclash-helper.log` lines around initialization, reset, runtime
+  start, and takeover apply
+
+Product follow-up:
+
+- LuCI should surface an explicit incomplete-workdir diagnosis when the core is
+  installed but the runtime profile is `normal` or default-created while other
+  expected router initialization artifacts are missing.
+- The user-facing next action should be `Advanced -> Full Reset`, then normal
+  initialization, instead of exposing only MCP-oriented recovery text such as
+  `call config_configure with runtime_profile=router`.
+
 ## 2026-05-31 LuCI Reboot Restore Gap
 
 Observed symptom:
