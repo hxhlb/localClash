@@ -4,6 +4,7 @@
 
 - Changelog source: `docs/changelog.md`
 - Telegram fixed top Markdown: `telegram/top.md`
+- Telegram announcement cursor: `telegram/broadcast-state.json`
 - Telegram generator/poster: `scripts/telegram-channel-update.py`
 - X.com card generator: `scripts/x-release-card.py`
 - Generated Telegram update body: `telegram/changelog.md`
@@ -21,6 +22,7 @@ Tracked source files:
 
 - `docs/changelog.md`
 - `telegram/top.md`
+- `telegram/broadcast-state.json`
 - `scripts/telegram-channel-update.py`
 - `scripts/x-release-card.py`
 - `docs/x-release-card-style.md`
@@ -79,6 +81,16 @@ Preview without writing:
 scripts/telegram-channel-update.py --dry-run --no-write
 ```
 
+The Telegram script reads `telegram/broadcast-state.json` and extracts only
+release blocks newer than the tracked `core` / `luci` cursor. A dry run with no
+new release blocks must fail with `No unannounced Telegram release blocks
+found.` rather than reposting an older changelog section.
+
+When the default image is used, the full announcement is the image caption. It
+must fit Telegram's 1024-character caption limit. If it is too long, shorten the
+announcement; the script fails explicitly and must not split the post into a
+standalone image plus a separate text message.
+
 Preview and write the ignored local Markdown:
 
 ```bash
@@ -90,6 +102,10 @@ Post to the default channel with the default image:
 ```bash
 scripts/telegram-channel-update.py
 ```
+
+After a successful live post, the script updates
+`telegram/broadcast-state.json` to the newly announced Core/LuCI versions. Commit
+that tracked state change with the broadcast update.
 
 Post text only:
 

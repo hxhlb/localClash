@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Generate and optionally post a localClash Telegram channel update.
 
-The script reads docs/changelog.md, extracts the latest dated release section,
-writes the generated update body to telegram/changelog.md, then combines
-telegram/top.md + telegram/changelog.md for previewing or posting to Telegram.
+The script reads docs/changelog.md, extracts release blocks newer than
+telegram/broadcast-state.json, writes the generated update body to
+telegram/changelog.md, then combines telegram/top.md + telegram/changelog.md
+for previewing or posting to Telegram.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ MESSAGE_LIMIT = 4096
 DEFAULT_CHAT_ID = "@RonnieAppsChannel"
 DEFAULT_SYNCNEXT_TOKEN_FILE = Path("/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token")
 DEFAULT_IMAGE_RELATIVE_PATH = Path("telegram/out/localclash-x-release-card.png")
+DEFAULT_STATE_RELATIVE_PATH = Path("telegram/broadcast-state.json")
 
 
 class ScriptError(RuntimeError):
@@ -33,6 +35,10 @@ class ScriptError(RuntimeError):
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def write_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def read_token_from_file(path: Path | None) -> str | None:
@@ -51,6 +57,18 @@ def latest_dated_section(markdown: str) -> tuple[str, str]:
     next_match = re.search(r"^## \S+", markdown[start:], re.MULTILINE)
     end = start + next_match.start() if next_match else len(markdown)
     return match.group(1), markdown[start:end].strip()
+
+
+def dated_sections(markdown: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"^## (\d{4}-\d{2}-\d{2})\s*$", markdown, re.MULTILINE))
+    if not matches:
+        raise ScriptError("No dated changelog section found.")
+    sections: list[tuple[str, str]] = []
+    for idx, match in enumerate(matches):
+        start = match.end()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(markdown)
+        sections.append((match.group(1), markdown[start:end].strip()))
+    return sections
 
 
 def strip_markdown_link(text: str) -> str:
@@ -78,6 +96,63 @@ def extract_release_url(block: str) -> str | None:
     if match:
         return match.group(1)
     return None
+
+
+def channel_from_title(title: str) -> str | None:
+    lowered = title.lower()
+    if "localclash core" in lowered:
+        return "core"
+    if "localclash-luci" in lowered:
+        return "luci"
+    return None
+
+
+def tags_from_title(title: str, channel: str) -> list[str]:
+    if channel == "core":
+        return re.findall(r"v\d+\.\d+\.\d+", title)
+    if channel == "luci":
+        return re.findall(r"v\d+\.\d+\.\d+-\d+", title)
+    return []
+
+
+def version_key(tag: str) -> tuple[int, ...]:
+    parts = re.findall(r"\d+", tag)
+    if not parts:
+        raise ScriptError(f"Cannot parse release version from {tag!r}.")
+    return tuple(int(part) for part in parts)
+
+
+def latest_tag(tags: list[str]) -> str:
+    if not tags:
+        raise ScriptError("Cannot determine latest release tag from changelog block title.")
+    return max(tags, key=version_key)
+
+
+def load_broadcast_state(path: Path) -> dict:
+    if not path.exists():
+        raise ScriptError(f"Missing Telegram broadcast state: {path}")
+    try:
+        data = json.loads(read_text(path))
+    except json.JSONDecodeError as exc:
+        raise ScriptError(f"Invalid Telegram broadcast state JSON: {path}") from exc
+    if data.get("schema_version") != 1:
+        raise ScriptError(f"Unsupported Telegram broadcast state schema_version in {path}")
+    last = data.get("telegram", {}).get("last_announced")
+    if not isinstance(last, dict):
+        raise ScriptError(f"Invalid Telegram broadcast state: telegram.last_announced is required in {path}")
+    for channel in ("core", "luci"):
+        tag = last.get(channel)
+        if tag is not None and not isinstance(tag, str):
+            raise ScriptError(f"Invalid Telegram broadcast state: {channel} tag must be a string")
+    return data
+
+
+def should_announce(tags: list[str], last_announced: str | None) -> bool:
+    if not tags:
+        return False
+    if not last_announced:
+        return True
+    return version_key(latest_tag(tags)) > version_key(last_announced)
 
 
 def join_wrapped_line(current: str, continuation: str) -> str:
@@ -142,32 +217,47 @@ def merge_text(top: str, changelog: str, date: str) -> str:
     return f"{top_clean}{change_clean}"
 
 
-def build_telegram_changelog(changelog: str) -> tuple[str, str]:
-    date, section = latest_dated_section(changelog)
-    blocks = split_release_blocks(section)
-    if not blocks:
-        raise ScriptError(f"No release blocks found under {date}.")
+def build_telegram_changelog(changelog: str, state: dict) -> tuple[str, str, dict]:
+    last_announced = state["telegram"]["last_announced"]
 
     lines: list[str] = []
     extracted_blocks = 0
-    for title, block in blocks:
-        changes = extract_changes(block)
-        release_url = extract_release_url(block)
-        if not changes:
+    latest_announced = dict(last_announced)
+    source_date = ""
+    for date, section in dated_sections(changelog):
+        blocks = split_release_blocks(section)
+        if not blocks:
             continue
+        for title, block in blocks:
+            channel = channel_from_title(title)
+            if channel is None:
+                continue
+            tags = tags_from_title(title, channel)
+            if not should_announce(tags, last_announced.get(channel)):
+                continue
+            changes = extract_changes(block)
+            release_url = extract_release_url(block)
+            if not changes:
+                continue
 
-        extracted_blocks += 1
-        lines.append("")
-        lines.append(f"*{telegram_escape_legacy(title)}*")
-        for change in changes:
-            lines.append(normalize_bullet(change))
-        if release_url:
-            lines.append(f"Release: {release_url}")
+            if not source_date:
+                source_date = date
+            extracted_blocks += 1
+            latest_announced[channel] = latest_tag(tags)
+            lines.append("")
+            lines.append(f"*{telegram_escape_legacy(title)}*")
+            for change in changes:
+                lines.append(normalize_bullet(change))
+            if release_url:
+                lines.append(f"Release: {release_url}")
 
     message = "\n".join(lines).strip() + "\n"
     if extracted_blocks == 0:
-        raise ScriptError(f"No user-facing changes extracted under {date}.")
-    return date, message
+        raise ScriptError("No unannounced Telegram release blocks found.")
+    updated_state = dict(state)
+    updated_state["telegram"] = dict(state["telegram"])
+    updated_state["telegram"]["last_announced"] = latest_announced
+    return source_date, message, updated_state
 
 
 def build_multipart(fields: dict[str, str], files: dict[str, tuple[str, bytes, str]]) -> tuple[bytes, str]:
@@ -252,19 +342,22 @@ def send_photo(api_base: str, chat_id: str, image_path: Path, caption: str | Non
     return http_post(f"{api_base}/sendPhoto", fields, files)
 
 
+def validate_delivery_shape(message: str, image: Path | None) -> None:
+    if image and len(message) > CAPTION_LIMIT:
+        raise ScriptError(
+            f"Telegram image caption is too long: {len(message)} > {CAPTION_LIMIT}; shorten the announcement."
+        )
+
+
 def post_to_telegram(token: str, chat_id: str, message: str, image: Path | None, parse_mode: str | None) -> None:
     api_base = f"https://api.telegram.org/bot{token}"
     if image:
-        if len(message) <= CAPTION_LIMIT:
-            response = send_photo(api_base, chat_id, image, message, parse_mode)
-            if not response.get("ok"):
-                raise ScriptError(f"sendPhoto failed: {response}")
-            print("Posted Telegram photo with caption.")
-            return
-
-        response = send_photo(api_base, chat_id, image, None, None)
+        validate_delivery_shape(message, image)
+        response = send_photo(api_base, chat_id, image, message, parse_mode)
         if not response.get("ok"):
             raise ScriptError(f"sendPhoto failed: {response}")
+        print("Posted Telegram photo with caption.")
+        return
 
     for chunk in chunk_text(message, MESSAGE_LIMIT):
         response = send_message(api_base, chat_id, chunk, parse_mode)
@@ -279,6 +372,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--changelog", type=Path, default=repo_root / "docs/changelog.md")
     parser.add_argument("--top", type=Path, default=repo_root / "telegram/top.md")
     parser.add_argument("--output", type=Path, default=repo_root / "telegram/changelog.md")
+    parser.add_argument("--state", type=Path, default=repo_root / DEFAULT_STATE_RELATIVE_PATH)
     parser.add_argument("--chat-id", default=DEFAULT_CHAT_ID)
     parser.add_argument("--token", default=None, help="Telegram bot token. Prefer env or token files.")
     parser.add_argument("--token-file", type=Path, default=repo_root / "telegram/.token")
@@ -298,18 +392,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parse-mode", default="Markdown", help="Telegram parse mode. Use empty string for plain text.")
     parser.add_argument("--dry-run", action="store_true", help="Generate and print the message without posting.")
     parser.add_argument("--no-write", action="store_true", help="Print/generate without writing --output.")
+    parser.add_argument("--no-state-update", action="store_true", help="Do not update broadcast state after posting.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    date, changelog_body = build_telegram_changelog(read_text(args.changelog))
+    state = load_broadcast_state(args.state)
+    date, changelog_body, updated_state = build_telegram_changelog(read_text(args.changelog), state)
 
     if not args.no_write:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(changelog_body, encoding="utf-8")
 
     message = merge_text(read_text(args.top), changelog_body, date) + "\n"
+    image = None if args.no_image else args.image
+    validate_delivery_shape(message, image)
 
     if args.dry_run:
         print(message, end="")
@@ -327,11 +425,13 @@ def main() -> int:
     if not token:
         raise ScriptError("Missing Telegram bot token. Set TELEGRAM_BOT_TOKEN or create telegram/.token.")
 
-    image = None if args.no_image else args.image
     if image and not image.exists():
         raise ScriptError(f"Image file not found: {image}")
     parse_mode = args.parse_mode or None
     post_to_telegram(token, args.chat_id, message, image, parse_mode)
+    if not args.no_state_update:
+        write_json(args.state, updated_state)
+        print(f"Updated Telegram broadcast state: {args.state}")
     return 0
 
 

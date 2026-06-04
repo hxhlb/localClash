@@ -268,6 +268,10 @@ Bot token 讀取順序：
 3. `/Volumes/Data/Github/SyncnextProjects/Syncnext/telegram/.token`
 
 固定公告頭部維護在 `telegram/top.md`，腳本會把最新日期區塊提取出的
-更新正文寫入 `telegram/changelog.md`。正式預覽或發送時，文字內容由
-`telegram/top.md` 加上 `telegram/changelog.md` 組成。生成文件、本地
-token 和發送記錄目錄都在 `.gitignore` 中，不能進入 Git 追蹤。
+固定公告頭部維護在 `telegram/top.md`，已公告版本游標維護在
+`telegram/broadcast-state.json`。腳本只會提取游標之後的新 release blocks，
+避免同一天內已公告過的舊 changelog 被重複發送。正式預覽或發送時，文字
+內容由 `telegram/top.md` 加上提取出的 `telegram/changelog.md` 組成；帶圖
+發送時若 caption 超過 Telegram 的 1024 字限制，腳本會直接失敗，要求先
+縮短公告，不會自動拆成「圖片 + 獨立文字」。生成文件、本地 token 和發送
+記錄目錄都在 `.gitignore` 中，不能進入 Git 追蹤。

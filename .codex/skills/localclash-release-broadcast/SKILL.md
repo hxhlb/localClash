@@ -37,9 +37,18 @@ notes and Telegram channel announcements.
    ```bash
    scripts/telegram-channel-update.py --dry-run --no-write
    ```
+   The script reads `telegram/broadcast-state.json` and includes only release
+   blocks newer than the tracked Telegram cursor. If there are no unannounced
+   blocks, it must fail instead of reposting old changelog content.
 7. For live Telegram posting:
    - If the user explicitly asks to send/post/publish the Telegram notice, run
      `scripts/telegram-channel-update.py`.
+   - With the default image, the complete announcement must fit Telegram's
+     1024-character photo caption limit. The script fails when it is too long;
+     shorten the changelog instead of sending text separately.
+   - After a successful live post, the script updates
+     `telegram/broadcast-state.json`; commit that tracked state update with the
+     release broadcast changes.
    - Otherwise stop after dry-run and ask for approval before posting.
    - The default channel is `@RonnieAppsChannel`.
    - The default image is the generated X.com changelog card:
@@ -54,6 +63,8 @@ notes and Telegram channel announcements.
 
 - Never commit or stage `telegram/changelog.md`, `telegram/.token`,
   `telegram/out/`, or `telegram/sent/`.
+- Do commit `telegram/broadcast-state.json`; it is the durable Telegram
+  announcement cursor.
 - Never print Telegram bot tokens.
 - Do not treat Core and LuCI releases as the same artifact. Core releases carry
   binaries, base assets, and `localclash-release-manifest.json`; LuCI releases
