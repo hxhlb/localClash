@@ -947,6 +947,16 @@ func parseRemoteSubscription(sourceID string, data []byte) (subscriptionDoc, err
 	if uriErr == nil {
 		return doc, nil
 	}
+	if decoded, err := decodeBase64BytesStrict(data); err == nil && !bytes.Equal(bytes.TrimSpace(decoded), bytes.TrimSpace(data)) {
+		doc, decodedYAMLErr := parseSubscription(sourceID, decoded)
+		if decodedYAMLErr == nil {
+			return doc, nil
+		}
+		doc, decodedURIErr := parseProxyURIList(sourceID, decoded)
+		if decodedURIErr == nil {
+			return doc, nil
+		}
+	}
 	return subscriptionDoc{}, fmt.Errorf("source %q response is neither Mihomo YAML nor MVP proxy URI lines: yaml: %v; proxy_uri_lines: %v", sourceID, yamlErr, uriErr)
 }
 

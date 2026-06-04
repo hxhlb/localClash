@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
@@ -342,6 +343,41 @@ not a proxy line
 	}
 	if result.Merged.ProxiesCount != 1 {
 		t.Fatalf("merged = %+v, want one proxy from URI lines", result.Merged)
+	}
+	if result.Sources[0].Format != subscriptionFormatProxyURILines {
+		t.Fatalf("source format = %q, want proxy URI lines", result.Sources[0].Format)
+	}
+	merged := readTestFile(t, paths.merged)
+	for _, want := range []string{"name: AnyTLS", "type: anytls"} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("merged subscription missing %q:\n%s", want, merged)
+		}
+	}
+	assertNoTokenLeak(t, result)
+}
+
+func TestRefreshRemoteBase64ProxyURILines(t *testing.T) {
+	const decodedBody = `REMARKS=oixCloud
+STATUS=traffic: 2.85 TiB/3.01 TiB
+anytls://pass@example.com:443?sni=edge.example.com&insecure=1#AnyTLS
+`
+	encodedBody := base64.StdEncoding.EncodeToString([]byte(decodedBody))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(encodedBody))
+	}))
+	defer server.Close()
+	paths := writeRefreshConfig(t, []Source{{URI: server.URL + "/sub?token=secret-token"}})
+
+	result, err := Refresh(context.Background(), RefreshOptions{
+		ConfigPath: paths.config,
+		RuntimeDir: paths.runtimeDir,
+		MergedPath: paths.merged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Merged.ProxiesCount != 1 {
+		t.Fatalf("merged = %+v, want one proxy from base64 URI lines", result.Merged)
 	}
 	if result.Sources[0].Format != subscriptionFormatProxyURILines {
 		t.Fatalf("source format = %q, want proxy URI lines", result.Sources[0].Format)
