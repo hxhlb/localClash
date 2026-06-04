@@ -619,6 +619,8 @@ func renderCustomRuleLine(id string, rule CustomRuleLine, target string) (string
 		kind = "DOMAIN"
 	case "domain_suffix":
 		kind = "DOMAIN-SUFFIX"
+	case "domain_regex":
+		kind = "DOMAIN-REGEX"
 	case "ip_cidr":
 		kind = "IP-CIDR"
 	case "ip_cidr6":
