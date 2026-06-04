@@ -177,6 +177,11 @@ def items_from_change(channel: str, change: str) -> list[ChangeItem]:
     if skip_change(text):
         return []
 
+    if channel == "core" and "非 URI 說明行" in text:
+        return [ChangeItem(channel, "容忍訂閱說明行", "機場輸出的 REMARKS 與 STATUS 不再阻斷有效 proxy URI。", "cyan")]
+    if channel == "luci" and "mirror fallback log" in text:
+        return [ChangeItem(channel, "鏡像下載日誌", "直接下載失敗、鏡像候選與後續嘗試更容易追蹤。", "blue")]
+
     if channel == "core" and "proxy URI" in text and "display_name" in text:
         return [
             ChangeItem(channel, "Proxy URI 訂閱", "新增 proxy URI 訂閱來源支援，多來源訂閱輸入更完整。", "cyan"),
@@ -221,15 +226,8 @@ def fallback_item(channel: str, text: str) -> ChangeItem:
     elif "，" in text:
         title, body = text.split("，", 1)
     else:
-        title, body = text[:18], text
-    return ChangeItem(channel, trim_sentence(title, 18), trim_sentence(body, 54), color)
-
-
-def trim_sentence(text: str, max_chars: int) -> str:
-    text = text.strip(" ，。；：")
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 1].rstrip() + "…"
+        title, body = "更新項目", text
+    return ChangeItem(channel, title.strip(" ，。；："), body.strip(" ，。；："), color)
 
 
 def build_summary(items: list[ChangeItem]) -> str:
@@ -251,6 +249,8 @@ def build_card_data(changelog: str) -> CardData:
 
     core_range = core_latest
     luci_range = luci_latest
+    core_range_seen = False
+    luci_range_seen = False
     core_items: list[ChangeItem] = []
     luci_items: list[ChangeItem] = []
 
@@ -259,10 +259,14 @@ def build_card_data(changelog: str) -> CardData:
         if channel is None:
             continue
         range_text = release_range_from_title(title, channel)
-        if channel == "core":
+        if channel == "core" and not core_range_seen:
             core_range = range_text
-        else:
+            core_range_seen = True
+        elif channel == "luci" and not luci_range_seen:
             luci_range = range_text
+            luci_range_seen = True
+        elif channel == "core" or channel == "luci":
+            continue
         for change in extract_changes(block):
             parsed = items_from_change(channel, change)
             if channel == "core":
